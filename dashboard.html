@@ -4695,12 +4695,16 @@ function buildFilters() {
   };
 }
 
+function bucketSortDate(b) {
+  // 优先用事件日期 date；没有 date 的桶才退回创建/导入时间 created
+  return String((b && (b.date || b.created)) || '');
+}
 function sortBuckets(buckets) {
   var list = (buckets || []).slice();
   if (bucketSortMode === 'newest') {
-    list.sort(function(a, b) { return String(b.created || '').localeCompare(String(a.created || '')); });
+    list.sort(function(a, b) { return bucketSortDate(b).localeCompare(bucketSortDate(a)); });
   } else if (bucketSortMode === 'oldest') {
-    list.sort(function(a, b) { return String(a.created || '').localeCompare(String(b.created || '')); });
+    list.sort(function(a, b) { return bucketSortDate(a).localeCompare(bucketSortDate(b)); });
   }
   // score 模式：后端已经按 score 降序返回，不用再排
   return list;
