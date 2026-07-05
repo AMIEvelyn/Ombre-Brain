@@ -60,7 +60,12 @@ def main():
         config["state_dir"] = os.path.abspath(args.state_dir)
     store = FactStore(config)
     for predicate_key, item in by_key.items():
-        store.upsert_predicate(predicate_key, mode=item["mode"], notes=item.get("notes", ""))
+        store.upsert_predicate(
+            predicate_key,
+            mode=item["mode"],
+            notes=item.get("notes", ""),
+            display_name=item.get("display_name", ""),
+        )
 
     print(f"\nApplied: {len(by_key)} predicate(s) written to {store.db_path}")
 
