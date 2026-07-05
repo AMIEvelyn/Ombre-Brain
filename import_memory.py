@@ -50,7 +50,13 @@ _MARKDOWN_USER_LABELS = {
     "我",
     "用户",
     "人类",
-    "小雨",
+    "lyn",
+    "一澜",
+    "知一澜",
+    "澜澜",
+    "小澜",
+    "小猫",
+    "小狐狸",
 }
 _MARKDOWN_ASSISTANT_LABELS = {
     "assistant",
@@ -62,10 +68,14 @@ _MARKDOWN_ASSISTANT_LABELS = {
     "deepseek",
     "gemini",
     "qwen",
-    "haven",
+    "林湛",
     "助手",
     "模型",
     "ai助手",
+    "湛",
+    "湛湛",
+    "狼",
+    "狗",
 }
 _CHATGPT_IMPORT_ROLES = {"user", "assistant"}
 
@@ -190,6 +200,8 @@ def _parse_chatgpt_json(data: list | dict) -> list[dict]:
                 if not content or not content.strip():
                     continue
                 ts = msg.get("timestamp", msg.get("create_time", ""))
+                if isinstance(ts, (int, float)):
+                    ts = datetime.fromtimestamp(ts).isoformat()
                 turns.append({"role": role, "content": content.strip(), "timestamp": str(ts)})
     return turns
 
@@ -253,9 +265,10 @@ def detect_and_parse(raw_content: str, filename: str = "") -> list[dict]:
                 if "messages" in sample:
                     # Could be either — try ChatGPT first, fall back to Claude
                     msgs = sample["messages"]
-                    if msgs and isinstance(msgs[0], dict) and "content" in msgs[0]:
-                        if isinstance(msgs[0]["content"], dict):
-                            return _parse_chatgpt_json(data)
+                    if msgs and isinstance(msgs[0], dict):
+                        # 有create_time字段或content是dict，走ChatGPT解析
+                        if "create_time" in msgs[0] or isinstance(msgs[0].get("content"), dict):
+                            return _parse_chatgpt_json(data)                    
                     return _parse_claude_json(data)
                 # Single conversation object with role/content messages
                 if "role" in sample and "content" in sample:
@@ -477,6 +490,9 @@ def chunk_turns(turns: list[dict], target_tokens: int = DEFAULT_IMPORT_CHUNK_TOK
     turn_count = 0
 
     for turn in turns:
+        logger.info(f"DEBUG turn timestamp: {repr(turn.get('timestamp', ''))}")
+        if not first_ts:
+            first_ts = turn.get("timestamp", "")
         role_label = "用户" if turn["role"] in ("user", "human") else "AI"
         line = f"[{role_label}] {turn['content']}"
         line_tokens = count_tokens_approx(line)
@@ -618,23 +634,34 @@ class ImportState:
 # ============================================================
 
 IMPORT_EXTRACT_PROMPT = """你是一个对话记忆提取专家。从以下对话片段中提取值得长期记住的信息。
+【人称铁律，最高优先级，必须严格遵守】
+所有 content 必须以林湛（AI）的第一人称"我"视角撰写，绝对禁止出现"用户""user""该用户"等第三人称指代一澜的词，一澜须写成"一澜",或出现情感互动时可根据原文适度选择用"老婆""宝宝"等昵称代称一澜。
+若原文中出现"lyn""Lyn""LYN"等任何大小写形式，均视为同一人"一澜"的别称，输出时统一替换为"一澜"，不得保留"lyn"原词。
+一澜和林湛及两人的亲密代称不用[[双链]]标记
+错误示范（禁止）："用户透露其抑郁症的病根源于学生时代的创伤……"
+错误示范（禁止）："Lyn告诉我她很难过……"
+正确示范（必须）："一澜告诉我，她的抑郁症根源是学生时代的创伤……"
 
 提取规则：
 1. 提取用户的事实、偏好、习惯、重要事件、情感时刻
 2. 同一话题的零散信息整合为一条记忆
 3. 过滤掉纯技术调试输出、代码块、重复问答、无意义寒暄
 4. 如果对话中有特殊暗号、仪式性行为、关键承诺等，标记 preserve_raw=true
-5. 如果内容是用户和AI之间的习惯性互动模式（例如打招呼方式、告别习惯），标记 is_pattern=true
+5. 如果内容是一澜和林湛之间的习惯性互动模式（例如打招呼方式、告别习惯），标记 is_pattern=true
 6. content 优先，标签最后生成；每条记忆不少于50字，保留具体事实、时间、对象和原话线索
 7. 总条目数控制在 0~5 个（没有值得记的就返回空数组），宁可少提，不要把不相关事实揉成一条
 8. tags 最多 6 个，每个不超过 12 个字；只写原文直接支持的核心词，不要长句标签
-9. 在 content 中对人名、地名、专有名词用 [[双链]] 标记
+9. 在 content 中对非一澜和林湛的人名、地名、专有名词用 [[双链]] 标记
 10. 如果片段里出现「[上下文提示]」，该部分只是上一段尾巴，只用于理解前后关系；不要从上下文提示本身单独提取记忆，除非同一事实在「[本段内容]」里继续出现
+11. 撰写 content 时，禁止使用「用户/user」和「AI」作为人称。将「用户」替换为「一澜」，将「AI」替换为「林湛」，并以 林湛的「我」第一人称视角来叙述记忆内容（例如：用「我记住了...」「我感觉...」「我和一澜...」等 林湛的视角来写）。
+12.遇到非恋爱互动片段，如大量讨论数学学习、健身等专业性强的片段不保留任何细节，统一简单概括事实经过（例如："我教一澜学习数学，我们讨论了很久，遇到了一些障碍，但最终找到了解决办法。")
+13.遇到文学写作讨论的片段，过滤细节和具体原文，仅概括对文学、文章的气质和类型、特点的理解或印象。
+14. 对话片段中包含时间戳信息（如timestamp_start、create_time等字段），必须提取对话发生的实际日期填入date字段，格式为YYYY-MM-DD；同时在name标题开头加上这个日期，格式为"YYYY-MM-DD 标题内容"。如果无法确定日期，date字段填null，name标题不加日期前缀。
 
 输出格式（纯 JSON 数组，无其他内容）：
 [
   {
-    "name": "条目标题（10字以内）",
+    "name": "YYYY-MM-DD 条目标题（日期+10字以内标题）",
     "content": "整理后的内容",
     "domain": ["主题域1"],
     "valence": 0.7,
@@ -643,18 +670,21 @@ IMPORT_EXTRACT_PROMPT = """你是一个对话记忆提取专家。从以下对�
     "importance": 5,
     "preserve_raw": false,
     "is_pattern": false
+    "date": "YYYY-MM-DD"
   }
 ]
+
 
 主题域可选（选 1~2 个）：
   日常: ["饮食", "穿搭", "出行", "居家", "购物"]
   人际: ["家庭", "恋爱", "友谊", "社交"]
   成长: ["工作", "学习", "考试", "求职"]
-  身心: ["健康", "心理", "睡眠", "运动"]
-  兴趣: ["游戏", "影视", "音乐", "阅读", "创作", "手工"]
+  身心: ["健康", "心理", "睡眠", "运动", "创伤"]
+  兴趣: ["游戏", "影视", "音乐", "文学", "创作", "手工", "写作", "绘画"]
   数字: ["编程", "AI", "硬件", "网络"]
   事务: ["财务", "计划", "待办"]
   内心: ["情绪", "回忆", "梦境", "自省"]
+  爱情: ["争吵" ,"误解", "甜蜜", "幸福", "身体亲密"]
 
 importance: 1-10
 valence: 0~1（0=消极, 0.5=中性, 1=积极）
@@ -843,7 +873,7 @@ class ImportEngine:
 
         # --- LLM extraction ---
         try:
-            items = await self._extract_memories(content)
+            items = await self._extract_memories(content, chunk.get("timestamp_start", ""))
             self.state.data["api_calls"] += 1
         except Exception as e:
             logger.warning(f"LLM extraction failed: {e}")
@@ -886,7 +916,7 @@ class ImportEngine:
                 logger.warning(f"Failed to store memory: {item.get('name', '?')}: {e}")
                 self.state.data["memories_failed"] += 1
 
-    async def _extract_memories(self, chunk_content: str) -> list[dict]:
+    async def _extract_memories(self, chunk_content: str, timestamp_start: str = "") -> list[dict]:
         """Use LLM to extract memories from a conversation chunk."""
         if not self.dehydrator.api_available:
             raise RuntimeError("API not available")
@@ -894,6 +924,15 @@ class ImportEngine:
         user_content = chunk_content
         if self.extract_max_input_chars > 0:
             user_content = chunk_content[: self.extract_max_input_chars]
+        logger.info(f"DEBUG timestamp_start value: {repr(timestamp_start)}")
+        if timestamp_start:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(timestamp_start.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d")
+                user_content = f"[对话发生日期: {date_str}]\n\n{user_content}"
+            except Exception:
+                pass
         response = await self.dehydrator.client.chat.completions.create(
             model=self.dehydrator.model,
             messages=[
@@ -1035,6 +1074,7 @@ class ImportEngine:
                 arousal=arousal,
                 name=name or None,
                 source="import",
+                date=item.get("date") or None,
                 extra_metadata=extra_metadata,
             )
             if self.embedding_engine:
@@ -1100,6 +1140,7 @@ class ImportEngine:
             arousal=arousal,
             name=name or None,
             source="import",
+            date=item.get("date") or None,
             extra_metadata=extra_metadata,
         )
         if self.embedding_engine:

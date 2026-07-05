@@ -899,18 +899,22 @@ def _oauth_server_metadata(request) -> dict:
 
 
 @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
-@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
 @mcp.custom_route("/mcp/.well-known/oauth-authorization-server", methods=["GET"])
-@mcp.custom_route("/mcp/.well-known/openid-configuration", methods=["GET"])
 async def chatgpt_oauth_metadata(request):
     from starlette.responses import JSONResponse
 
     if not OMBRE_CHATGPT_OAUTH.enabled:
         return _oauth_error("oauth_not_configured", 404)
     return JSONResponse(_oauth_server_metadata(request))
+@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
+@mcp.custom_route("/mcp/.well-known/openid-configuration", methods=["GET"])
+async def chatgpt_openid_not_supported(request):
+    from starlette.responses import JSONResponse
+    return JSONResponse({"error": "not_found"}, status_code=404)
 
 
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+@mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET"])
 @mcp.custom_route("/mcp/.well-known/oauth-protected-resource", methods=["GET"])
 async def chatgpt_oauth_resource_metadata(request):
     from starlette.responses import JSONResponse

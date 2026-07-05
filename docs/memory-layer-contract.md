@@ -20,13 +20,13 @@ One interaction can produce two different memories.
 
 User side:
 
-- Xiaoyu's state, preference, boundary, habit, need, pain point, current difficulty.
+- Yilan's state, preference, boundary, habit, need, pain point, current difficulty.
 - Example: "I have been sleeping badly this week."
 
 Relationship or AI side:
 
-- What Haven did, promised, learned to notice, or should carry next time.
-- Example: "When Xiaoyu says she is tired, first check sleep and recent overload before giving advice."
+- What Linzhan did, promised, learned to notice, or should carry next time.
+- Example: "When Yilan says she is tired, first check sleep and recent overload before giving advice."
 
 Do not collapse these into one generic summary. If only the user state matters, write only that. If only the relationship lesson matters, write only that. If neither will matter later, write nothing.
 

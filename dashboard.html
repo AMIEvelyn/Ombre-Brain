@@ -268,6 +268,25 @@
     border-color: rgba(139, 74, 74, 0.58);
   }
   .bucket-tools .bulk-hidden { display: none; }
+    .bucket-tools .flag-btn {
+      background: linear-gradient(145deg, var(--accent-light), var(--accent));
+      color: #F0EDE4;
+      border: none;
+      font-weight: 600;
+      box-shadow: 4px 4px 8px rgba(40,65,65,0.25), -3px -3px 6px var(--shadow-light);
+}
+    .bucket-tools .flag-btn:hover { transform: translateY(-1px); }
+    .bucket-tools .flag-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .bucket-row .row-flag { display: flex; align-items: center; justify-content: center; }
+    .bucket-row .row-flag select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-solid);
+      color: var(--accent);
+      font-size: 14px;
+      padding: 3px;
+      cursor: pointer;
+}
   .bucket-bulk-status {
     font-size: 12px;
     color: var(--text-dim);
@@ -383,7 +402,7 @@
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
   .bucket-row {
     display: grid;
-    grid-template-columns: 32px 200px 100px 80px 60px 100px 1fr;
+    grid-template-columns: 32px 200px 100px 80px 60px 100px 1fr 44px;
     gap: 12px;
     padding: 14px 20px;
     border-radius: 16px;
@@ -396,7 +415,7 @@
     box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
   }
   .bucket-row.bulk {
-    grid-template-columns: 28px 32px 200px 100px 80px 60px 100px 1fr;
+    grid-template-columns: 28px 32px 200px 100px 80px 60px 100px 1fr 44px;
   }
   .bucket-row.selected {
     border-color: rgba(47, 79, 79, 0.45);
@@ -2397,6 +2416,9 @@
     <button type="button" id="bucket-bulk-toggle" onclick="toggleBucketBulkMode()">批量选择</button>
     <button type="button" class="bulk-hidden" data-bulk-action="select-current" onclick="selectCurrentBuckets()">全选当前筛选</button>
     <button type="button" class="bulk-hidden" data-bulk-action="clear" onclick="clearBucketSelection()">清空</button>
+    <button type="button" class="bulk-hidden flag-btn" data-bulk-action="pin" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'pin')">🔒 永久保留</button>
+       <button type="button" class="bulk-hidden flag-btn" data-bulk-action="anchor" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'anchor')">⚓ 受保护/button>
+    <button type="button" class="bulk-hidden flag-btn" data-bulk-action="important" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'important')">⭐ 加强权重</button>
     <button type="button" class="bulk-hidden danger" data-bulk-action="delete" onclick="deleteSelectedBuckets()">删除选中</button>
     <span class="bucket-bulk-status bulk-hidden" id="bucket-bulk-status">未选择</span>
   </div>
@@ -3189,6 +3211,7 @@ let identitySemanticData = null;
 let currentFilter = 'all';
 let bucketBulkMode = false;
 let selectedBucketIds = new Set();
+let bucketSortMode = 'score'; // score | newest | oldest
 let dashboardCommentAuthor = 'Rain';
 let dashboardAiAuthor = 'Haven';
 let reflectionSelectedDate = formatLocalDate(new Date());
@@ -3342,7 +3365,7 @@ document.getElementById('search-input').addEventListener('input', (e) => {
   const q = e.target.value.trim();
   searchTimer = setTimeout(() => {
     if (q) searchBuckets(q);
-    else renderBuckets(filterBuckets(allBuckets));
+    else renderBuckets(sortBuckets(filterBuckets(allBuckets)));
   }, 300);
 });
 
@@ -3360,7 +3383,7 @@ async function loadBuckets(options) {
         selectedBucketIds.delete(id);
       }
     });
-    renderBuckets(filterBuckets(allBuckets));
+       renderBuckets(sortBuckets(filterBuckets(allBuckets)));
     if (getActiveTab() === 'reflection') renderReflectionReview();
     if (getActiveTab() === 'todos') loadTodos();
     if (getActiveTab() === 'dreams') loadDreams();
@@ -4630,8 +4653,8 @@ function buildFilters() {
   const filters = document.getElementById('filters');
   const legacyViewFilters = [
     { key: 'all', label: '全部' },
-    { key: 'pinned', label: '📌 钉选' },
-    { key: 'anchor', label: '⚓ Anchor' },
+    { key: 'pinned', label: '🔒 永久保留' },
+    { key: 'anchor', label: '⚓ 受保护' },
     { key: 'feel', label: 'Feel' },
     { key: 'daily_impression', label: '日印象' },
     { key: 'unresolved', label: '⚡ 可浮现' },
@@ -4648,18 +4671,44 @@ function buildFilters() {
   function renderButton(item) {
     return '<button class="filter-btn ' + (item.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(item.key) + '">' + esc(item.label) + '</button>';
   }
+  var sortOptions = [
+    { key: 'score', label: '⚖️ 权重' },
+    { key: 'newest', label: '🕐 最新在前' },
+    { key: 'oldest', label: '📜 最旧在前' },
+  ];
+  var sortHtml = '<div class="filter-group" style="margin-left:auto;">' +
+    sortOptions.map(function(item) {
+      return '<button class="filter-btn ' + (item.key === bucketSortMode ? 'active' : '') + '" onclick="setBucketSortMode(\'' + item.key + '\')">' + esc(item.label) + '</button>';
+    }).join('') +
+    '</div>';
   filters.innerHTML = '<div class="filter-group">' +
     legacyViewFilters.map(renderButton).join('') +
-    '</div>';
+    '</div>' + sortHtml;
 
   filters.onclick = function(e) {
-    var btn = e.target.closest('.filter-btn');
+    var btn = e.target.closest('.filter-btn[data-filter]');
     if (!btn) return;
     filters.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     currentFilter = btn.dataset.filter;
-    renderBuckets(filterBuckets(allBuckets));
+    renderBuckets(sortBuckets(filterBuckets(allBuckets)));
   };
+}
+
+function sortBuckets(buckets) {
+  var list = (buckets || []).slice();
+  if (bucketSortMode === 'newest') {
+    list.sort(function(a, b) { return String(b.created || '').localeCompare(String(a.created || '')); });
+  } else if (bucketSortMode === 'oldest') {
+    list.sort(function(a, b) { return String(a.created || '').localeCompare(String(b.created || '')); });
+  }
+  // score 模式：后端已经按 score 降序返回，不用再排
+  return list;
+}
+function setBucketSortMode(mode) {
+  bucketSortMode = mode;
+  buildFilters();
+  renderBuckets(sortBuckets(filterBuckets(allBuckets)));
 }
 
 function filterBuckets(buckets) {
@@ -4755,9 +4804,15 @@ function updateBucketBulkToolbar() {
   var selectBtn = toolbar.querySelector('[data-bulk-action="select-current"]');
   var clearBtn = toolbar.querySelector('[data-bulk-action="clear"]');
   var deleteBtn = toolbar.querySelector('[data-bulk-action="delete"]');
+  var pinBtn = toolbar.querySelector('[data-bulk-action="pin"]');
+  var anchorBtn = toolbar.querySelector('[data-bulk-action="anchor"]');
+  var importantBtn = toolbar.querySelector('[data-bulk-action="important"]');
   if (selectBtn) selectBtn.disabled = !selectable;
   if (clearBtn) clearBtn.disabled = !selected;
   if (deleteBtn) deleteBtn.disabled = !selected;
+  if (pinBtn) pinBtn.disabled = !selected;
+  if (anchorBtn) anchorBtn.disabled = !selected;
+  if (importantBtn) importantBtn.disabled = !selected;
 }
 
 function toggleBucketBulkMode() {
@@ -4811,6 +4866,29 @@ function clearBucketSelection() {
   selectedBucketIds.clear();
   setBucketBulkMessage('');
   renderBuckets(renderedBuckets);
+}
+async function applyBucketFlag(ids, action) {
+  ids = (ids || []).filter(Boolean);
+  if (!ids.length) return;
+  var labels = { pin: '固定', anchor: 'Anchor', important: '重要' };
+  var label = labels[action] || action;
+  try {
+    var res = await authFetch(BASE + '/api/import/review', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        decisions: ids.map(function(id) { return { bucket_id: id, action: action }; })
+      })
+    });
+    if (!res) return;
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || (label + '标记失败'));
+    selectedBucketIds.clear();
+    await loadBuckets();
+    setBucketBulkMessage('已标记「' + label + '」' + data.applied + ' 个，失败 ' + data.errors + ' 个。', data.applied ? 'ok' : 'error');
+  } catch (e) {
+    setBucketBulkMessage(label + '标记失败: ' + e.message, 'error');
+  }
 }
 
 async function deleteSelectedBuckets() {
@@ -4878,6 +4956,14 @@ function renderBuckets(buckets) {
       '<span class="score">' + b.score.toFixed(2) + '</span>' +
       '<span class="time">' + esc(timeAgo) + '</span>' +
       '<span class="preview">' + esc(b.content_preview) + '</span>' +
+      '<span class="row-flag" onclick="event.stopPropagation()">' +
+        '<select onchange="if(this.value){applyBucketFlag([\'' + jsString(id) + '\'], this.value);} this.selectedIndex=0;">' +
+          '<option value="">⋯</option>' +
+          '<option value="pin">🔒 永久保留</option>' +
+          '<option value="anchor">⚓ 受保护</option>' +
+          '<option value="important">⭐ 加强权重</option>' +
+        '</select>' +
+      '</span>' +
     '</div>';
   }).join('');
 }
@@ -4887,7 +4973,7 @@ async function searchBuckets(query) {
     var res = await authFetch(BASE + '/api/search?q=' + encodeURIComponent(query));
     if (!res) return;
     var results = await res.json();
-    renderBuckets(results);
+    renderBuckets(sortBuckets(results));
   } catch (e) {
     console.error('Search failed:', e);
   }
@@ -7067,7 +7153,7 @@ async function startImport(file) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const res = await authFetch(BASE + '/api/import/upload?preserve_raw=' + (preserveRaw ? '1' : '0'), { method: 'POST', body: fd });
+    const res = await authFetch(BASE + '/api/import/upload?preserve_raw=' + (preserveRaw ? '1' : '0') + '&resume=1', { method: 'POST', body: fd });;
     if (!res) return;
     const data = await res.json();
     if (data.error) { alert('导入失败: ' + data.error); return; }
@@ -7147,9 +7233,9 @@ async function loadImportResults() {
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${esc((b.tags||[]).map(t=>'#'+t).join(' '))}</div>
         <div style="display:flex;gap:8px;">
-          <button onclick="reviewAction('${safeId}','pin')" title="固定为永久记忆">📌 固定</button>
-          <button onclick="reviewAction('${safeId}','anchor')" title="标为长期锚点">⚓ Anchor</button>
-          <button onclick="reviewAction('${safeId}','important')" title="标为重要">⭐ 重要</button>
+          <button onclick="reviewAction('${safeId}','pin')" title="固定为永久记忆">🔒 永久保留</button>
+          <button onclick="reviewAction('${safeId}','anchor')" title="标为长期锚点">⚓ 受保护</button>
+          <button onclick="reviewAction('${safeId}','important')" title="标为重要">⭐ 加强权重</button>
           <button onclick="reviewAction('${safeId}','noise')" title="标为噪声并resolve">🗑 噪声</button>
           <button onclick="if(confirm('确定删除？'))reviewAction('${safeId}','delete')" title="彻底删除" style="color:var(--negative);">✕ 删除</button>
         </div>
@@ -7179,9 +7265,9 @@ async function detectPatterns() {
         </div>
         <p style="font-size:13px;margin:6px 0;">${esc(p.pattern_content)}</p>
         <div style="display:flex;gap:8px;">
-          <button onclick="reviewAction('${firstId}','pin')">📌 固定</button>
-          <button onclick="reviewAction('${firstId}','anchor')">⚓ Anchor</button>
-          <button onclick="reviewAction('${firstId}','important')">⭐ 重要</button>
+          <button onclick="reviewAction('${firstId}','pin')">🔒 永久保留</button>
+          <button onclick="reviewAction('${firstId}','anchor')">⚓ 受保护</button>
+          <button onclick="reviewAction('${firstId}','important')">⭐ 加强权重</button>
           <button onclick="batchReview('${idsJson}','noise')">🗑 噪声</button>
         </div>
       </div>

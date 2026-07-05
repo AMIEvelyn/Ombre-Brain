@@ -639,6 +639,7 @@ class PersonaStateEngine:
             raw = response.choices[0].message.content if response.choices else ""
             parsed = self._parse_json(raw or "")
             if parsed is None:
+                logger.warning("Persona evaluator raw content: %r", raw)
                 logger.warning("Persona evaluator returned malformed JSON")
                 return None, raw or "", "persona LLM returned malformed JSON"
             return self._normalize_evaluation(parsed), raw or "", None
