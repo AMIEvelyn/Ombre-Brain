@@ -9370,7 +9370,11 @@ async def api_portrait_state_reset(request):
 @mcp.custom_route("/api/facts-skeleton", methods=["GET"])
 async def api_facts_skeleton(request):
     """Read the facts/timeline skeleton layer (facts.sqlite) for dashboard display.
-    Query params: subject_key, predicate_key, at_date (all optional)."""
+    Default: grouped by (subject_key, predicate_key), each group carries its
+    current value(s) plus full change history and a change_count, so the
+    dashboard can show "一澜的身高 162cm · 变动过2次" and expand to history.
+    Query params: subject_key, predicate_key, at_date (all optional; at_date
+    returns a flat historical snapshot instead of the grouped current view)."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
@@ -9379,14 +9383,36 @@ async def api_facts_skeleton(request):
     predicate_key = str(request.query_params.get("predicate_key") or "").strip()
     at_date = str(request.query_params.get("at_date") or "").strip()
     try:
+        predicates = fact_store.list_predicates()
+        predicate_meta = {p["predicate_key"]: p for p in predicates}
+
         if at_date:
             facts = fact_store.get_facts_at(at_date, subject_key=subject_key)
             if predicate_key:
                 facts = [f for f in facts if f.get("predicate_key") == predicate_key]
-        else:
-            facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
-        predicates = fact_store.list_predicates()
-        return JSONResponse({"facts": facts, "predicates": predicates})
+            return JSONResponse({"facts": facts, "predicates": predicates})
+
+        current = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+        groups: dict[tuple, dict] = {}
+        for item in current:
+            group_key = (item["subject_key"], item["predicate_key"])
+            group = groups.setdefault(group_key, {
+                "subject_key": item["subject_key"],
+                "predicate_key": item["predicate_key"],
+                "display_name": (predicate_meta.get(item["predicate_key"]) or {}).get("display_name") or "",
+                "current": [],
+            })
+            group["current"].append(item)
+
+        result = []
+        for (subj, pred), group in groups.items():
+            history = fact_store.get_fact_history(subj, pred)
+            group["history"] = history
+            group["change_count"] = len(history)
+            group["last_changed_at"] = max((str(h.get("valid_at") or h.get("created_at") or "") for h in history), default="")
+            result.append(group)
+
+        return JSONResponse({"groups": result, "predicates": predicates})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
