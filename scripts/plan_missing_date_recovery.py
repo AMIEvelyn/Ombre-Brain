@@ -2,6 +2,12 @@
 prefix, by matching their content against original ChatGPT/Claude-style
 export JSON files (the ones with created_at / messages[].create_time).
 
+A single conversation thread can span weeks or months, so its overall
+created_at is not a reliable date for every bucket chunked out of it.
+Each conversation is first split into per-local-day segments using each
+message's own create_time, and buckets are matched against those day
+segments rather than the whole conversation.
+
 Pure local keyword-overlap matching (jieba if available, else regex
 tokenization) -- no LLM/API calls, no cost. This script is read-only: it
 never touches bucket files. It writes a review table so a human confirms
@@ -86,24 +92,64 @@ def load_conversations(exports_dir: str) -> list[dict]:
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                text = item.get("fullTextSearch") or " ".join(
-                    str(m.get("content", "")) for m in item.get("messages", []) if isinstance(m, dict)
-                )
-                create_time = item.get("created_at")
-                if not create_time:
-                    msgs = item.get("messages") or []
-                    times = [m.get("create_time") for m in msgs if isinstance(m, dict) and m.get("create_time")]
-                    create_time = min(times) if times else None
                 conversations.append(
                     {
                         "source_file": fname,
                         "uuid": item.get("uuid", ""),
                         "name": item.get("name", ""),
-                        "created_at": create_time,
-                        "text": text,
+                        "created_at": item.get("created_at"),
+                        "messages": item.get("messages") or [],
+                        "fullTextSearch": item.get("fullTextSearch") or "",
                     }
                 )
     return conversations
+
+
+def build_day_segments(conversations: list[dict], tz_offset_hours: float) -> list[dict]:
+    """Split each conversation into per-local-day segments using each
+    message's own create_time -- a single conversation thread can span
+    weeks/months, so its overall created_at is not a reliable date for
+    every bucket chunked out of it. Falls back to the whole-conversation
+    created_at only if no per-message timestamps are available at all.
+    """
+    segments = []
+    for conv in conversations:
+        by_date: dict[str, list[str]] = {}
+        for msg in conv.get("messages", []):
+            if not isinstance(msg, dict):
+                continue
+            date = epoch_to_local_date(msg.get("create_time"), tz_offset_hours)
+            if not date:
+                continue
+            by_date.setdefault(date, []).append(str(msg.get("content", "")))
+
+        if by_date:
+            for date, texts in by_date.items():
+                segments.append(
+                    {
+                        "source_file": conv["source_file"],
+                        "conv_name": conv.get("name", ""),
+                        "date": date,
+                        "text": " ".join(texts),
+                    }
+                )
+            continue
+
+        # Fallback: no per-message timestamps at all, use whole-conversation created_at.
+        date = epoch_to_local_date(conv.get("created_at"), tz_offset_hours)
+        if date:
+            text = conv.get("fullTextSearch") or " ".join(
+                str(m.get("content", "")) for m in conv.get("messages", []) if isinstance(m, dict)
+            )
+            segments.append(
+                {
+                    "source_file": conv["source_file"],
+                    "conv_name": conv.get("name", ""),
+                    "date": date,
+                    "text": text,
+                }
+            )
+    return segments
 
 
 def score(bucket_words: set[str], conv_words: set[str]) -> tuple[float, int]:
@@ -141,12 +187,8 @@ async def main():
     no_prefix = [b for b in buckets if not has_name_date((b.get("metadata") or {}).get("name", ""))]
 
     conversations = load_conversations(args.exports_dir)
-    conv_indexed = []
-    for conv in conversations:
-        date = epoch_to_local_date(conv["created_at"], args.tz_offset) if conv["created_at"] else None
-        if not date:
-            continue
-        conv_indexed.append({**conv, "words": tokenize(conv["text"]), "date": date})
+    segments = build_day_segments(conversations, args.tz_offset)
+    conv_indexed = [{**seg, "words": tokenize(seg["text"])} for seg in segments]
 
     plans = []
     for bucket in no_prefix:
@@ -168,7 +210,7 @@ async def main():
                 "candidates": [
                     {
                         "date": conv["date"],
-                        "conv_name": conv["name"],
+                        "conv_name": conv["conv_name"],
                         "source_file": conv["source_file"],
                         "overlap": overlap,
                         "score": round(ratio, 4),
@@ -182,7 +224,7 @@ async def main():
     print(f"buckets_dir: {config['buckets_dir']}")
     print(f"exports_dir: {os.path.abspath(args.exports_dir)}")
     print(f"no-date-prefix buckets: {len(no_prefix)}")
-    print(f"conversations indexed from exports (with a usable date): {len(conv_indexed)}")
+    print(f"per-day conversation segments indexed from exports: {len(conv_indexed)}")
     print(f"buckets with at least one candidate match: {matched}")
     print(f"buckets with no candidate at all: {len(no_prefix) - matched}")
 
