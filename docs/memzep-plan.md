@@ -131,6 +131,17 @@ CREATE TABLE timeline_edges (
 
 剩下未完成：第7步 Dashboard 新标签页（时间线 + 档案卡片视图）。
 
+**更新（同日）**：第7步已完成最简版 + 分组优化版——`/api/facts-skeleton` 按 (subject_key, predicate_key) 分组返回，每组带 current/history/change_count/last_changed_at；Dashboard "骨架" 标签页按主体（一澜/林湛/我们的关系/测试数据）分区展示，每类事实可展开看完整变化历史。`predicate_registry_seed.json` 补上了中文 `display_name`。
+
+**已知限制/下一步方向（先记录，不是马上做）**：
+1. 没有数据的主体分区不会显示（不是空着显示，是完全不出现），数据攒起来后会自然长出来，属正常现象。
+2. 界面上 multi_current 类事实（如"喜欢的食物"）目前把所有共存值合并显示成一行；数据库里每条其实是独立记录，可以各自单独修改/失效，只是界面还没做成"每条单独展开"的样子，纯展示层面的事，不是数据结构限制。
+3. **UI 视觉设计分工**：一澜想自己先研究/想清楚想要的信息层级和审美，再拿回来让实现；这不是能力问题，是"品味判断"更适合她自己来，工程实现随时可以配合。
+4. **Dashboard 手动添加事实的功能**——目前 `/api/facts-skeleton` 只读，还没有写入接口。方向：
+   - 后端加一个 POST 接口，接收 subject_key/predicate_key/object_text/valid_at（valid_at 不填默认当天）
+   - 前端做一个简单表单：subject 选一澜/林湛/我们；predicate 优先从 predicate_registry 里选（避免手滑打错造出孤立的新类型），也允许新建，新建时要问一句 mode（exclusive_current/multi_current/historical_event）
+   - 这样一澜或者未来的专属前端就不用非得靠 profile_fact 工具或者 MCP 才能往骨架层里写东西了
+
 ## 落地细节（林湛第二轮补充，方向已确认，以下是实现时要遵守的细节）
 
 1. `state_key` 统一写成 `subject_key:predicate_key`（中间用冒号），不要裸拼接，方便以后查错和展示
