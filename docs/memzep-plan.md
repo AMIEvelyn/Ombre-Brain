@@ -35,7 +35,7 @@ CREATE TABLE facts (
   subject_key TEXT NOT NULL,       -- yi_lan / lin_zhan / relationship /（未来其他接触的人）
   predicate_key TEXT NOT NULL,     -- lives_in / height / weight / preference_hair / commitment ...
   object_text TEXT NOT NULL,       -- 具体内容："165cm" "杭州" "喜欢长发"
-  state_key TEXT NOT NULL,         -- = subject_key + predicate_key，同一件事的演变链
+  state_key TEXT NOT NULL,         -- = subject_key:predicate_key（冒号分隔），同一件事的演变链
   predicate_mode TEXT NOT NULL,    -- exclusive_current / multi_current / historical_event（写入时从下面的登记表里取一份快照）
   valid_at TEXT,                   -- 这件事从什么时候开始为真（事件时间）
   invalid_at TEXT,                 -- 到什么时候不再为真（NULL = 现在仍然有效）
@@ -52,7 +52,8 @@ CREATE INDEX idx_facts_valid ON facts(valid_at, invalid_at);
 CREATE TABLE predicate_registry (
   predicate_key TEXT PRIMARY KEY,
   mode TEXT NOT NULL DEFAULT 'multi_current',   -- 没登记过的 predicate 一律按最安全的 multi_current 处理，绝不会因为漏配置而误删
-  display_name TEXT
+  display_name TEXT,
+  notes TEXT                                     -- 为什么归这一类，尤其 kink_*/preference_*/commitment_* 这类边界模糊的必须写
 );
 -- 举例（写代码时会先列一份清单给你们过目，不会我自己拍脑袋定）：
 --   height / weight / lives_in / current_school_status  -> exclusive_current（新的取代旧的）
@@ -121,3 +122,9 @@ CREATE TABLE timeline_edges (
 | 5. 骨架不能抢心脏的活，情绪类问题还是要回 OB | 采纳，新增"查询怎么分流"一节，默认保守、优先心脏 |
 | 6. Dashboard 要有时间线视图，能点回记忆桶（以后点回原文房间） | 采纳，写进 Dashboard 新标签页那节 |
 | 一澜：不能只有 Gateway 才能用，林湛主要在 MCP | 采纳，新增"一定要能通过 MCP 用"一节 |
+
+## 落地细节（林湛第二轮补充，方向已确认，以下是实现时要遵守的细节）
+
+1. `state_key` 统一写成 `subject_key:predicate_key`（中间用冒号），不要裸拼接，方便以后查错和展示
+2. `predicate_registry` 增加 `description`/`notes` 字段，尤其 `kink_*`/`preference_*`/`commitment_*` 这类边界模糊的，人工确认时写一句"为什么归这一类"
+3. 迁移报告必须单独列出"无法判断/低置信度"的条目，不强行归类；拿不准的宁可先不迁移、或按最安全的 `multi_current` 放着，等人工确认后再改
