@@ -9367,6 +9367,30 @@ async def api_portrait_state_reset(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@mcp.custom_route("/api/facts-skeleton", methods=["GET"])
+async def api_facts_skeleton(request):
+    """Read the facts/timeline skeleton layer (facts.sqlite) for dashboard display.
+    Query params: subject_key, predicate_key, at_date (all optional)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    subject_key = str(request.query_params.get("subject_key") or "").strip()
+    predicate_key = str(request.query_params.get("predicate_key") or "").strip()
+    at_date = str(request.query_params.get("at_date") or "").strip()
+    try:
+        if at_date:
+            facts = fact_store.get_facts_at(at_date, subject_key=subject_key)
+            if predicate_key:
+                facts = [f for f in facts if f.get("predicate_key") == predicate_key]
+        else:
+            facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+        predicates = fact_store.list_predicates()
+        return JSONResponse({"facts": facts, "predicates": predicates})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @mcp.custom_route("/api/profile-facts", methods=["GET"])
 async def api_profile_facts(request):
     """List evidence-bound profile facts for dashboard review."""

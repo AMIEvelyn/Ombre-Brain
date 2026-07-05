@@ -2402,6 +2402,7 @@
   <div class="tab" data-tab="dreams">梦境</div>
   <div class="tab" data-tab="persona">Persona</div>
   <div class="tab" data-tab="profile">画像</div>
+  <div class="tab" data-tab="facts">骨架</div>
   <div class="tab" data-tab="word-map">词图</div>
   <div class="tab" data-tab="network">记忆网络</div>
   <div class="tab" data-tab="config">配置</div>
@@ -2759,6 +2760,22 @@
     <div class="profile-summary" id="profile-summary">加载中…</div>
     <div class="profile-list" id="profile-facts-list">
       <div class="loading">加载画像事实…</div>
+    </div>
+  </div>
+</div>
+
+<div class="content" id="facts-view" style="display:none">
+  <div class="profile-shell">
+    <div class="profile-toolbar">
+      <div>
+        <h2>骨架层 · 稳定事实</h2>
+        <p>facts.sqlite 里的当前有效事实；不受遗忘曲线影响，不会随时间沉底。情绪/关系类问题不在这里，仍由 OB 记忆池负责。</p>
+      </div>
+      <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+    </div>
+    <div class="profile-summary" id="facts-summary">加载中…</div>
+    <div class="profile-list" id="facts-list">
+      <div class="loading">加载骨架层事实…</div>
     </div>
   </div>
 </div>
@@ -3336,6 +3353,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('dreams-view').style.display = target === 'dreams' ? '' : 'none';
     document.getElementById('persona-view').style.display = target === 'persona' ? '' : 'none';
     document.getElementById('profile-view').style.display = target === 'profile' ? '' : 'none';
+    document.getElementById('facts-view').style.display = target === 'facts' ? '' : 'none';
     document.getElementById('word-map-view').style.display = target === 'word-map' ? '' : 'none';
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('config-view').style.display = target === 'config' ? '' : 'none';
@@ -3351,6 +3369,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       loadPortraitState();
       loadProfileFacts();
     }
+    if (target === 'facts') loadFactsSkeleton();
     if (target === 'word-map') loadWordMap();
     if (target === 'network') loadNetwork();
     if (target === 'config') loadConfig();
@@ -4126,6 +4145,37 @@ async function loadProfileFacts() {
     if (!res.ok) throw new Error(data.error || '加载失败');
     profileFacts = Array.isArray(data.facts) ? data.facts : [];
     renderProfileFacts();
+  } catch (e) {
+    summary.textContent = '读取失败';
+    list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadFactsSkeleton() {
+  var list = document.getElementById('facts-list');
+  var summary = document.getElementById('facts-summary');
+  if (!list || !summary) return;
+  list.innerHTML = '<div class="loading">加载骨架层事实…</div>';
+  summary.textContent = '读取中…';
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton');
+    if (!res) return;
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || '加载失败');
+    var facts = Array.isArray(data.facts) ? data.facts : [];
+    summary.textContent = facts.length + ' 条当前有效事实';
+    if (!facts.length) {
+      list.innerHTML = '<div class="loading">还没有稳定事实。</div>';
+      return;
+    }
+    list.innerHTML = facts.map(function(f) {
+      var invalidNote = f.invalid_at ? ('（已于 ' + esc(f.invalid_at) + ' 失效）') : '';
+      var evidenceNote = f.evidence_id ? ('，来源桶 ' + esc(f.evidence_id)) : '';
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">' +
+        '<b>[' + esc(f.subject_key || '') + ']</b> ' + esc(f.predicate_key || '') + ' = ' + esc(f.object_text || '') +
+        '<div style="color:var(--text-dim);font-size:12px;">生效于 ' + esc(f.valid_at || '未知') + invalidNote + evidenceNote + '</div>' +
+        '</div>';
+    }).join('');
   } catch (e) {
     summary.textContent = '读取失败';
     list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
