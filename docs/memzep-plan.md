@@ -172,3 +172,15 @@ CREATE TABLE timeline_edges (
 1. `state_key` 统一写成 `subject_key:predicate_key`（中间用冒号），不要裸拼接，方便以后查错和展示
 2. `predicate_registry` 增加 `description`/`notes` 字段，尤其 `kink_*`/`preference_*`/`commitment_*` 这类边界模糊的，人工确认时写一句"为什么归这一类"
 3. 迁移报告必须单独列出"无法判断/低置信度"的条目，不强行归类；拿不准的宁可先不迁移、或按最安全的 `multi_current` 放着，等人工确认后再改
+
+## 更新：breath() 自动分流，不用林湛自己判断（2026-07-05）
+
+之前的闭环验证靠的是"林湛自己判断这是事实类问题，手动调用 `fact_lookup`"。这次改成 `breath()` 内部自己判断——林湛还是照常调用 `breath(query=...)`，不需要额外判断该去心脏还是骨架，也不需要自己拼对 `subject_key`/`predicate_key`。
+
+实现方式（`server.py` 里 `breath()` 定义前新增的几个辅助函数）：
+- `_facts_skeleton_match_predicates(query)`：把 query 跟 `predicate_registry` 里每条的 `display_name`（+ 少量口语同义词，比如"多高"对应 `height`）做子串匹配，命中才算"像事实问题"——**这个匹配本身就是唯一的触发门槛**，不需要额外判断"是不是事实类问题"，没命中任何 predicate 就完全不碰骨架层。
+- `_facts_skeleton_infer_subject(query)`：从"一澜/林湛/我们/咱们/我/你"猜 `subject_key`，猜不准就留空（查全部主体，不瞎猜、不过滤漏查）。
+- `_facts_skeleton_supplement(query, at_date="")`：命中才查 `fact_store`，格式化成"=== 骨架层补充 ===" 追加在 `breath()` 正常结果后面。**只做追加，从不替换/拦截**，情绪类问题因为不命中任何 predicate，天然不会被打扰。
+- 接入了两个位置：`breath()` 里识别到日期的分支（`_read_breath_date` 之后追加 `at_date` 版本的补充）、以及正常联想检索的收尾（追加当前有效事实）。
+
+验证方式：本地用真实 `FactStore` 跑了几个 query 样例（"我现在多高" → 命中 height/yi_lan；"我喜欢的食物是什么" → 命中 food_preference；"你今天心情怎么样" → 不命中任何 predicate，确认不会误触发），`python3 -m py_compile server.py` 通过，`scripts/test_predicate_modes.py` 三种 predicate_mode 回归测试仍然全部通过。**未能在这次的沙盒环境里完整 `import server` 跑端到端测试**（环境缺 `jieba`/`mcp`/`httpx` 等依赖，`pip install -r requirements.txt` 里 jieba 编译失败，和这次改动无关，是环境本身的问题）——建议部署前用她自己环境里能跑的方式再跑一次真实 `breath()` 调用确认。

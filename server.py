@@ -6819,6 +6819,114 @@ def _has_active_facets(facets: dict | None) -> bool:
 
 
 # =============================================================
+# Facts/timeline skeleton auto-supplement for breath()
+# 骨架层自动补充：breath() 内部自己判断要不要额外查 facts，
+# 不需要调用方（林湛）自己判断该去心脏还是骨架
+#
+# Design intent (见 docs/memzep-plan.md "查询怎么分流"):
+# 默认所有问题都走心脏（原有 breath 检索），只有明确像"要精确事实"
+# 的问题才额外补充骨架层内容；宁可漏查退回心脏，也不误判抢答情绪类问题。
+# 这里只做"补充"（append），从不替换/拦截正常 breath 结果。
+# =============================================================
+
+# 部分 predicate 的常见口语问法跟 display_name 不完全一致，补充同义词
+# 触发词；display_name 本身也会作为触发词参与匹配（见下方函数）。
+_FACT_QUERY_PREDICATE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "height": ("身高", "多高"),
+    "weight": ("体重", "多重"),
+    "current_school_status": ("休学", "在读", "上学状态", "在校状态"),
+    "current_health_status": ("现在身体", "现在感冒", "现在咳嗽", "身体状态"),
+    "current_plan": ("当前计划", "现在的计划", "最近的计划"),
+    "relationship_status": ("关系状态", "复婚了吗", "结婚了吗", "现在是什么关系"),
+    "tool_access_status": ("工具权限", "写入权限", "能不能写入"),
+    "budget_status": ("预算状态", "预算够不够"),
+    "preferred_name": ("现在怎么称呼", "现在叫什么", "当前称呼"),
+}
+
+_FACT_SUBJECT_HINTS: tuple[tuple[str, str], ...] = (
+    ("一澜", "yi_lan"),
+    ("林湛", "lin_zhan"),
+    ("我们", "relationship"),
+    ("咱们", "relationship"),
+)
+
+
+def _facts_skeleton_infer_subject(query: str) -> str:
+    """从问题里猜 subject_key；猜不准就留空（查全部主体），不瞎猜。"""
+    q = query or ""
+    for token, subject_key in _FACT_SUBJECT_HINTS:
+        if token in q:
+            return subject_key
+    has_wo = "我" in q
+    has_ni = "你" in q
+    if has_wo and not has_ni:
+        return "yi_lan"
+    if has_ni and not has_wo:
+        return "lin_zhan"
+    return ""
+
+
+def _facts_skeleton_match_predicates(query: str) -> list[str]:
+    """问题里是否提到了某个已登记 predicate；命中才算"像事实问题"，这是唯一的触发门槛。"""
+    q = (query or "").strip()
+    if not q:
+        return []
+    matched = []
+    try:
+        predicates = fact_store.list_predicates()
+    except Exception as e:
+        logger.warning("Facts skeleton predicate lookup failed / 骨架层读取 predicate_registry 失败: %s", e)
+        return []
+    for row in predicates:
+        predicate_key = row.get("predicate_key") or ""
+        display_name = (row.get("display_name") or "").strip()
+        hit = bool(display_name) and display_name in q
+        if not hit:
+            for syn in _FACT_QUERY_PREDICATE_SYNONYMS.get(predicate_key, ()):
+                if syn in q:
+                    hit = True
+                    break
+        if hit:
+            matched.append(predicate_key)
+    return matched
+
+
+def _format_facts_skeleton_entries(facts: list[dict], at_date: str = "") -> str:
+    if not facts:
+        return ""
+    header = f"=== 骨架层补充（{'截至 ' + at_date if at_date else '当前有效'}，自动匹配） ==="
+    lines = [header]
+    for item in facts:
+        invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
+        lines.append(
+            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {item.get('object_text')}"
+            f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}）"
+        )
+    return "\n".join(lines)
+
+
+def _facts_skeleton_supplement(query: str, at_date: str = "") -> str:
+    """query 像"要精确事实"才补充骨架层内容，否则原样返回空字符串、绝不介入。"""
+    predicate_keys = _facts_skeleton_match_predicates(query)
+    if not predicate_keys:
+        return ""
+    subject_key = _facts_skeleton_infer_subject(query)
+    try:
+        collected: list[dict] = []
+        for predicate_key in predicate_keys:
+            if at_date:
+                rows = fact_store.get_facts_at(at_date, subject_key=subject_key)
+                rows = [r for r in rows if r.get("predicate_key") == predicate_key]
+            else:
+                rows = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+            collected.extend(rows)
+    except Exception as e:
+        logger.warning("Facts skeleton auto-supplement failed / 骨架层自动补充失败: %s", e)
+        return ""
+    return _format_facts_skeleton_entries(collected, at_date=at_date)
+
+
+# =============================================================
 # Tool 1: breath — Breathe
 # 工具 1：breath — 呼吸
 #
@@ -6953,7 +7061,7 @@ async def breath(
 
     if date_key:
         domain_filter = [d.strip() for d in domain.split(",") if d.strip()] or None
-        return await _read_breath_date(
+        date_result = await _read_breath_date(
             date_key=date_key,
             label=date_label,
             query=query,
@@ -6961,6 +7069,8 @@ async def breath(
             max_results=max_results,
             domain_filter=domain_filter,
         )
+        facts_supplement = _facts_skeleton_supplement(query, at_date=date_key)
+        return f"{date_result}\n\n{facts_supplement}" if facts_supplement else date_result
 
     # --- No args or empty query: surfacing mode (weight pool active push) ---
     # --- 无参数或空query：浮现模式（权重池主动推送）---
@@ -7655,14 +7765,20 @@ async def breath(
             + "\n".join(_format_suppressed_recall_candidate(moment, seed_diagnostics) for moment in suppressed_moments[:10])
         )
 
+    facts_supplement = _facts_skeleton_supplement(query)
+
     if not response_parts:
         if recall_thresholds.get("has_explicit_entity") and suppressed_moments:
-            return dream_block or "没有找到可靠命中。"
-        return dream_block or "未找到相关记忆。"
+            base = dream_block or "没有找到可靠命中。"
+        else:
+            base = dream_block or "未找到相关记忆。"
+        return f"{base}\n\n{facts_supplement}" if facts_supplement else base
 
     response_text = "\n\n".join(response_parts)
     if dream_block:
         response_text += "\n\n" + dream_block
+    if facts_supplement:
+        response_text += "\n\n" + facts_supplement
     return response_text
 
 
