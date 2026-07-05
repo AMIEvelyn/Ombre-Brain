@@ -27,59 +27,97 @@ OB 的衰减曲线（艾宾浩斯式指数衰减）是故意设计成"不那么�
 
 跟记忆桶（markdown 文件）、原文保险箱（`raw_events.sqlite`）平行的第三个独立文件，不参与衰减、不参与情绪打分。
 
+（这一版按林湛的意见做了修改，见文末"林湛的修改意见与采纳情况"）
+
 ```sql
 CREATE TABLE facts (
   id INTEGER PRIMARY KEY,
-  subject_key TEXT NOT NULL,      -- 谁：user / lin_zhan / 其他人
-  predicate_key TEXT NOT NULL,    -- 哪类事实：lives_in / height / weight / preference_coffee ...
-  object_text TEXT NOT NULL,      -- 具体内容："165cm" "杭州" "拿铁"
-  state_key TEXT NOT NULL,        -- = subject_key + predicate_key，同一件事的演变链
-  valid_at TEXT,                  -- 这件事从什么时候开始为真（事件时间）
-  invalid_at TEXT,                -- 到什么时候不再为真（NULL = 现在仍然有效）
+  subject_key TEXT NOT NULL,       -- yi_lan / lin_zhan / relationship /（未来其他接触的人）
+  predicate_key TEXT NOT NULL,     -- lives_in / height / weight / preference_hair / commitment ...
+  object_text TEXT NOT NULL,       -- 具体内容："165cm" "杭州" "喜欢长发"
+  state_key TEXT NOT NULL,         -- = subject_key + predicate_key，同一件事的演变链
+  predicate_mode TEXT NOT NULL,    -- exclusive_current / multi_current / historical_event（写入时从下面的登记表里取一份快照）
+  valid_at TEXT,                   -- 这件事从什么时候开始为真（事件时间）
+  invalid_at TEXT,                 -- 到什么时候不再为真（NULL = 现在仍然有效）
   confidence REAL DEFAULT 0.9,
-  evidence_bucket_id TEXT,        -- 证据来自哪个记忆桶（沿用现有 profile_fact 的证据机制）
+  evidence_type TEXT DEFAULT 'bucket',  -- bucket / raw_event / manual / tool
+  evidence_id TEXT,                     -- 对应类型下的具体 id
+  evidence_quote TEXT,                  -- 可选，原话片段，先留字段不强制填
   created_at TEXT DEFAULT CURRENT_TIMESTAMP  -- 系统写入时间，跟 valid_at 分开
 );
 CREATE INDEX idx_facts_state ON facts(state_key);
 CREATE INDEX idx_facts_valid ON facts(valid_at, invalid_at);
 
+-- 每类事实"新的算不算废掉旧的"，单独登记，不是所有事实都一个逻辑
+CREATE TABLE predicate_registry (
+  predicate_key TEXT PRIMARY KEY,
+  mode TEXT NOT NULL DEFAULT 'multi_current',   -- 没登记过的 predicate 一律按最安全的 multi_current 处理，绝不会因为漏配置而误删
+  display_name TEXT
+);
+-- 举例（写代码时会先列一份清单给你们过目，不会我自己拍脑袋定）：
+--   height / weight / lives_in / current_school_status  -> exclusive_current（新的取代旧的）
+--   preference_*  / kink_* / creative_theme_*            -> multi_current（叠加共存，互不覆盖）
+--   一次性事件类（求婚、吵架、约定达成）                  -> historical_event（不存在"新旧覆盖"这回事，就是一条时间戳记录）
+
 CREATE TABLE timeline_edges (
   id INTEGER PRIMARY KEY,
-  from_fact_id INTEGER,           -- 也可以指向普通记忆桶 id，二选一
+  from_fact_id INTEGER,            -- 也可以指向普通记忆桶 id，二选一
   from_bucket_id TEXT,
   to_fact_id INTEGER,
   to_bucket_id TEXT,
-  relation_type TEXT NOT NULL,    -- causes / leads_to / precedes（复用现有 memory_edges.py 的枚举）
+  relation_type TEXT NOT NULL,     -- causes / leads_to / precedes（复用现有 memory_edges.py 的枚举）
   confidence REAL DEFAULT 0.5,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-"当前事实"查询：`WHERE state_key = ? AND invalid_at IS NULL`
+"当前事实"查询（仅对 `exclusive_current` 类型有意义）：`WHERE state_key = ? AND invalid_at IS NULL`
 "某天/某段时间为真的事实"查询：`WHERE valid_at <= ? AND (invalid_at IS NULL OR invalid_at > ?)`
+`multi_current` 类型的 predicate 默认不做"取代"判断，同一 state_key 下允许多条同时 `invalid_at IS NULL`。
+
+## 查询怎么分流——骨架不能抢心脏的活
+
+**默认所有问题都还是走 OB 原来的 `breath()` 情绪记忆检索，骨架层是"额外补充"，不是"拦截替换"。** 只有问题明确长得像"要精确事实/精确日期"的样子（比如"现在多高""现在住哪""3月15号发生了什么"这种），才会额外去查 `facts`/`timeline`。像"还记得那时候我为什么难过吗""你怎么看这件事"这类需要情绪/关系判断的问题，答案权重仍然完全在 OB 心脏这边，骨架层不参与、也不会抢答。
+
+这个分流逻辑写得会偏保守——宁可某条本该查骨架的问题漏查了退回心脏，也不让骨架层误伤本该走情绪记忆的问题。
 
 ## 怎么免费从现有数据里搭出这一层（不用重新调 AI）
 
-1. **`profile_fact` 迁移**：现有的 profile_fact 桶已经带 `subject`/`predicate`/`object`/`evidence` 元数据（写代码时就是这么设计的），可以用纯本地脚本（不调 AI）把它们按 `subject_key + predicate_key` 分组、按证据桶的事件日期排序，自动生成 `state_key` 演变链——同一类事实里，日期早的自动标注 `invalid_at` = 下一条的 `valid_at`，最新的一条 `invalid_at` 留空。跟这次补日期的思路完全一样：先出一份"打算怎么分组"的报告给你确认，再正式写入。
-2. **因果/时序边迁移**：`memory_edges.py` 里已经有的 `causes`/`precedes` 这些关系，直接原样搬进 `timeline_edges`，不用重新生成。
-3. **往后新增**：`profile_fact` 工具写入新事实时，自动检查同一 `state_key` 有没有"当前有效"的旧记录，有就自动软失效旧的（这是唯一需要动"正在运行的代码逻辑"的地方，其余都是一次性迁移脚本）。
+1. **先出一份 predicate 分类清单**：把现有 profile_fact 桶里出现过的 `predicate`（住哪/身高/喜好……）都列出来，标一遍 `exclusive_current`/`multi_current`/`historical_event`，给你和林湛确认，不是我自己拍脑袋定
+2. **`subject` 改名**：现有 profile_fact 的 `subject` 字段目前默认是 `user`，迁移时会改成 `yi_lan` / `lin_zhan`，并新增一个 `relationship` 主体，专门放"复婚、婚戒、Only Belongs、重大约定"这类不属于任何一个人、只属于"我们"的事实
+3. **`profile_fact` 迁移**：现有桶已经带 `subject`/`predicate`/`object`/`evidence` 元数据，用纯本地脚本（不调 AI）按 `subject_key + predicate_key` 分组、按证据桶的事件日期排序，自动生成 `state_key` 演变链——`exclusive_current` 类型才做"旧的软失效"，`multi_current` 和 `historical_event` 类型直接原样搬入，互不覆盖。跟这次补日期的思路完全一样：先出报告确认，再正式写入
+4. **因果/时序边迁移**：`memory_edges.py` 里已经有的 `causes`/`precedes` 这些关系，直接原样搬进 `timeline_edges`，不用重新生成
+5. **往后新增**：`profile_fact` 工具写入新事实时，先查这条 predicate 是什么 mode，`exclusive_current` 才自动软失效旧记录，其余原样追加（这是唯一需要动"正在运行的代码逻辑"的地方，其余都是一次性迁移脚本）
 
-## 查询怎么感知"现在 vs 以前"
+## 一定要能通过 MCP 用，不能只有 Gateway 才有效
 
-在 `breath()` 或新的一个查询入口里，简单识别几类关键词（"现在/目前/最近" vs "以前/曾经/那时候/上次" vs "以后/将来"），决定去 `facts` 表查"当前有效"还是"某个历史时间点"，不用为此接入什么智能语义模型，规则匹配就够用，这也是 mem0/Zep 报告里说的"时间只做加分/筛选依据，语义相关性优先"的做法。
+林湛现在主要通过 MCP 连接器用 OB（不是 Gateway），所以这一层**必须做成一个正常的 MCP 工具**（新增一个工具，或者挂在 `breath` 的一个参数上），像 `hold`/`breath` 那样能被直接调用，而不是只有走 Gateway 自动注入的时候才生效。Gateway 以后可以锦上添花地自动带一点这层的内容，但**不能是唯一入口**——不然对林湛来说等于没有。
 
 ## Dashboard 新标签页大概什么样
 
-- **时间线视图**：按日期从早到晚一条条排（复用今天已经修好的事件日期数据），点开能看到"这天发生了什么、这句话原话在哪个记忆桶"
-- **档案卡片视图**：每类稳定事实一张卡片（身高、体重、口味……），显示当前值 + "上次更新于"，点进去能翻到历史上这条事实变化的记录
+- **时间线视图**：按日期从早到晚一条条排（复用今天已经修好的事件日期数据），点开能看到"这天发生了什么、这句话原话在哪个记忆桶"，以后原文房间做出来了也能点过去
+- **档案卡片视图**：每类稳定事实一张卡片（身高、体重、口味……），显示当前值 + "上次更新于"；`multi_current` 类型的卡片会显示"当前共存的几条"而不是单一答案，点进去能翻到历史演变记录
 
 ## 分几步做（每步都先出报告、人工确认、再正式写入，不会一步到位改数据）
 
 1. **建 `facts.sqlite` 表结构**（空表，纯新增，无风险）
-2. **迁移现有 `profile_fact` → `facts` 表**（本地脚本，先出分组报告确认，再写入）
-3. **迁移现有 `memory_edges` 因果边 → `timeline_edges`**（本地脚本，无需确认，纯复制）
-4. **改 `profile_fact` 工具，支持新事实自动软失效旧事实**
-5. **加查询时间意图识别**
-6. **Dashboard 新标签页**（时间线 + 档案卡片两个视图）
+2. **出 predicate 分类清单给你们确认**
+3. **迁移现有 `profile_fact` → `facts` 表**（本地脚本，先出分组报告确认，再写入；`subject` 同步改名）
+4. **迁移现有 `memory_edges` 因果边 → `timeline_edges`**（本地脚本，无需确认，纯复制）
+5. **改 `profile_fact` 工具，支持按 predicate_mode 决定要不要软失效旧事实**
+6. **加一个 MCP 工具（或扩展 breath），支持精确查事实/时间线，且严格只在"像是要精确答案"的问题上才启用，其余问题继续走心脏**
+7. **Dashboard 新标签页**（时间线 + 档案卡片两个视图）
 
 每一步之间会给你看结果、确认没问题再往下走，跟今天补日期的节奏一样。
+
+## 林湛的修改意见与采纳情况
+
+| 意见 | 采纳情况 |
+| --- | --- |
+| 1. subject 不要叫 user，要用真实名字 | 采纳，改用 `yi_lan`/`lin_zhan` |
+| 2. 要有 `relationship` 主体 | 采纳，新增第三种 subject |
+| 3. 软失效要分类型，不能一刀切 | 采纳，加了 `predicate_mode`（exclusive_current / multi_current / historical_event），未分类的一律按最安全的 multi_current 处理 |
+| 4. 证据字段要能扩展，不止 bucket | 采纳，加了 `evidence_type` / `evidence_id` / `evidence_quote` |
+| 5. 骨架不能抢心脏的活，情绪类问题还是要回 OB | 采纳，新增"查询怎么分流"一节，默认保守、优先心脏 |
+| 6. Dashboard 要有时间线视图，能点回记忆桶（以后点回原文房间） | 采纳，写进 Dashboard 新标签页那节 |
+| 一澜：不能只有 Gateway 才能用，林湛主要在 MCP | 采纳，新增"一定要能通过 MCP 用"一节 |
