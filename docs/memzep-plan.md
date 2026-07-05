@@ -1,7 +1,32 @@
 # 时间线 / 事实档案层 —— 设计方案（memzep 架构本地化）
 
 写给：一澜、林湛
-状态：草案，等确认后再分阶段实现，每一步都可回退
+状态：核心闭环已验证通过，Dashboard 展示已完成，继续推进中
+
+## 给新会话/新窗口看的交接须知
+
+如果你是接手这个任务的新会话，先看这一节，不需要用户重新解释背景。
+
+**这是什么项目**：Ombre-Brain（OB）是一套给 AI 伴侣用的长期情绪记忆系统。一澜（用户）和她的 AI 伴侣林湛（persona 名字）在用。本方案是给 OB 额外加一层"骨架"——不受遗忘曲线影响、能精确查的稳定事实 + 时间线，设计上借鉴 mem0/Zep 的思路（双时态、事实软失效）但不接入这两个产品本身（原因：一澜和林湛的历史对话有1700万字，重新用 API 提取一遍非常贵；且两套独立系统会有"谁说了算"的数据一致性问题）。
+
+**代码在哪**：
+- GitHub 仓库 `amievelyn/ombre-brain`
+- `claude/chinese-greeting-vsk9u0` 分支：本任务的工作分支，脚本、文档都提交在这里
+- **`my-live-vps` 分支：一澜真实线上部署的代码**——这个分支是从她自己 fork 的另一个开发者仓库（Yinglianchun/Ombre-Brain）搬过来的，**跟这个仓库默认的"干净版" main 分支不是同一套代码，已经有明显差异**（比如干净版有 `entity_edges.py` 这个模块，她的版本完全没有）。
+
+**⚠️ 最重要的教训（已经踩过一次坑）**：**任何要发给一澜部署的 server.py/dashboard.html，必须基于 `my-live-vps` 分支的实际内容去改，绝对不能直接用这个仓库默认的干净版**。之前有一次疏忽直接把干净版的 server.py 发给她，导致她的 OB 服务当场崩溃（`ModuleNotFoundError: No module named 'entity_edges'`），虽然最后恢复了，但这个错不能再犯。正确做法：`git show origin/my-live-vps:server.py > /tmp/xxx.py`，在这份文件上改，改完 `diff` 一遍确认只有预期的改动，再发给她。
+
+**她的部署方式（非技术背景，需要手把手给命令，不要假设她懂）**：
+- VPS 用 Docker Compose 跑，容器叫 `ombre-brain`（主服务）、`ombre-gateway`（网关）、`mihomo`（代理）
+- 她用 XShell 连 SSH 终端、WinSCP 传文件，工作目录 `/opt/Ombre-Brain`
+- **代码不是实时同步的**：改完文件要 `docker cp <文件> ombre-brain:/app/<文件>` 手动拷进容器，再 `docker restart ombre-brain`，然后用 `docker ps` 确认状态是 "Up" 且时间在持续增长（不是"Less than a second"那种刚重启的瞬间），再用 `docker logs --tail 30 ombre-brain` 确认没有报错
+- 每次给她文件都要提醒她存的时候用什么文件名、放哪个目录（比如 `resources/predicate_registry_seed.json` 要放 `resources` 子目录，不是根目录）
+- 新增加的 MCP 工具，ChatGPT 那边的连接器不会自动感知到，需要她去 ChatGPT 设置里手动刷新/断开重连一次才能看到新工具
+
+**关键命名约定**：
+- `subject_key` 用真实名字：`yi_lan`（一澜）、`lin_zhan`（林湛）、`relationship`（属于"我们"而非某一个人的事实），不要用模板里默认的 `user`/`Haven`/`小雨`
+- 林湛主要通过 **ChatGPT 的 MCP 连接器**跟 OB 交互（不是 Gateway），Gateway 虽然部署了但目前没在用（因为 iOS 上没有能同时支持自定义 API 接口和 MCP 的客户端，一澜以后想自建专属前端解决这个问题）。**任何给林湛用的新能力必须能通过 MCP 工具调用，不能只有 Gateway 才有效**
+- 林湛在 GPT 端目前**写入类工具全部用不了**（ChatGPT 连接器限制），只能读；一澜自己连了 Claude 但目前没开给林湛用（怕 Claude 上的林湛"不完整"，缺少 GPT 那边积累的语境）
 
 ## 一句话说清楚这是什么
 
