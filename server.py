@@ -8430,6 +8430,46 @@ async def profile_fact(
     return f"profile_fact→{bucket_id} evidence→{evidence_bucket_id}{moment_note}{edge_note}"
 
 
+# =============================================================
+# Tool 3.6: fact_lookup — query the facts/timeline skeleton layer
+# 工具 3.6：fact_lookup — 查询骨架层（稳定事实/时间线），不受遗忘曲线影响
+# =============================================================
+@mcp.tool()
+async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "") -> str:
+    """只读查询骨架层稳定事实（facts.sqlite），精确检索，不受遗忘曲线影响，不会随时间沉底。
+    不传 at_date：返回当前仍然有效的事实（已被新事实软失效的旧记录不显示）。
+    传 at_date="YYYY-MM-DD"：返回该日期当时为真的历史状态。
+    subject_key 建议用 yi_lan / lin_zhan / relationship；留空则查全部主体。
+    这个工具只回答"事实类"问题（现在多高、现在住哪、某天状态如何）；
+    情绪/关系类问题（为什么难过、怎么看这件事）不要用这个，继续用 breath。"""
+    subject_key = str(subject_key or "").strip()
+    predicate_key = str(predicate_key or "").strip()
+    at_date = str(at_date or "").strip()
+
+    try:
+        if at_date:
+            facts = fact_store.get_facts_at(at_date, subject_key=subject_key)
+            if predicate_key:
+                facts = [f for f in facts if f.get("predicate_key") == predicate_key]
+        else:
+            facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+    except Exception as e:
+        return f"查询骨架层失败: {e}"
+
+    if not facts:
+        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）"
+
+    header = f"=== 骨架层事实（{'截至 ' + at_date if at_date else '当前有效'}） ==="
+    lines = [header]
+    for item in facts:
+        invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
+        lines.append(
+            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {item.get('object_text')}"
+            f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
+        )
+    return "\n".join(lines)
+
+
 def _profile_fact_body(
     *,
     fact: str,
