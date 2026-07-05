@@ -4796,12 +4796,22 @@ function bucketSortDate(b) {
   // 优先用事件日期 date；没有 date 的桶才退回创建/导入时间 created
   return String((b && (b.date || b.created)) || '');
 }
+function bucketSortSecondary(b) {
+  // 同一天内部用 created 当第二关键字，方向要跟主排序一起翻转，不能靠"稳定排序"兜底
+  return String((b && b.created) || '');
+}
 function sortBuckets(buckets) {
   var list = (buckets || []).slice();
   if (bucketSortMode === 'newest') {
-    list.sort(function(a, b) { return bucketSortDate(b).localeCompare(bucketSortDate(a)); });
+    list.sort(function(a, b) {
+      var primary = bucketSortDate(b).localeCompare(bucketSortDate(a));
+      return primary !== 0 ? primary : bucketSortSecondary(b).localeCompare(bucketSortSecondary(a));
+    });
   } else if (bucketSortMode === 'oldest') {
-    list.sort(function(a, b) { return bucketSortDate(a).localeCompare(bucketSortDate(b)); });
+    list.sort(function(a, b) {
+      var primary = bucketSortDate(a).localeCompare(bucketSortDate(b));
+      return primary !== 0 ? primary : bucketSortSecondary(a).localeCompare(bucketSortSecondary(b));
+    });
   }
   // score 模式：后端已经按 score 降序返回，不用再排
   return list;
