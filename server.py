@@ -85,6 +85,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
+from facts_store import FactStore
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
     active_facets,
@@ -166,6 +167,7 @@ recall_diagnostics = RecallDiagnosticsLogger(config)  # Recall diagnostics / 召
 import_engine = ImportEngine(config, bucket_mgr, dehydrator, embedding_engine)  # Import engine / 导入引擎
 persona_engine = PersonaStateEngine(config)           # Persona state engine / 人格状态引擎
 memory_edge_store = MemoryEdgeStore(config)            # Explicit memory relationship edges / 显式记忆关系边
+fact_store = FactStore(config)                          # Facts/timeline skeleton layer, decay-exempt / 骨架层：稳定事实与时间线，不参与衰减
 memory_node_store = MemoryNodeStore(config)            # Computable memory node index / 可计算记忆节点
 memory_moment_store = MemoryMomentStore(config)        # Structured bucket body/comment moment index / 记忆片段索引
 memory_write_gate = MemoryWriteGate(config)            # Automatic grow gate / 自动写入门卫
@@ -8330,7 +8332,9 @@ async def profile_fact(
     followup: str = "",
     confidence: float = 0.9,
 ) -> str:
-    """手动写入一条画像事实，并强制关联证据桶。先有事件桶，再用这个工具固化稳定偏好/事实。"""
+    """手动写入一条画像事实，并强制关联证据桶。先有事件桶，再用这个工具固化稳定偏好/事实。
+    subject 建议传真实主体：yi_lan / lin_zhan / relationship（属于"我们"而非某一个人的事实，如约定、共同事件，用 relationship）。
+    predicate 决定这条事实会不会被新记录软失效，取决于 predicate_registry 里登记的 mode；没登记过的一律按最安全的 multi_current 处理（新旧共存，不覆盖）。"""
     fact = str(fact or "").strip()
     evidence_bucket_id = str(evidence_bucket_id or "").strip()
     if not fact:
@@ -8398,6 +8402,21 @@ async def profile_fact(
         confidence=confidence,
         reason="profile fact evidence",
     )
+    if predicate_key:
+        evidence_date = str((evidence_bucket.get("metadata", {}) or {}).get("date") or "").strip()
+        try:
+            fact_store.add_fact(
+                subject_key,
+                predicate_key,
+                object_text or fact,
+                valid_at=evidence_date or None,
+                confidence=confidence,
+                evidence_type="bucket",
+                evidence_id=evidence_bucket_id,
+                evidence_quote=evidence_context or fact,
+            )
+        except Exception as e:
+            logger.warning("Facts-layer write failed for profile_fact (bucket still created): %s", e)
     _queue_embedding_refresh(bucket_id)
     try:
         created_bucket = await bucket_mgr.get(bucket_id)
