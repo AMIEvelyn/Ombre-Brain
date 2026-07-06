@@ -2961,7 +2961,10 @@
         <h2>骨架层 · 稳定事实</h2>
         <p>facts.sqlite 里的当前有效事实；不受遗忘曲线影响，不会随时间沉底。情绪/关系类问题不在这里，仍由 OB 记忆池负责。</p>
       </div>
-      <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+      <div class="word-map-actions">
+        <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+        <button type="button" onclick="backfillFactsSkeletonDisplayNames()">补齐默认类型中文名</button>
+      </div>
     </div>
     <div class="profile-proposal-panel">
       <div class="profile-proposal-form">
@@ -4875,20 +4878,95 @@ function factsIsTestGroup(group) {
   return group.subject_key === 'qa_test' || String(group.predicate_key || '').indexOf('test_') === 0;
 }
 
+function factsDeleteButton(factId) {
+  return '<button type="button" title="删除这条" onclick="deleteFactsSkeletonFact(' + factId + ')" ' +
+    'style="border:none;background:none;color:var(--text-dim);cursor:pointer;padding:0 2px;font-size:12px;">✕</button>';
+}
+
 function renderFactGroup(g) {
-  var currentText = (g.current || []).map(function(c) { return esc(c.object_text || ''); }).join('、') || '（无）';
+  var currentText = (g.current || []).map(function(c) {
+    return esc(c.object_text || '') + factsDeleteButton(c.id);
+  }).join('、 ') || '（无）';
   var historyRows = (g.history || []).slice().reverse().map(function(h) {
     var invalidNote = h.invalid_at ? ('，已于 ' + esc(h.invalid_at) + ' 失效') : '';
-    return '<div style="padding:4px 0 4px 16px;color:var(--text-dim);font-size:12px;">' +
-      esc(h.object_text || '') + '（生效于 ' + esc(h.valid_at || '未知') + invalidNote + '）' +
+    return '<div style="padding:4px 0 4px 16px;color:var(--text-dim);font-size:12px;display:flex;justify-content:space-between;gap:8px;">' +
+      '<span>' + esc(h.object_text || '') + '（生效于 ' + esc(h.valid_at || '未知') + invalidNote + '）</span>' +
+      factsDeleteButton(h.id) +
       '</div>';
+  }).join('');
+  var predicateKey = g.predicate_key;
+  var editorId = 'predicate-mode-editor-' + predicateKey;
+  var selectId = 'predicate-mode-select-' + predicateKey;
+  var modeOptions = ['exclusive_current', 'multi_current', 'historical_event'].map(function(m) {
+    return '<option value="' + m + '"' + (m === g.mode ? ' selected' : '') + '>' + m + '</option>';
   }).join('');
   return '<details style="padding:8px 0;border-bottom:1px solid var(--border);">' +
     '<summary style="cursor:pointer;">' +
     '<b>' + esc(g.display_name || g.predicate_key) + '</b>：' + currentText +
     ' <span style="color:var(--text-dim);font-size:12px;">（变动过 ' + (g.change_count || 0) +
     ' 次，最新变动于 ' + esc(g.last_changed_at || '未知') + '）</span>' +
-    '</summary>' + historyRows + '</details>';
+    ' <button type="button" onclick="event.preventDefault();togglePredicateModeEditor(\'' + predicateKey + '\')" ' +
+    'style="margin-left:8px;font-size:12px;">改类型</button>' +
+    '</summary>' +
+    '<div id="' + editorId + '" style="display:none;padding:8px 0 8px 16px;">' +
+    '<select id="' + selectId + '">' + modeOptions + '</select> ' +
+    '<button type="button" onclick="submitPredicateModeChange(\'' + predicateKey + '\')">保存</button>' +
+    '</div>' +
+    historyRows + '</details>';
+}
+
+function togglePredicateModeEditor(predicateKey) {
+  var el = document.getElementById('predicate-mode-editor-' + predicateKey);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+async function submitPredicateModeChange(predicateKey) {
+  var sel = document.getElementById('predicate-mode-select-' + predicateKey);
+  var mode = sel && sel.value;
+  if (!mode) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/predicates/' + encodeURIComponent(predicateKey), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mode: mode })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '修改失败');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('改类型失败: ' + e.message);
+  }
+}
+
+async function deleteFactsSkeletonFact(factId) {
+  if (!confirm('删除这条稳定事实？删掉之后没法撤销。')) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId, {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ confirm: 'DELETE' })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '删除失败');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+async function backfillFactsSkeletonDisplayNames() {
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/predicates/backfill-display-names', { method: 'POST' });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '补齐失败');
+    alert('补齐了 ' + (data.count || 0) + ' 个类型的中文名。');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('补齐失败: ' + e.message);
+  }
 }
 
 function populateFactsAddPredicateOptions() {

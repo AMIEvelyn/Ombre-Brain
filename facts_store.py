@@ -139,6 +139,15 @@ class FactStore:
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_predicate(self, predicate_key: str) -> dict | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM predicate_registry WHERE predicate_key = ?",
+            (str(predicate_key or "").strip(),),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     # ------------------------------------------------------------------
     # facts
     # ------------------------------------------------------------------
@@ -229,6 +238,14 @@ class FactStore:
         ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def delete_fact(self, fact_id: int) -> bool:
+        conn = self._connect()
+        cursor = conn.execute("DELETE FROM facts WHERE id = ?", (int(fact_id),))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
 
     # ------------------------------------------------------------------
     # timeline_edges

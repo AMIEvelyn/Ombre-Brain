@@ -216,3 +216,17 @@ CREATE TABLE timeline_edges (
 - 顺带把这个骨架层功能（GET 读接口 + 完整 Dashboard 标签页 UI）从 `my-live-vps` 分支同步补齐进了这次的开发分支——这两个分支之前在这一块有差异（`my-live-vps` 上已经手动加过 `fact_lookup` 工具和骨架 Dashboard 标签页，但从没同步回开发分支），现在写入功能是在补齐后的基础上一起加的，开发分支和实际部署分支在这一块的功能对齐了。
 
 验证：`python3 -m py_compile server.py` 通过；`node --check` 过了 dashboard.html 里提取出的整个 script 内容；用真实 `FactStore` 模拟了三种写入场景（已注册 predicate 直接写、全新 predicate 先注册再写、`exclusive_current` 新值正确软失效旧值），行为符合预期；`scripts/test_predicate_modes.py` 回归测试仍全部通过。同样准备了一份基于 `my-live-vps` 实际代码改的 server.py + dashboard.html，diff 过确认只多了这一块，其余没有改动。
+
+## 更新：手动加事实的三个补丁——删除、改类型、批量补中文名（同日）
+
+一澜实测后反馈两个问题：①手滑把"生日""结婚纪念日"两个新 predicate 建成了默认的 exclusive_current，需要能改成 historical_event，也希望有删除功能；②默认自带的那 50 个 predicate 在下拉框里显示成"budget_status (budget_status)"这种英文重复，不像她自己新建的那样有中文名——这是因为 `predicate_registry_seed.json` 里的中文名从来没有真正写进过她 VPS 上那份 facts.sqlite（这份种子文件此前只用来对着看，`scripts/seed_predicate_registry.py --apply` 从没在她的实例上跑过）。
+
+补了三个东西：
+1. **`FactStore.delete_fact(fact_id)`**：删单条事实记录，`facts_store.py` 新增。
+2. **`PATCH /api/facts-skeleton/predicates/{predicate_key}`**：改一个已注册 predicate 的 mode/display_name/notes，只传要改的字段，没传的维持原样——用来把手滑选错的 mode 改过来，不用删掉重建。
+3. **`POST /api/facts-skeleton/predicates/backfill-display-names`**：一键把 `predicate_registry_seed.json` 里的中文名/notes 补进已注册但 display_name 还是空的 predicate；只补空的，不碰已经有名字的（包括她自己新建的"生日""结婚纪念日"这种，种子文件里根本没有，不会被误动），可以放心多点几次。
+4. **`DELETE /api/facts-skeleton/facts/{fact_id}`**：删单条事实，前端每一条当前值/历史记录后面都跟了一个"✕"。
+
+Dashboard 前端：每个事实分组标题后面加了"改类型"按钮，点开是个小的 mode 下拉框+保存；工具栏加了"补齐默认类型中文名"按钮，点一次就把默认 50 个类型的中文名同步进来。
+
+验证：`python3 -m py_compile server.py` 通过，`node --check` 过 dashboard.html 的 script；用真实 `FactStore` 模拟了 backfill（只补空 display_name、不碰自定义 predicate）、mode 单独修改（display_name/notes 保留原值）、删除已有事实和删除不存在的事实（返回 false）三类场景，行为符合预期；`scripts/test_predicate_modes.py` 回归测试仍全部通过。同样准备了基于 `my-live-vps` 实际代码改的 server.py / dashboard.html / facts_store.py 三个文件，diff 确认只多了这一块。

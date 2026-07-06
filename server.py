@@ -9636,6 +9636,7 @@ async def api_facts_skeleton(request):
                 "subject_key": item["subject_key"],
                 "predicate_key": item["predicate_key"],
                 "display_name": (predicate_meta.get(item["predicate_key"]) or {}).get("display_name") or "",
+                "mode": (predicate_meta.get(item["predicate_key"]) or {}).get("mode") or "",
                 "current": [],
             })
             group["current"].append(item)
@@ -9707,6 +9708,127 @@ async def api_facts_skeleton_create(request):
         return JSONResponse({"status": "created", "id": fact_id})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}", methods=["DELETE"])
+async def api_facts_skeleton_delete_fact(request):
+    """Delete one fact row from the skeleton layer (e.g. added under the
+    wrong predicate/mode by mistake). Requires confirm: "DELETE" in the body,
+    same convention as /api/profile-facts/{bucket_id} DELETE."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    if body.get("confirm") != "DELETE":
+        return JSONResponse({"error": "confirmation required"}, status_code=400)
+    try:
+        deleted = fact_store.delete_fact(fact_id)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not deleted:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"status": "deleted", "id": fact_id})
+
+
+@mcp.custom_route("/api/facts-skeleton/predicates/{predicate_key}", methods=["PATCH"])
+async def api_facts_skeleton_update_predicate(request):
+    """Change an existing predicate's mode/display_name/notes -- e.g. fixing
+    a predicate that got created under the wrong mode (like a one-time
+    calendar date accidentally left as exclusive_current instead of
+    historical_event). Partial update: only fields present in the body are
+    changed, the rest keep their current value."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    predicate_key = str(request.path_params.get("predicate_key") or "").strip()
+    if not predicate_key:
+        return JSONResponse({"error": "invalid predicate_key"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    existing = fact_store.get_predicate(predicate_key)
+    if not existing:
+        return JSONResponse({"error": "predicate not found"}, status_code=404)
+
+    mode = str(body.get("mode") or "").strip() or existing["mode"]
+    if mode not in PREDICATE_MODES:
+        return JSONResponse({"error": "mode 必须是 exclusive_current/multi_current/historical_event"}, status_code=400)
+    display_name = body.get("display_name")
+    display_name = existing["display_name"] if display_name is None else str(display_name).strip()
+    notes = body.get("notes")
+    notes = existing["notes"] if notes is None else str(notes).strip()
+
+    try:
+        fact_store.upsert_predicate(predicate_key, mode=mode, display_name=display_name, notes=notes)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"status": "updated", "predicate": fact_store.get_predicate(predicate_key)})
+
+
+@mcp.custom_route("/api/facts-skeleton/predicates/backfill-display-names", methods=["POST"])
+async def api_facts_skeleton_backfill_display_names(request):
+    """One-click fix for predicates that exist in predicate_registry with no
+    Chinese display_name yet (this happens when a predicate got registered
+    through actual fact-writing before the hand-written seed list with
+    display names was ever applied). Reads resources/predicate_registry_seed.json
+    bundled with the app; only fills in display_name/notes for predicates
+    whose display_name is currently empty, and never touches mode or any
+    predicate the seed file doesn't know about (e.g. custom ones added from
+    the Dashboard) -- safe to click more than once."""
+    from starlette.responses import JSONResponse
+    import json
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    seed_path = os.path.join(os.path.dirname(__file__), "resources", "predicate_registry_seed.json")
+    try:
+        with open(seed_path, "r", encoding="utf-8") as f:
+            seed_items = json.load(f)
+    except Exception as e:
+        return JSONResponse({"error": f"读取 predicate_registry_seed.json 失败: {e}"}, status_code=500)
+
+    seed_by_key: dict[str, dict] = {}
+    for item in seed_items:
+        key = str(item.get("predicate_key") or "").strip()
+        if key and item.get("mode") in PREDICATE_MODES:
+            seed_by_key[key] = item
+
+    updated = []
+    try:
+        for row in fact_store.list_predicates():
+            key = row["predicate_key"]
+            if row.get("display_name"):
+                continue
+            seed = seed_by_key.get(key)
+            if not seed:
+                continue
+            fact_store.upsert_predicate(
+                key,
+                mode=row["mode"],
+                display_name=seed.get("display_name", "") or key,
+                notes=seed.get("notes", "") or row.get("notes", ""),
+            )
+            updated.append(key)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"status": "ok", "updated": updated, "count": len(updated)})
 
 
 @mcp.custom_route("/api/profile-facts", methods=["GET"])
