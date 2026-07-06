@@ -2994,6 +2994,12 @@
       </div>
       <div class="profile-proposal-message" id="facts-add-message"></div>
     </div>
+    <details style="margin-bottom:16px;">
+      <summary style="cursor:pointer;font-size:14px;color:var(--text-dim);">事实类型管理（改这里对所有用这个类型的人都生效）</summary>
+      <div class="profile-list" id="facts-predicate-list" style="padding-top:8px;">
+        <div class="loading">加载中…</div>
+      </div>
+    </details>
     <div class="profile-summary" id="facts-summary">加载中…</div>
     <div class="profile-list" id="facts-list">
       <div class="loading">加载骨架层事实…</div>
@@ -4894,44 +4900,45 @@ function renderFactGroup(g) {
       factsDeleteButton(h.id) +
       '</div>';
   }).join('');
-  var predicateKey = g.predicate_key;
-  // predicate_key alone isn't unique across groups (e.g. "birthday" exists for
-  // both yi_lan and lin_zhan, sharing one predicate_registry row/mode) -- so
-  // DOM ids must be scoped by subject_key too, or the wrong group's editor
-  // pops open when two subjects share a predicate_key.
-  var groupKey = g.subject_key + '__' + predicateKey;
-  var editorId = 'predicate-mode-editor-' + groupKey;
-  var selectId = 'predicate-mode-select-' + groupKey;
-  var modeOptions = ['exclusive_current', 'multi_current', 'historical_event'].map(function(m) {
-    return '<option value="' + m + '"' + (m === g.mode ? ' selected' : '') + '>' + m + '</option>';
-  }).join('');
-  return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">' +
-    '<details>' +
+  return '<details style="padding:8px 0;border-bottom:1px solid var(--border);">' +
     '<summary style="cursor:pointer;">' +
     '<b>' + esc(g.display_name || g.predicate_key) + '</b>：' + currentText +
     ' <span style="color:var(--text-dim);font-size:12px;">（变动过 ' + (g.change_count || 0) +
     ' 次，最新变动于 ' + esc(g.last_changed_at || '未知') + '）</span>' +
     '</summary>' +
-    historyRows +
-    '</details>' +
-    '<div style="padding-top:4px;">' +
-    '<button type="button" onclick="togglePredicateModeEditor(\'' + groupKey + '\')" ' +
-    'style="font-size:12px;">改类型</button>' +
-    '<div id="' + editorId + '" style="display:none;padding:8px 0 8px 16px;">' +
-    '<select id="' + selectId + '">' + modeOptions + '</select> ' +
-    '<button type="button" onclick="submitPredicateModeChange(\'' + groupKey + '\', \'' + predicateKey + '\')">保存</button>' +
-    '</div>' +
-    '</div>' +
+    historyRows + '</details>';
+}
+
+// 类型（mode）是记在 predicate_registry 上的，跟"这一类事实该怎么处理新旧"绑定，
+// 不属于某个具体的人或某一条记录——同一个 predicate_key 被哪几个 subject 共用，
+// 改一次就对所有人生效。所以编辑入口放在这个单独的"事实类型管理"列表里（每个
+// predicate_key 只出现一次），不再放在按 subject 分组的事实卡片里，避免造成
+// "好像是在单独改某个人的类型"的误解。
+function renderPredicateManagementRow(p) {
+  var key = p.predicate_key;
+  var modeOptions = ['exclusive_current', 'multi_current', 'historical_event'].map(function(m) {
+    return '<option value="' + m + '"' + (m === p.mode ? ' selected' : '') + '>' + m + '</option>';
+  }).join('');
+  return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+    '<span style="min-width:160px;">' + esc(p.display_name || key) + ' <span style="color:var(--text-dim);font-size:12px;">(' + esc(key) + ')</span></span>' +
+    '<select id="predicate-mode-select-' + esc(key) + '">' + modeOptions + '</select>' +
+    '<button type="button" onclick="submitPredicateModeChange(\'' + esc(key) + '\')">保存</button>' +
     '</div>';
 }
 
-function togglePredicateModeEditor(groupKey) {
-  var el = document.getElementById('predicate-mode-editor-' + groupKey);
-  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+function renderPredicateManagementList() {
+  var list = document.getElementById('facts-predicate-list');
+  if (!list) return;
+  var predicates = (factsSkeletonPredicates || []).slice().sort(function(a, b) {
+    return String(a.display_name || a.predicate_key).localeCompare(String(b.display_name || b.predicate_key), 'zh');
+  });
+  list.innerHTML = predicates.length
+    ? predicates.map(renderPredicateManagementRow).join('')
+    : '<div class="loading">还没有登记过的事实类型。</div>';
 }
 
-async function submitPredicateModeChange(groupKey, predicateKey) {
-  var sel = document.getElementById('predicate-mode-select-' + groupKey);
+async function submitPredicateModeChange(predicateKey) {
+  var sel = document.getElementById('predicate-mode-select-' + predicateKey);
   var mode = sel && sel.value;
   if (!mode) return;
   try {
@@ -5082,6 +5089,7 @@ async function loadFactsSkeleton() {
     if (!res.ok) throw new Error(data.error || '加载失败');
     factsSkeletonPredicates = Array.isArray(data.predicates) ? data.predicates : [];
     populateFactsAddPredicateOptions();
+    renderPredicateManagementList();
     var groups = Array.isArray(data.groups) ? data.groups : [];
     summary.textContent = groups.length + ' 类事实';
     if (!groups.length) {

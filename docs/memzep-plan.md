@@ -230,3 +230,15 @@ CREATE TABLE timeline_edges (
 Dashboard 前端：每个事实分组标题后面加了"改类型"按钮，点开是个小的 mode 下拉框+保存；工具栏加了"补齐默认类型中文名"按钮，点一次就把默认 50 个类型的中文名同步进来。
 
 验证：`python3 -m py_compile server.py` 通过，`node --check` 过 dashboard.html 的 script；用真实 `FactStore` 模拟了 backfill（只补空 display_name、不碰自定义 predicate）、mode 单独修改（display_name/notes 保留原值）、删除已有事实和删除不存在的事实（返回 false）三类场景，行为符合预期；`scripts/test_predicate_modes.py` 回归测试仍全部通过。同样准备了基于 `my-live-vps` 实际代码改的 server.py / dashboard.html / facts_store.py 三个文件，diff 确认只多了这一块。
+
+## 更新："改类型"两次返工——先修 bug，再改位置（同日）
+
+一澜实测"改类型"发现两个问题，一个是 bug，一个是设计位置放错了。
+
+**第一次：bug**——点开一澜"生日"的"改类型"，弹出来的却是林湛"生日"那个下拉框。原因：`predicate_key`（比如 `birthday`）在多个 subject 之间是共用的（predicate_registry 表里 `predicate_key` 是主键，一个 key 只有一行），但前端生成"改类型"编辑框的网页元素 id 只用了 predicate_key，没带 subject_key，导致两个共用同一 key 的分组渲染出了重复 id，`getElementById` 只会抓到文档里第一个匹配的，点哪个都可能弹错。当时的修法是把 id 换成 `subject_key + predicate_key` 拼接，暂时不重复了。
+
+**第二次：一澜追问"类型到底跟着谁走"，指出位置从设计上就放错了**——她说得对：mode 记在 predicate_registry 上，是"这一类事实该怎么处理新旧"的规则，跟具体是谁的、哪一条记录无关；同一个 predicate_key 被几个人共用，改一次就对所有人生效。既然如此，"改类型"就不该长在按 subject 分组显示的事实卡片里（那会让人误以为在单独改某个人的），应该有自己独立的位置，每个 predicate_key 只出现一次。
+
+于是把"改类型"整个搬出来，新增一个独立的"事实类型管理"折叠区（在骨架标签页里，加事实表单下面），列出所有已登记的 predicate_key（按中文名排序），每条一个 mode 下拉框 + 保存按钮，一个 key 只出现一行。原来每个事实分组卡片里的"改类型"按钮/编辑框整个撤掉，`renderFactGroup` 恢复成最初那个纯展示版本。
+
+验证：`python3 -m py_compile server.py` 通过，`node --check` 过 dashboard.html 的 script；`scripts/test_predicate_modes.py` 回归测试仍全部通过。同样准备了基于 `my-live-vps` 实际代码改的 dashboard.html，diff 确认这次只动了 facts-view 区域的这一块（HTML 加了一个折叠区，JS 把改类型相关函数整个替换）。
