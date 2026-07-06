@@ -6850,9 +6850,12 @@ _FACT_QUERY_PREDICATE_SYNONYMS: dict[str, tuple[str, ...]] = {
 # 这几个 predicate 本身就是"关于情绪/关系的资料"，display_name/同义词很容易在
 # 谈心时被顺口说出来（"冲突""情绪需求"）。裸词命中不算数，必须同时带"像在查档案"
 # 的信号词，才会真的触发骨架——避免谈心谈到一半突然被追加一段资料卡。
+# 注意："记得"故意不算信号词——"你记得我们上次冲突我哭了吗"这种是回忆/谈心，
+# 不是查档案，光凭"记得"太宽，必须是"有哪些/是什么/记录过/骨架里/稳定事实里/
+# 查一下"这类更明确的查档案说法才算数。
 _FACT_SKELETON_SENSITIVE_PREDICATES = {"trauma_trigger", "emotional_need", "relationship_need", "conflict"}
 _FACT_SKELETON_ARCHIVE_INTENT_MARKERS = (
-    "记得", "查一下", "查查", "骨架", "稳定事实", "记录过", "记录里", "有哪些", "档案",
+    "有哪些", "是什么", "记录过", "记录里", "骨架", "稳定事实", "查一下", "查查", "档案",
 )
 
 _FACT_SUBJECT_HINTS: tuple[tuple[str, str], ...] = (
