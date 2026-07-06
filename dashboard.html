@@ -2144,7 +2144,8 @@
     gap: 10px;
     align-items: center;
   }
-  .profile-proposal-form input {
+  .profile-proposal-form input,
+  .profile-proposal-form select {
     min-height: 34px;
     padding: 8px 12px;
     border: 1px solid var(--border);
@@ -2490,6 +2491,7 @@
   <div class="tab" data-tab="dreams">梦境</div>
   <div class="tab" data-tab="persona">Persona</div>
   <div class="tab" data-tab="profile">画像</div>
+  <div class="tab" data-tab="facts">骨架</div>
   <div class="tab" data-tab="word-map">词图</div>
   <div class="tab" data-tab="network">记忆网络</div>
   <div class="tab" data-tab="config">配置</div>
@@ -2948,6 +2950,50 @@
     <div class="profile-summary" id="profile-summary">加载中…</div>
     <div class="profile-list" id="profile-facts-list">
       <div class="loading">加载画像事实…</div>
+    </div>
+  </div>
+</div>
+
+<div class="content" id="facts-view" style="display:none">
+  <div class="profile-shell">
+    <div class="profile-toolbar">
+      <div>
+        <h2>骨架层 · 稳定事实</h2>
+        <p>facts.sqlite 里的当前有效事实；不受遗忘曲线影响，不会随时间沉底。情绪/关系类问题不在这里，仍由 OB 记忆池负责。</p>
+      </div>
+      <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+    </div>
+    <div class="profile-proposal-panel">
+      <div class="profile-proposal-form">
+        <select id="facts-add-subject">
+          <option value="yi_lan">一澜</option>
+          <option value="lin_zhan">林湛</option>
+          <option value="relationship">我们的关系</option>
+        </select>
+        <select id="facts-add-predicate" onchange="onFactsAddPredicateChange()">
+          <option value="">加载中…</option>
+        </select>
+        <input type="text" id="facts-add-object" placeholder="具体内容，例如 165cm" />
+      </div>
+      <div class="profile-proposal-form" id="facts-add-new-predicate-row" style="display:none">
+        <input type="text" id="facts-add-new-predicate-key" placeholder="新 predicate_key（英文，如 xxx_status）" />
+        <select id="facts-add-new-predicate-mode">
+          <option value="exclusive_current">exclusive_current（新值取代旧值）</option>
+          <option value="multi_current">multi_current（新旧共存）</option>
+          <option value="historical_event">historical_event（一次性事件）</option>
+        </select>
+        <input type="text" id="facts-add-new-predicate-name" placeholder="中文显示名（可选）" />
+      </div>
+      <div class="profile-proposal-form">
+        <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
+        <span></span>
+        <button type="button" onclick="submitFactsAdd()">添加事实</button>
+      </div>
+      <div class="profile-proposal-message" id="facts-add-message"></div>
+    </div>
+    <div class="profile-summary" id="facts-summary">加载中…</div>
+    <div class="profile-list" id="facts-list">
+      <div class="loading">加载骨架层事实…</div>
     </div>
   </div>
 </div>
@@ -3529,6 +3575,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('dreams-view').style.display = target === 'dreams' ? '' : 'none';
     document.getElementById('persona-view').style.display = target === 'persona' ? '' : 'none';
     document.getElementById('profile-view').style.display = target === 'profile' ? '' : 'none';
+    document.getElementById('facts-view').style.display = target === 'facts' ? '' : 'none';
     document.getElementById('word-map-view').style.display = target === 'word-map' ? '' : 'none';
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('config-view').style.display = target === 'config' ? '' : 'none';
@@ -3546,6 +3593,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       loadPortraitState();
       loadProfileFacts();
     }
+    if (target === 'facts') loadFactsSkeleton();
     if (target === 'word-map') loadWordMap();
     if (target === 'network') loadNetwork();
     if (target === 'config') loadConfig();
@@ -4808,6 +4856,178 @@ function editProfileFact(id) {
     reflection: sections.reflection || '',
     followup: sections.followup || ''
   });
+}
+
+var FACTS_SUBJECT_LABELS = {
+  yi_lan: '一澜',
+  lin_zhan: '林湛',
+  relationship: '我们的关系',
+  qa_test: '测试数据',
+};
+
+var factsSkeletonPredicates = [];
+
+function factsSubjectLabel(subjectKey) {
+  return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
+}
+
+function factsIsTestGroup(group) {
+  return group.subject_key === 'qa_test' || String(group.predicate_key || '').indexOf('test_') === 0;
+}
+
+function renderFactGroup(g) {
+  var currentText = (g.current || []).map(function(c) { return esc(c.object_text || ''); }).join('、') || '（无）';
+  var historyRows = (g.history || []).slice().reverse().map(function(h) {
+    var invalidNote = h.invalid_at ? ('，已于 ' + esc(h.invalid_at) + ' 失效') : '';
+    return '<div style="padding:4px 0 4px 16px;color:var(--text-dim);font-size:12px;">' +
+      esc(h.object_text || '') + '（生效于 ' + esc(h.valid_at || '未知') + invalidNote + '）' +
+      '</div>';
+  }).join('');
+  return '<details style="padding:8px 0;border-bottom:1px solid var(--border);">' +
+    '<summary style="cursor:pointer;">' +
+    '<b>' + esc(g.display_name || g.predicate_key) + '</b>：' + currentText +
+    ' <span style="color:var(--text-dim);font-size:12px;">（变动过 ' + (g.change_count || 0) +
+    ' 次，最新变动于 ' + esc(g.last_changed_at || '未知') + '）</span>' +
+    '</summary>' + historyRows + '</details>';
+}
+
+function populateFactsAddPredicateOptions() {
+  var sel = document.getElementById('facts-add-predicate');
+  if (!sel) return;
+  var previous = sel.value;
+  var options = factsSkeletonPredicates.slice().sort(function(a, b) {
+    return String(a.display_name || a.predicate_key).localeCompare(String(b.display_name || b.predicate_key), 'zh');
+  }).map(function(p) {
+    return '<option value="' + esc(p.predicate_key) + '">' + esc(p.display_name || p.predicate_key) + ' (' + esc(p.predicate_key) + ')</option>';
+  }).join('');
+  sel.innerHTML = options + '<option value="__new__">+ 新建 predicate…</option>';
+  if (previous && factsSkeletonPredicates.some(function(p) { return p.predicate_key === previous; })) {
+    sel.value = previous;
+  }
+  onFactsAddPredicateChange();
+}
+
+function onFactsAddPredicateChange() {
+  var sel = document.getElementById('facts-add-predicate');
+  var isNew = !!sel && sel.value === '__new__';
+  var row = document.getElementById('facts-add-new-predicate-row');
+  if (row) row.style.display = isNew ? '' : 'none';
+}
+
+function setFactsAddMessage(message, tone) {
+  var el = document.getElementById('facts-add-message');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('ok', 'error');
+  if (tone) el.classList.add(tone);
+}
+
+async function submitFactsAdd() {
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  var objectInput = document.getElementById('facts-add-object');
+  var validAtInput = document.getElementById('facts-add-valid-at');
+  var subjectKey = (subjectSel && subjectSel.value) || '';
+  var predicateValue = (predicateSel && predicateSel.value) || '';
+  var objectText = ((objectInput && objectInput.value) || '').trim();
+  var validAt = ((validAtInput && validAtInput.value) || '').trim();
+
+  if (!objectText) {
+    setFactsAddMessage('先填具体内容，比如 165cm。', 'error');
+    return;
+  }
+  if (!predicateValue) {
+    setFactsAddMessage('先选一个 predicate，或者新建一个。', 'error');
+    return;
+  }
+
+  var payload = { subject_key: subjectKey, object_text: objectText, valid_at: validAt };
+
+  if (predicateValue === '__new__') {
+    var newKeyInput = document.getElementById('facts-add-new-predicate-key');
+    var newModeSel = document.getElementById('facts-add-new-predicate-mode');
+    var newNameInput = document.getElementById('facts-add-new-predicate-name');
+    var newKey = ((newKeyInput && newKeyInput.value) || '').trim();
+    if (!newKey) {
+      setFactsAddMessage('新 predicate 要填 predicate_key（英文，比如 xxx_status）。', 'error');
+      return;
+    }
+    payload.predicate_key = newKey;
+    payload.mode = (newModeSel && newModeSel.value) || '';
+    payload.display_name = ((newNameInput && newNameInput.value) || '').trim();
+  } else {
+    payload.predicate_key = predicateValue;
+  }
+
+  setFactsAddMessage('写入中…', '');
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '写入失败');
+    setFactsAddMessage('已添加事实（id ' + data.id + '）。', 'ok');
+    if (objectInput) objectInput.value = '';
+    var newKeyInputAfter = document.getElementById('facts-add-new-predicate-key');
+    var newNameInputAfter = document.getElementById('facts-add-new-predicate-name');
+    if (newKeyInputAfter) newKeyInputAfter.value = '';
+    if (newNameInputAfter) newNameInputAfter.value = '';
+    await loadFactsSkeleton();
+  } catch (e) {
+    setFactsAddMessage('写入失败: ' + e.message, 'error');
+  }
+}
+
+async function loadFactsSkeleton() {
+  var list = document.getElementById('facts-list');
+  var summary = document.getElementById('facts-summary');
+  if (!list || !summary) return;
+  list.innerHTML = '<div class="loading">加载骨架层事实…</div>';
+  summary.textContent = '读取中…';
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton');
+    if (!res) return;
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || '加载失败');
+    factsSkeletonPredicates = Array.isArray(data.predicates) ? data.predicates : [];
+    populateFactsAddPredicateOptions();
+    var groups = Array.isArray(data.groups) ? data.groups : [];
+    summary.textContent = groups.length + ' 类事实';
+    if (!groups.length) {
+      list.innerHTML = '<div class="loading">还没有稳定事实。</div>';
+      return;
+    }
+
+    var bySubject = {};
+    var testGroups = [];
+    groups.forEach(function(g) {
+      if (factsIsTestGroup(g)) { testGroups.push(g); return; }
+      (bySubject[g.subject_key] = bySubject[g.subject_key] || []).push(g);
+    });
+
+    var html = '';
+    Object.keys(bySubject).forEach(function(subjectKey) {
+      html += '<details open style="margin-bottom:12px;">' +
+        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;">' +
+        esc(factsSubjectLabel(subjectKey)) + '</summary>' +
+        '<div style="padding-left:8px;">' + bySubject[subjectKey].map(renderFactGroup).join('') + '</div>' +
+        '</details>';
+    });
+    if (testGroups.length) {
+      html += '<details style="margin-bottom:12px;">' +
+        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;color:var(--text-dim);">' +
+        '测试数据（' + testGroups.length + '）</summary>' +
+        '<div style="padding-left:8px;">' + testGroups.map(renderFactGroup).join('') + '</div>' +
+        '</details>';
+    }
+    list.innerHTML = html;
+  } catch (e) {
+    summary.textContent = '读取失败';
+    list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+  }
 }
 
 function setWordMapMessage(message, tone) {

@@ -85,7 +85,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
-from facts_store import FactStore
+from facts_store import FactStore, PREDICATE_MODES
 from entity_edges import EntityEdgeStore, extract_entity_edges_from_bucket
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
@@ -9600,6 +9600,112 @@ async def api_portrait_state_reset(request):
         return JSONResponse(portrait_engine.reset_state())
     except Exception as e:
         logger.warning("Portrait state reset API failed: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/facts-skeleton", methods=["GET"])
+async def api_facts_skeleton(request):
+    """Read the facts/timeline skeleton layer (facts.sqlite) for dashboard display.
+    Default: grouped by (subject_key, predicate_key), each group carries its
+    current value(s) plus full change history and a change_count, so the
+    dashboard can show "一澜的身高 162cm · 变动过2次" and expand to history.
+    Query params: subject_key, predicate_key, at_date (all optional; at_date
+    returns a flat historical snapshot instead of the grouped current view)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    subject_key = str(request.query_params.get("subject_key") or "").strip()
+    predicate_key = str(request.query_params.get("predicate_key") or "").strip()
+    at_date = str(request.query_params.get("at_date") or "").strip()
+    try:
+        predicates = fact_store.list_predicates()
+        predicate_meta = {p["predicate_key"]: p for p in predicates}
+
+        if at_date:
+            facts = fact_store.get_facts_at(at_date, subject_key=subject_key)
+            if predicate_key:
+                facts = [f for f in facts if f.get("predicate_key") == predicate_key]
+            return JSONResponse({"facts": facts, "predicates": predicates})
+
+        current = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+        groups: dict[tuple, dict] = {}
+        for item in current:
+            group_key = (item["subject_key"], item["predicate_key"])
+            group = groups.setdefault(group_key, {
+                "subject_key": item["subject_key"],
+                "predicate_key": item["predicate_key"],
+                "display_name": (predicate_meta.get(item["predicate_key"]) or {}).get("display_name") or "",
+                "current": [],
+            })
+            group["current"].append(item)
+
+        result = []
+        for (subj, pred), group in groups.items():
+            history = fact_store.get_fact_history(subj, pred)
+            group["history"] = history
+            group["change_count"] = len(history)
+            group["last_changed_at"] = max((str(h.get("valid_at") or h.get("created_at") or "") for h in history), default="")
+            result.append(group)
+
+        return JSONResponse({"groups": result, "predicates": predicates})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/facts-skeleton", methods=["POST"])
+async def api_facts_skeleton_create(request):
+    """Manually add one stable fact to the skeleton layer from the Dashboard.
+    Body: subject_key (yi_lan/lin_zhan/relationship), predicate_key, object_text
+    required; valid_at optional (defaults to today). If predicate_key isn't in
+    predicate_registry yet, mode is required (display_name optional) to
+    register it first -- this keeps typos from silently creating orphan
+    predicates that never show up grouped with anything."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    subject_key = str(body.get("subject_key") or "").strip()
+    predicate_key = str(body.get("predicate_key") or "").strip()
+    object_text = str(body.get("object_text") or "").strip()
+    valid_at = str(body.get("valid_at") or "").strip() or datetime.now(timezone.utc).date().isoformat()
+
+    if subject_key not in {"yi_lan", "lin_zhan", "relationship"}:
+        return JSONResponse({"error": "subject_key 必须是 yi_lan / lin_zhan / relationship"}, status_code=400)
+    if not predicate_key:
+        return JSONResponse({"error": "predicate_key 不能为空"}, status_code=400)
+    if not object_text:
+        return JSONResponse({"error": "object_text 不能为空"}, status_code=400)
+
+    try:
+        existing_predicates = {p["predicate_key"] for p in fact_store.list_predicates()}
+        if predicate_key not in existing_predicates:
+            mode = str(body.get("mode") or "").strip()
+            if mode not in PREDICATE_MODES:
+                return JSONResponse(
+                    {"error": "这是个新 predicate，需要指定 mode（exclusive_current/multi_current/historical_event）"},
+                    status_code=400,
+                )
+            display_name = str(body.get("display_name") or "").strip()
+            fact_store.upsert_predicate(predicate_key, mode=mode, display_name=display_name or predicate_key)
+
+        fact_id = fact_store.add_fact(
+            subject_key,
+            predicate_key,
+            object_text,
+            valid_at=valid_at,
+            evidence_type="manual",
+            evidence_id="dashboard",
+        )
+        return JSONResponse({"status": "created", "id": fact_id})
+    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

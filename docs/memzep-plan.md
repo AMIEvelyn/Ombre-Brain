@@ -205,3 +205,14 @@ CREATE TABLE timeline_edges (
 验证：跑了林湛给的下一轮 7 句测试（"我现在多少斤？""我喜欢吃什么？""我们复婚了吗？""我现在很难过，是不是因为之前冲突？""你记得我们上次冲突我为什么难过吗？""骨架里记录过我们有哪些冲突吗？""查一下我的关系需求。"），全部符合预期——前三句正常触发对应事实，第四、五句（情绪谈心 + "记得"单独出现）都不触发，第六、七句（明确带"记录过""有哪些""查一下"）正常触发。`python3 -m py_compile server.py` 通过，`scripts/test_predicate_modes.py` 回归测试仍全部通过。
 
 林湛的评价：这一版可以先定为骨架自动分流逻辑的第一版可用版本。
+
+## 更新：Dashboard 手动加事实功能（同日）
+
+按"已知限制/下一步方向"第4条把这个补上了。之前排查发现：最早计划里第3步"免费迁移旧 profile_fact 桶"这条路走不通——纯 OB 时代压根没留下这层结构化的 subject/predicate/object 元数据，没东西可迁移。所以骨架层的数据只能靠"人工手动加"（这次做的）和"以后小批量付费 API dry-run 从旧记忆桶提取候选、人工确认"（下一步）两条路来填。
+
+实现内容：
+- **后端**：新增 `POST /api/facts-skeleton`，接收 `subject_key`（限定 yi_lan/lin_zhan/relationship）/`predicate_key`/`object_text`/`valid_at`（留空默认当天）。如果 `predicate_key` 不在 `predicate_registry` 里，必须同时传 `mode`（exclusive_current/multi_current/historical_event）才允许创建，防止手滑打错字造出孤立的新 predicate。
+- **前端**：Dashboard"骨架"标签页顶部加了一个小表单——subject 下拉选一澜/林湛/我们的关系；predicate 下拉从 registry 里选（按中文名排序），也可以选"+ 新建 predicate…"，选了会展开新 predicate 的 key/mode/中文名三个输入框；object 内容、生效日期各一个输入框；提交后自动刷新下面的事实列表。
+- 顺带把这个骨架层功能（GET 读接口 + 完整 Dashboard 标签页 UI）从 `my-live-vps` 分支同步补齐进了这次的开发分支——这两个分支之前在这一块有差异（`my-live-vps` 上已经手动加过 `fact_lookup` 工具和骨架 Dashboard 标签页，但从没同步回开发分支），现在写入功能是在补齐后的基础上一起加的，开发分支和实际部署分支在这一块的功能对齐了。
+
+验证：`python3 -m py_compile server.py` 通过；`node --check` 过了 dashboard.html 里提取出的整个 script 内容；用真实 `FactStore` 模拟了三种写入场景（已注册 predicate 直接写、全新 predicate 先注册再写、`exclusive_current` 新值正确软失效旧值），行为符合预期；`scripts/test_predicate_modes.py` 回归测试仍全部通过。同样准备了一份基于 `my-live-vps` 实际代码改的 server.py + dashboard.html，diff 过确认只多了这一块，其余没有改动。
