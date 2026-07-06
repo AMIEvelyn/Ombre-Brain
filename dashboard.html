@@ -4895,8 +4895,13 @@ function renderFactGroup(g) {
       '</div>';
   }).join('');
   var predicateKey = g.predicate_key;
-  var editorId = 'predicate-mode-editor-' + predicateKey;
-  var selectId = 'predicate-mode-select-' + predicateKey;
+  // predicate_key alone isn't unique across groups (e.g. "birthday" exists for
+  // both yi_lan and lin_zhan, sharing one predicate_registry row/mode) -- so
+  // DOM ids must be scoped by subject_key too, or the wrong group's editor
+  // pops open when two subjects share a predicate_key.
+  var groupKey = g.subject_key + '__' + predicateKey;
+  var editorId = 'predicate-mode-editor-' + groupKey;
+  var selectId = 'predicate-mode-select-' + groupKey;
   var modeOptions = ['exclusive_current', 'multi_current', 'historical_event'].map(function(m) {
     return '<option value="' + m + '"' + (m === g.mode ? ' selected' : '') + '>' + m + '</option>';
   }).join('');
@@ -4910,23 +4915,23 @@ function renderFactGroup(g) {
     historyRows +
     '</details>' +
     '<div style="padding-top:4px;">' +
-    '<button type="button" onclick="togglePredicateModeEditor(\'' + predicateKey + '\')" ' +
+    '<button type="button" onclick="togglePredicateModeEditor(\'' + groupKey + '\')" ' +
     'style="font-size:12px;">改类型</button>' +
     '<div id="' + editorId + '" style="display:none;padding:8px 0 8px 16px;">' +
     '<select id="' + selectId + '">' + modeOptions + '</select> ' +
-    '<button type="button" onclick="submitPredicateModeChange(\'' + predicateKey + '\')">保存</button>' +
+    '<button type="button" onclick="submitPredicateModeChange(\'' + groupKey + '\', \'' + predicateKey + '\')">保存</button>' +
     '</div>' +
     '</div>' +
     '</div>';
 }
 
-function togglePredicateModeEditor(predicateKey) {
-  var el = document.getElementById('predicate-mode-editor-' + predicateKey);
+function togglePredicateModeEditor(groupKey) {
+  var el = document.getElementById('predicate-mode-editor-' + groupKey);
   if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
-async function submitPredicateModeChange(predicateKey) {
-  var sel = document.getElementById('predicate-mode-select-' + predicateKey);
+async function submitPredicateModeChange(groupKey, predicateKey) {
+  var sel = document.getElementById('predicate-mode-select-' + groupKey);
   var mode = sel && sel.value;
   if (!mode) return;
   try {
