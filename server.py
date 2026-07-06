@@ -6831,17 +6831,29 @@ def _has_active_facets(facets: dict | None) -> bool:
 
 # 部分 predicate 的常见口语问法跟 display_name 不完全一致，补充同义词
 # 触发词；display_name 本身也会作为触发词参与匹配（见下方函数）。
+# 同义词表是笨办法但故意保持笨——漏查了就是漏了这一条同义词，照着日志
+# 补上就行，不引入"聪明但边界模糊"的判断方式。
 _FACT_QUERY_PREDICATE_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "height": ("身高", "多高"),
-    "weight": ("体重", "多重"),
+    "height": ("身高", "多高", "几厘米", "个子", "个头"),
+    "weight": ("体重", "多重", "多少斤", "几斤", "胖瘦"),
+    "food_preference": ("喜欢吃什么", "爱吃什么", "偏好", "口味", "食物喜好"),
     "current_school_status": ("休学", "在读", "上学状态", "在校状态"),
     "current_health_status": ("现在身体", "现在感冒", "现在咳嗽", "身体状态"),
     "current_plan": ("当前计划", "现在的计划", "最近的计划"),
-    "relationship_status": ("关系状态", "复婚了吗", "结婚了吗", "现在是什么关系"),
+    "relationship_status": ("关系状态", "复婚了吗", "结婚了吗", "现在是什么关系", "我们现在什么关系", "我们是不是在一起"),
     "tool_access_status": ("工具权限", "写入权限", "能不能写入"),
     "budget_status": ("预算状态", "预算够不够"),
     "preferred_name": ("现在怎么称呼", "现在叫什么", "当前称呼"),
+    "relationship_need": ("关系需求", "亲密关系的需求", "关系需要什么"),
 }
+
+# 这几个 predicate 本身就是"关于情绪/关系的资料"，display_name/同义词很容易在
+# 谈心时被顺口说出来（"冲突""情绪需求"）。裸词命中不算数，必须同时带"像在查档案"
+# 的信号词，才会真的触发骨架——避免谈心谈到一半突然被追加一段资料卡。
+_FACT_SKELETON_SENSITIVE_PREDICATES = {"trauma_trigger", "emotional_need", "relationship_need", "conflict"}
+_FACT_SKELETON_ARCHIVE_INTENT_MARKERS = (
+    "记得", "查一下", "查查", "骨架", "稳定事实", "记录过", "记录里", "有哪些", "档案",
+)
 
 _FACT_SUBJECT_HINTS: tuple[tuple[str, str], ...] = (
     ("一澜", "yi_lan"),
@@ -6867,7 +6879,8 @@ def _facts_skeleton_infer_subject(query: str) -> str:
 
 
 def _facts_skeleton_match_predicates(query: str) -> list[str]:
-    """问题里是否提到了某个已登记 predicate；命中才算"像事实问题"，这是唯一的触发门槛。"""
+    """问题里是否提到了某个已登记 predicate；命中才算"像事实问题"，这是唯一的触发门槛。
+    情绪/关系类敏感 predicate 额外要求带"查档案"的信号词，裸词提及不算命中。"""
     q = (query or "").strip()
     if not q:
         return []
@@ -6877,6 +6890,7 @@ def _facts_skeleton_match_predicates(query: str) -> list[str]:
     except Exception as e:
         logger.warning("Facts skeleton predicate lookup failed / 骨架层读取 predicate_registry 失败: %s", e)
         return []
+    has_archive_intent = any(marker in q for marker in _FACT_SKELETON_ARCHIVE_INTENT_MARKERS)
     for row in predicates:
         predicate_key = row.get("predicate_key") or ""
         display_name = (row.get("display_name") or "").strip()
@@ -6886,6 +6900,8 @@ def _facts_skeleton_match_predicates(query: str) -> list[str]:
                 if syn in q:
                     hit = True
                     break
+        if hit and predicate_key in _FACT_SKELETON_SENSITIVE_PREDICATES and not has_archive_intent:
+            hit = False
         if hit:
             matched.append(predicate_key)
     return matched
@@ -6894,7 +6910,11 @@ def _facts_skeleton_match_predicates(query: str) -> list[str]:
 def _format_facts_skeleton_entries(facts: list[dict], at_date: str = "") -> str:
     if not facts:
         return ""
-    header = f"=== 骨架层补充（{'截至 ' + at_date if at_date else '当前有效'}，自动匹配） ==="
+    when = f"截至 {at_date}" if at_date else "当前有效"
+    header = (
+        f"（骨架层自动补充，{when}，自动匹配——这是后台结构化数据，"
+        "回复时请用自然语言转述给对方听，不要把下面的字段原样贴出来）"
+    )
     lines = [header]
     for item in facts:
         invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
@@ -6905,10 +6925,19 @@ def _format_facts_skeleton_entries(facts: list[dict], at_date: str = "") -> str:
     return "\n".join(lines)
 
 
+def _format_facts_skeleton_empty_note(at_date: str = "") -> str:
+    when = f"截至 {at_date}" if at_date else "当前"
+    return f"（骨架层已查，{when}暂无这条稳定事实记录——如实告知对方查不到，不要自己编。）"
+
+
 def _facts_skeleton_supplement(query: str, at_date: str = "") -> str:
-    """query 像"要精确事实"才补充骨架层内容，否则原样返回空字符串、绝不介入。"""
+    """query 像"要精确事实"才补充骨架层内容，否则原样返回空字符串、绝不介入。
+    三种状态都会写日志：not_triggered / triggered_found / triggered_empty，
+    方便以后从日志里发现"这句话本该触发但漏查了"，照着补同义词。"""
+    query_snippet = _clip_text(query or "", 60)
     predicate_keys = _facts_skeleton_match_predicates(query)
     if not predicate_keys:
+        logger.info("[facts-skeleton] state=not_triggered query=%r", query_snippet)
         return ""
     subject_key = _facts_skeleton_infer_subject(query)
     try:
@@ -6923,7 +6952,19 @@ def _facts_skeleton_supplement(query: str, at_date: str = "") -> str:
     except Exception as e:
         logger.warning("Facts skeleton auto-supplement failed / 骨架层自动补充失败: %s", e)
         return ""
-    return _format_facts_skeleton_entries(collected, at_date=at_date)
+
+    if collected:
+        logger.info(
+            "[facts-skeleton] state=triggered_found predicates=%s subject=%s count=%d query=%r",
+            predicate_keys, subject_key or "(all)", len(collected), query_snippet,
+        )
+        return _format_facts_skeleton_entries(collected, at_date=at_date)
+
+    logger.info(
+        "[facts-skeleton] state=triggered_empty predicates=%s subject=%s query=%r",
+        predicate_keys, subject_key or "(all)", query_snippet,
+    )
+    return _format_facts_skeleton_empty_note(at_date=at_date)
 
 
 # =============================================================

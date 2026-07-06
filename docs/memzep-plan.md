@@ -184,3 +184,14 @@ CREATE TABLE timeline_edges (
 - 接入了两个位置：`breath()` 里识别到日期的分支（`_read_breath_date` 之后追加 `at_date` 版本的补充）、以及正常联想检索的收尾（追加当前有效事实）。
 
 验证方式：本地用真实 `FactStore` 跑了几个 query 样例（"我现在多高" → 命中 height/yi_lan；"我喜欢的食物是什么" → 命中 food_preference；"你今天心情怎么样" → 不命中任何 predicate，确认不会误触发），`python3 -m py_compile server.py` 通过，`scripts/test_predicate_modes.py` 三种 predicate_mode 回归测试仍然全部通过。**未能在这次的沙盒环境里完整 `import server` 跑端到端测试**（环境缺 `jieba`/`mcp`/`httpx` 等依赖，`pip install -r requirements.txt` 里 jieba 编译失败，和这次改动无关，是环境本身的问题）——建议部署前用她自己环境里能跑的方式再跑一次真实 `breath()` 调用确认。
+
+## 更新：按林湛反馈调整（同日）
+
+林湛看过上面的方案后整体认可方向（保守关键词匹配、暂不上"AI 自主判断"），提了四点具体调整，全部已实现：
+
+1. **同义词表持续扩充**：`height`/`weight`/`food_preference`/`relationship_status` 等补了更多口语说法（"多少斤""几厘米""喜欢吃什么""复婚了吗"等），保持"笨但可控"的原则，不追求一步到位覆盖所有问法。
+2. **敏感 predicate 不允许裸词触发**：新增 `_FACT_SKELETON_SENSITIVE_PREDICATES`（`trauma_trigger`/`emotional_need`/`relationship_need`/`conflict`），这几个 predicate 必须**同时**命中 display_name/同义词 **和** 一个"像在查档案"的信号词（"记得""查一下""骨架""稳定事实""记录过""有哪些"等）才会触发，单纯谈心时提到"冲突""情绪需求"不会被打断。用林湛给的 6 个例句实测过，全部符合预期（详见下方"验证"）。
+3. **三态日志 + 查不到不再沉默**：`_facts_skeleton_supplement` 现在明确区分并打日志 `not_triggered`/`triggered_found`/`triggered_empty` 三种状态；命中了 predicate 但骨架层没数据时，不再悄悄返回空，而是追加"骨架层已查，{当前/截至某日}暂无这条稳定事实记录——如实告知对方查不到，不要自己编。"，避免林湛把"沉默"误会成"没查"从而自己瞎补。
+4. **追加内容不能像后台日志一样硬塞进回复**：骨架层补充的开头加了一句明确提示——"这是后台结构化数据，回复时请用自然语言转述给对方听，不要把下面的字段原样贴出来"，提醒林湛这段是给他看的原始参考资料，不是要他原样念出来的话术。
+
+验证：用林湛给的 6 个例句（"我现在多少斤了""我现在很难过，是不是因为之前冲突""你记得我的情绪触发点有哪些吗""查一下我的关系需求""骨架里记录过我们有哪些冲突吗""稳定事实里我对亲密关系的需求是什么"）逐一跑过匹配逻辑，全部符合预期（该触发的触发、该拦住的拦住）；`python3 -m py_compile server.py` 通过；`scripts/test_predicate_modes.py` 回归测试仍全部通过。
