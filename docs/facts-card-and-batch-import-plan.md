@@ -82,6 +82,13 @@
 
 一澜画了完整的手绘草图（参照苹果设计语言 + 开源图标，"view bucket"那屏是她自己画的、没有现成参照）。这一节把草图里的交互行为整理成文字规格，方便实现时照着做；具体的像素级视觉（配色、字体粗细等）以草图和后续微调为准，这里记录的是结构和交互逻辑。
 
+**原始手绘草图存档在 `docs/mockups/` 目录**（新会话/新窗口可以直接在仓库里看到，不用一澜重新上传）：
+- `01-create-flow.png`：骨架层主列表 + "+ Create" 新建流程 + Add Photo/Attach Files/Add Bucket 附件菜单
+- `02-detail-card-variants.png`：详情卡三个版本——最简版、最复杂版（照片+长内容自适应）、时间线单条展开版
+- `03-edit-menu-and-edit-page.png`："···"菜单（New Revision/Edit/Add Photo/Attach Files/View Bucket/Invalidate/Delete）+ 编辑页
+- `04-view-bucket-flow.png`：View Bucket 关联记忆桶列表 + 单条展开 + 取消关联
+- `05-new-key-form.png`：新建 predicate/key 的表单（显示名 + predicate_key + 类型）
+
 ### 三级导航
 
 `骨架层` 标签页从"按主体分组的大列表"改成真正的三级钻取：**主体（我们/林湛/一澜）→ 该主体下的类型(key)列表（生日/表达风格/承诺/冲突……）→ 该类型下的事实标题列表（每条显示标题+变动次数+最新变动日期）→ 点进单条事实的详情页**。
