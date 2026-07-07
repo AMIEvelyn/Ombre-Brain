@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -65,10 +66,26 @@ class FactStore:
                 evidence_type TEXT NOT NULL DEFAULT 'bucket',
                 evidence_id TEXT NOT NULL DEFAULT '',
                 evidence_quote TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                attachments TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
+        # Backfill columns for databases created before title/content/attachments
+        # existed -- SQLite has no "ADD COLUMN IF NOT EXISTS", so probe and ignore
+        # the "duplicate column" error on databases that already have them.
+        for column, ddl in (
+            ("title", "ALTER TABLE facts ADD COLUMN title TEXT NOT NULL DEFAULT ''"),
+            ("content", "ALTER TABLE facts ADD COLUMN content TEXT NOT NULL DEFAULT ''"),
+            ("attachments", "ALTER TABLE facts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'"),
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_state ON facts(state_key)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_valid ON facts(valid_at, invalid_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject_key, predicate_key)")
@@ -164,6 +181,9 @@ class FactStore:
         evidence_id: str = "",
         evidence_quote: str = "",
         predicate_mode: str | None = None,
+        title: str = "",
+        content: str = "",
+        attachments: list[dict] | None = None,
     ) -> int:
         subject_key = str(subject_key or "").strip()
         predicate_key = str(predicate_key or "").strip()
@@ -172,6 +192,7 @@ class FactStore:
         mode = predicate_mode if predicate_mode in PREDICATE_MODES else self.get_predicate_mode(predicate_key)
         evidence_type = evidence_type if evidence_type in EVIDENCE_TYPES else "bucket"
         state_key = make_state_key(subject_key, predicate_key)
+        attachments_json = json.dumps(attachments or [], ensure_ascii=False)
 
         conn = self._connect()
         if mode == "exclusive_current" and invalid_at is None:
@@ -184,19 +205,84 @@ class FactStore:
             """
             INSERT INTO facts (
                 subject_key, predicate_key, object_text, state_key, predicate_mode,
-                valid_at, invalid_at, confidence, evidence_type, evidence_id, evidence_quote, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                valid_at, invalid_at, confidence, evidence_type, evidence_id, evidence_quote, created_at,
+                title, content, attachments
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 subject_key, predicate_key, str(object_text or ""), state_key, mode,
                 valid_at, invalid_at, max(0.0, min(1.0, float(confidence))),
                 evidence_type, str(evidence_id or ""), str(evidence_quote or ""), self._now_iso(),
+                str(title or ""), str(content or ""), attachments_json,
             ),
         )
         fact_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return fact_id
+
+    def update_fact(
+        self,
+        fact_id: int,
+        *,
+        object_text: str | None = None,
+        title: str | None = None,
+        content: str | None = None,
+        attachments: list[dict] | None = None,
+    ) -> bool:
+        """Edit a fact in place -- does not touch valid_at/invalid_at and does
+        not create a new timeline point. Only fields explicitly passed (not
+        None) are changed."""
+        updates: dict[str, Any] = {}
+        if object_text is not None:
+            updates["object_text"] = str(object_text)
+        if title is not None:
+            updates["title"] = str(title)
+        if content is not None:
+            updates["content"] = str(content)
+        if attachments is not None:
+            updates["attachments"] = json.dumps(attachments, ensure_ascii=False)
+        if not updates:
+            return False
+        conn = self._connect()
+        set_clause = ", ".join(f"{key} = ?" for key in updates)
+        cursor = conn.execute(
+            f"UPDATE facts SET {set_clause} WHERE id = ?",
+            (*updates.values(), int(fact_id)),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+        conn.close()
+        return updated
+
+    def invalidate_fact(self, fact_id: int, invalid_at: str | None = None) -> bool:
+        """Manually mark a fact as no longer true, with no replacement value
+        (unlike add_fact's automatic supersede-on-new-value for exclusive_current).
+        No-op if the fact is already invalidated."""
+        conn = self._connect()
+        cursor = conn.execute(
+            "UPDATE facts SET invalid_at = ? WHERE id = ? AND invalid_at IS NULL",
+            (invalid_at or self._now_iso(), int(fact_id)),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+        conn.close()
+        return updated
+
+    @staticmethod
+    def _row_to_fact(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        try:
+            item["attachments"] = json.loads(item.get("attachments") or "[]")
+        except (TypeError, ValueError):
+            item["attachments"] = []
+        return item
+
+    def get_fact(self, fact_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM facts WHERE id = ?", (int(fact_id),)).fetchone()
+        conn.close()
+        return self._row_to_fact(row) if row else None
 
     def get_current_facts(self, subject_key: str = "", predicate_key: str = "") -> list[dict]:
         clauses = ["invalid_at IS NULL"]
@@ -213,7 +299,7 @@ class FactStore:
             params,
         ).fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return [self._row_to_fact(row) for row in rows]
 
     def get_facts_at(self, at_date: str, subject_key: str = "") -> list[dict]:
         clauses = ["(valid_at IS NULL OR valid_at <= ?)", "(invalid_at IS NULL OR invalid_at > ?)"]
@@ -227,7 +313,7 @@ class FactStore:
             params,
         ).fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return [self._row_to_fact(row) for row in rows]
 
     def get_fact_history(self, subject_key: str, predicate_key: str) -> list[dict]:
         state_key = make_state_key(subject_key, predicate_key)
@@ -237,7 +323,7 @@ class FactStore:
             (state_key,),
         ).fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return [self._row_to_fact(row) for row in rows]
 
     def delete_fact(self, fact_id: int) -> bool:
         conn = self._connect()

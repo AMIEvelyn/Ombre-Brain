@@ -9654,14 +9654,36 @@ async def api_facts_skeleton(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _parse_attachments_field(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        cleaned.append({
+            "type": str(item.get("type") or "link").strip() or "link",
+            "url": url,
+            "label": str(item.get("label") or "").strip(),
+            "source_type": str(item.get("source_type") or "").strip(),
+        })
+    return cleaned
+
+
 @mcp.custom_route("/api/facts-skeleton", methods=["POST"])
 async def api_facts_skeleton_create(request):
     """Manually add one stable fact to the skeleton layer from the Dashboard.
-    Body: subject_key (yi_lan/lin_zhan/relationship), predicate_key, object_text
-    required; valid_at optional (defaults to today). If predicate_key isn't in
-    predicate_registry yet, mode is required (display_name optional) to
-    register it first -- this keeps typos from silently creating orphan
-    predicates that never show up grouped with anything."""
+    Body: subject_key (yi_lan/lin_zhan/relationship), predicate_key, title
+    required; content/attachments/valid_at optional (valid_at defaults to
+    today). title also mirrors into object_text so existing consumers
+    (breath()'s auto-supplement, fact_lookup on deployments that have it)
+    keep working unchanged. If predicate_key isn't in predicate_registry yet,
+    mode is required (display_name optional) to register it first -- this
+    keeps typos from silently creating orphan predicates that never show up
+    grouped with anything."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
@@ -9675,15 +9697,17 @@ async def api_facts_skeleton_create(request):
 
     subject_key = str(body.get("subject_key") or "").strip()
     predicate_key = str(body.get("predicate_key") or "").strip()
-    object_text = str(body.get("object_text") or "").strip()
+    title = str(body.get("title") or "").strip()
+    content = str(body.get("content") or "").strip()
+    attachments = _parse_attachments_field(body.get("attachments"))
     valid_at = str(body.get("valid_at") or "").strip() or datetime.now(timezone.utc).date().isoformat()
 
     if subject_key not in {"yi_lan", "lin_zhan", "relationship"}:
         return JSONResponse({"error": "subject_key 必须是 yi_lan / lin_zhan / relationship"}, status_code=400)
     if not predicate_key:
         return JSONResponse({"error": "predicate_key 不能为空"}, status_code=400)
-    if not object_text:
-        return JSONResponse({"error": "object_text 不能为空"}, status_code=400)
+    if not title:
+        return JSONResponse({"error": "标题不能为空"}, status_code=400)
 
     try:
         existing_predicates = {p["predicate_key"] for p in fact_store.list_predicates()}
@@ -9700,14 +9724,94 @@ async def api_facts_skeleton_create(request):
         fact_id = fact_store.add_fact(
             subject_key,
             predicate_key,
-            object_text,
+            title,
             valid_at=valid_at,
             evidence_type="manual",
             evidence_id="dashboard",
+            title=title,
+            content=content,
+            attachments=attachments,
         )
         return JSONResponse({"status": "created", "id": fact_id})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}", methods=["PATCH"])
+async def api_facts_skeleton_update_fact(request):
+    """Edit action: change a fact's title/content/attachments in place --
+    does not touch valid_at/invalid_at and does not create a new timeline
+    point (that's what "New Revision" via POST /api/facts-skeleton is for).
+    Only fields present in the body are changed."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    kwargs: dict = {}
+    if "title" in body:
+        kwargs["title"] = str(body.get("title") or "").strip()
+        kwargs["object_text"] = kwargs["title"]  # keep mirrored for old consumers
+    if "content" in body:
+        kwargs["content"] = str(body.get("content") or "").strip()
+    if "attachments" in body:
+        kwargs["attachments"] = _parse_attachments_field(body.get("attachments"))
+
+    try:
+        updated = fact_store.update_fact(fact_id, **kwargs)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not updated:
+        return JSONResponse({"error": "nothing to update"}, status_code=400)
+    return JSONResponse({"status": "updated", "fact": fact_store.get_fact(fact_id)})
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/invalidate", methods=["POST"])
+async def api_facts_skeleton_invalidate_fact(request):
+    """Invalidate action: manually mark a fact as no longer true, with no
+    replacement value. Different from the automatic supersede-on-new-value
+    behavior for exclusive_current predicates in add_fact()."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    invalid_at = str(body.get("invalid_at") or "").strip() or None
+    try:
+        ok = fact_store.invalidate_fact(fact_id, invalid_at=invalid_at)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not ok:
+        return JSONResponse({"error": "already invalidated"}, status_code=400)
+    return JSONResponse({"status": "invalidated", "fact": fact_store.get_fact(fact_id)})
 
 
 @mcp.custom_route("/api/facts-skeleton/facts/{fact_id}", methods=["DELETE"])
