@@ -2211,6 +2211,44 @@
   }
   .facts-nav-row:hover { border-color: var(--accent); }
   .facts-nav-chevron { color: var(--text-dim); }
+  .facts-browse-columns {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    overflow-x: auto;
+  }
+  .facts-browse-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .facts-browse-col-subjects { flex: 0 0 20%; }
+  .facts-browse-col-keys {
+    flex: 0 0 26%;
+    border-left: 1px solid var(--border);
+    padding-left: 8px;
+  }
+  .facts-browse-col-titles {
+    flex: 1 1 auto;
+    border-left: 1px solid var(--border);
+    padding-left: 8px;
+    gap: 8px;
+  }
+  .facts-browse-item {
+    padding: 10px 6px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text);
+    cursor: pointer;
+    word-break: break-word;
+  }
+  .facts-browse-item:hover { background: var(--surface); }
+  .facts-browse-item.active {
+    background: var(--accent);
+    color: #F0EDE4;
+  }
   .facts-nav-back {
     display: inline-block;
     color: var(--text-dim);
@@ -2234,15 +2272,41 @@
     border-radius: 16px;
     padding: 20px;
     box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
+    width: min(520px, 92vw);
+    max-height: 86vh;
+    overflow-y: auto;
   }
   .facts-detail-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
     position: relative;
   }
-  .facts-detail-breadcrumb { color: var(--text-dim); font-size: 12px; }
+  .facts-detail-header-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .facts-detail-breadcrumb {
+    color: var(--text-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .facts-detail-close-btn {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    flex: 0 0 auto;
+  }
+  .facts-detail-close-btn:hover { background: var(--surface-solid); }
   .facts-detail-menu-btn {
     border: none;
     background: none;
@@ -2251,6 +2315,7 @@
     font-size: 18px;
     padding: 6px 10px;
     border-radius: 8px;
+    flex: 0 0 auto;
   }
   .facts-detail-menu-btn:hover { background: var(--surface-solid); }
   .facts-detail-menu {
@@ -2322,7 +2387,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 50;
+    z-index: 60;
+  }
+  .facts-detail-overlay {
+    z-index: 55;
+    padding: 16px;
+    box-sizing: border-box;
   }
   .facts-modal-panel {
     background: rgba(247, 242, 232, 0.72);
@@ -3370,7 +3440,7 @@
     <div class="profile-proposal-form">
       <span></span>
       <span></span>
-      <button type="button" onclick="submitFactsAdd()">添加事实</button>
+      <button type="button" onclick="submitFactsAdd()">Add</button>
     </div>
     <div class="profile-proposal-message" id="facts-add-message"></div>
   </div>
@@ -3409,10 +3479,14 @@
     <div class="profile-proposal-form">
       <span></span>
       <span></span>
-      <button type="button" onclick="submitFactsEdit()">Save 保存</button>
+      <button type="button" onclick="submitFactsEdit()">Save</button>
     </div>
     <div class="profile-proposal-message" id="facts-edit-message"></div>
   </div>
+</div>
+
+<div id="facts-detail-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) closeFactsDetailOverlay()">
+  <div id="facts-detail-modal-body"></div>
 </div>
 
 <div class="content" id="word-map-view" style="display:none">
@@ -5284,7 +5358,8 @@ var FACTS_SUBJECT_LABELS = {
 
 var factsSkeletonPredicates = [];
 var factsSkeletonGroups = [];
-var factsNavState = { level: 'subjects', subjectKey: '', predicateKey: '', factId: null };
+var factsNavState = { subjectKey: '', predicateKey: '' };
+var factsDetailOverlayState = null;
 var factsDetailTimelineExpanded = {};
 var factsEditingFactId = null;
 var factsPendingAttachments = { add: [], edit: [] };
@@ -5323,40 +5398,11 @@ function factsHistoryForTitle(group, title) {
   }).slice().sort(function(a, b) { return String(b.valid_at || '').localeCompare(String(a.valid_at || '')); });
 }
 
-// --- three-level navigation: subjects -> keys -> fact titles -> detail ---
+// --- browse navigation: subjects/keys/titles as three simultaneous columns, no back button.
+// Clicking a title opens the detail card as a floating overlay on top -- it's not a fourth
+// column/page, closing it just returns to whatever the three columns were already showing.
 
-function factsNavGoSubjects() {
-  factsNavState = { level: 'subjects', subjectKey: '', predicateKey: '', factId: null };
-  renderFactsNav();
-}
-function factsNavGoKeys(subjectKey) {
-  factsNavState = { level: 'keys', subjectKey: subjectKey, predicateKey: '', factId: null };
-  renderFactsNav();
-}
-function factsNavGoTitles(subjectKey, predicateKey) {
-  factsNavState = { level: 'titles', subjectKey: subjectKey, predicateKey: predicateKey, factId: null };
-  renderFactsNav();
-}
-function factsNavGoDetail(subjectKey, predicateKey, factId) {
-  factsNavState = { level: 'detail', subjectKey: subjectKey, predicateKey: predicateKey, factId: factId };
-  renderFactsNav();
-}
-
-function renderFactsNav() {
-  var container = document.getElementById('facts-nav');
-  if (!container) return;
-  if (factsNavState.level === 'keys') {
-    container.innerHTML = renderFactsKeysLevel(factsNavState.subjectKey);
-  } else if (factsNavState.level === 'titles') {
-    container.innerHTML = renderFactsTitlesLevel(factsNavState.subjectKey, factsNavState.predicateKey);
-  } else if (factsNavState.level === 'detail') {
-    container.innerHTML = renderFactsDetailLevel(factsNavState.subjectKey, factsNavState.predicateKey, factsNavState.factId);
-  } else {
-    container.innerHTML = renderFactsSubjectsLevel();
-  }
-}
-
-function renderFactsSubjectsLevel() {
+function factsOrderedSubjects() {
   var seen = {};
   var order = [];
   factsSkeletonGroups.forEach(function(g) {
@@ -5366,40 +5412,117 @@ function renderFactsSubjectsLevel() {
   var preferred = ['yi_lan', 'lin_zhan', 'relationship'];
   var subjects = preferred.filter(function(k) { return seen[k]; });
   order.forEach(function(k) { if (subjects.indexOf(k) === -1) subjects.push(k); });
+  return subjects;
+}
+
+function factsFirstPredicateForSubject(subjectKey) {
+  var group = factsSkeletonGroups.find(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
+  return group ? group.predicate_key : '';
+}
+
+// Called before every browse render so a stale/missing selection (first load, or the
+// selected subject/key having no data anymore) always resolves to something valid instead
+// of rendering an empty column 2/3 for no reason.
+function factsEnsureBrowseSelection() {
+  var subjects = factsOrderedSubjects();
+  if (!subjects.length) {
+    factsNavState.subjectKey = '';
+    factsNavState.predicateKey = '';
+    return;
+  }
+  if (subjects.indexOf(factsNavState.subjectKey) === -1) {
+    factsNavState.subjectKey = subjects[0];
+    factsNavState.predicateKey = '';
+  }
+  var stillValid = factsSkeletonGroups.some(function(g) {
+    return g.subject_key === factsNavState.subjectKey && g.predicate_key === factsNavState.predicateKey && !factsIsTestGroup(g);
+  });
+  if (!stillValid) {
+    factsNavState.predicateKey = factsFirstPredicateForSubject(factsNavState.subjectKey);
+  }
+}
+
+function factsNavSelectSubject(subjectKey) {
+  factsNavState = { subjectKey: subjectKey, predicateKey: factsFirstPredicateForSubject(subjectKey) };
+  renderFactsNav();
+}
+
+function factsNavSelectKey(subjectKey, predicateKey) {
+  factsNavState = { subjectKey: subjectKey, predicateKey: predicateKey };
+  renderFactsNav();
+}
+
+function factsNavGoDetail(subjectKey, predicateKey, factId) {
+  factsDetailOverlayState = { subjectKey: subjectKey, predicateKey: predicateKey, factId: factId };
+  renderFactsDetailOverlay();
+}
+
+function closeFactsDetailOverlay() {
+  factsDetailOverlayState = null;
+  var overlay = document.getElementById('facts-detail-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function renderFactsDetailOverlay() {
+  var overlay = document.getElementById('facts-detail-overlay');
+  var body = document.getElementById('facts-detail-modal-body');
+  if (!overlay || !body) return;
+  if (!factsDetailOverlayState) { overlay.style.display = 'none'; return; }
+  var fact = factsFindFact(factsDetailOverlayState.subjectKey, factsDetailOverlayState.predicateKey, factsDetailOverlayState.factId);
+  if (!fact) { closeFactsDetailOverlay(); return; }
+  body.innerHTML = renderFactsDetailCard(factsDetailOverlayState.subjectKey, factsDetailOverlayState.predicateKey, factsDetailOverlayState.factId);
+  overlay.style.display = 'flex';
+}
+
+function renderFactsNav() {
+  var container = document.getElementById('facts-nav');
+  if (!container) return;
+  factsEnsureBrowseSelection();
+  container.innerHTML = renderFactsBrowseLevel();
+}
+
+function renderFactsBrowseLevel() {
+  var subjects = factsOrderedSubjects();
   if (!subjects.length) return '<div class="loading">还没有稳定事实，点右上角 + Create 加一条试试。</div>';
-  return subjects.map(function(s) {
-    return '<div class="facts-nav-row" onclick="factsNavGoKeys(\'' + s + '\')">' +
-      '<b>' + esc(factsSubjectLabel(s)) + '</b><span class="facts-nav-chevron">›</span></div>';
-  }).join('');
-}
 
-function renderFactsKeysLevel(subjectKey) {
-  var groups = factsSkeletonGroups.filter(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
-  var header = '<div class="facts-nav-back" onclick="factsNavGoSubjects()">‹ 返回</div>' +
-    '<div class="facts-nav-title">' + esc(factsSubjectLabel(subjectKey)) + '</div>';
-  if (!groups.length) return header + '<div class="loading">这个主体下还没有事实。</div>';
-  return header + groups.map(function(g) {
-    return '<div class="facts-nav-row" onclick="factsNavGoTitles(\'' + subjectKey + '\', \'' + g.predicate_key + '\')">' +
-      '<b>' + esc(g.display_name || g.predicate_key) + '</b><span class="facts-nav-chevron">›</span></div>';
-  }).join('');
-}
+  var subjectKey = factsNavState.subjectKey;
+  var predicateKey = factsNavState.predicateKey;
 
-function renderFactsTitlesLevel(subjectKey, predicateKey) {
+  var col1 = subjects.map(function(s) {
+    return '<div class="facts-browse-item' + (s === subjectKey ? ' active' : '') + '" onclick="factsNavSelectSubject(\'' + s + '\')">' +
+      esc(factsSubjectLabel(s)) + '</div>';
+  }).join('');
+
+  var keyGroups = factsSkeletonGroups.filter(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
+  var col2 = keyGroups.length
+    ? keyGroups.map(function(g) {
+        return '<div class="facts-browse-item' + (g.predicate_key === predicateKey ? ' active' : '') + '" onclick="factsNavSelectKey(\'' + subjectKey + '\', \'' + g.predicate_key + '\')">' +
+          esc(g.display_name || g.predicate_key) + '</div>';
+      }).join('')
+    : '<div class="loading">还没有事实。</div>';
+
   var group = factsGroupFor(subjectKey, predicateKey);
-  var header = '<div class="facts-nav-back" onclick="factsNavGoKeys(\'' + subjectKey + '\')">‹ 返回</div>' +
-    '<div class="facts-nav-title">' + esc(factsSubjectLabel(subjectKey)) + ' · ' +
-    esc(group ? (group.display_name || group.predicate_key) : predicateKey) + '</div>';
-  if (!group || !(group.current || []).length) return header + '<div class="loading">还没有事实。</div>';
-  return header + group.current.map(function(c) {
-    var title = c.title || c.object_text || '';
-    var ownHistory = factsHistoryForTitle(group, title);
-    var lastChanged = ownHistory.length ? ownHistory[0].valid_at || '未知' : (c.valid_at || '未知');
-    return '<div class="facts-nav-row" onclick="factsNavGoDetail(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + c.id + ')">' +
-      '<div><b>' + esc(title) + '</b>' +
-      '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">变动过 ' + ownHistory.length +
-      ' 次，最新变动于 ' + esc(lastChanged) + '</div></div>' +
-      '<span class="facts-nav-chevron">›</span></div>';
-  }).join('');
+  var col3;
+  if (!group || !(group.current || []).length) {
+    col3 = '<div class="loading">还没有事实。</div>';
+  } else {
+    col3 = group.current.map(function(c) {
+      var title = c.title || c.object_text || '';
+      var ownHistory = factsHistoryForTitle(group, title);
+      var lastChanged = ownHistory.length ? ownHistory[0].valid_at || '未知' : (c.valid_at || '未知');
+      return '<div class="facts-nav-row" onclick="factsNavGoDetail(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + c.id + ')">' +
+        '<div><b>' + esc(title) + '</b>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">变动过 ' + ownHistory.length +
+        ' 次，最新变动于 ' + esc(lastChanged) + '</div></div>' +
+        '<span class="facts-nav-chevron">›</span></div>';
+    }).join('');
+  }
+
+  return '<div class="facts-browse-columns">' +
+    '<div class="facts-browse-col facts-browse-col-subjects">' + col1 + '</div>' +
+    '<div class="facts-browse-col facts-browse-col-keys">' + col2 + '</div>' +
+    '<div class="facts-browse-col facts-browse-col-titles">' + col3 + '</div>' +
+    '</div>';
 }
 
 function toggleFactsDetailMenu(factId) {
@@ -5411,7 +5534,7 @@ function toggleFactsDetailMenu(factId) {
 
 function toggleFactsTimelineExpand(factId) {
   factsDetailTimelineExpanded[factId] = !factsDetailTimelineExpanded[factId];
-  renderFactsNav();
+  renderFactsDetailOverlay();
 }
 
 function toggleFactsTimelineEntry(historyId) {
@@ -5420,11 +5543,10 @@ function toggleFactsTimelineEntry(historyId) {
   el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
-function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
+function renderFactsDetailCard(subjectKey, predicateKey, factId) {
   var group = factsGroupFor(subjectKey, predicateKey);
   var fact = factsFindFact(subjectKey, predicateKey, factId);
-  var backHtml = '<div class="facts-nav-back" onclick="factsNavGoTitles(\'' + subjectKey + '\', \'' + predicateKey + '\')">‹ 返回</div>';
-  if (!group || !fact) return backHtml + '<div class="loading">找不到这条事实（可能刚被删除）。</div>';
+  if (!group || !fact) return '<div class="loading">找不到这条事实（可能刚被删除）。</div>';
 
   var title = fact.title || fact.object_text || '';
   var relatedHistory = factsHistoryForTitle(group, title);
@@ -5446,10 +5568,12 @@ function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
       (expanded ? '收起' : '查看完整时间线（共 ' + relatedHistory.length + ' 条）') + '</div>'
     : '';
 
-  return backHtml +
-    '<div class="facts-detail-card">' +
+  return '<div class="facts-detail-card">' +
     '<div class="facts-detail-header">' +
+    '<div class="facts-detail-header-left">' +
+    '<button type="button" class="facts-detail-close-btn" onclick="closeFactsDetailOverlay()">✕</button>' +
     '<div class="facts-detail-breadcrumb">' + esc(factsSubjectLabel(subjectKey)) + ' · ' + esc(group.display_name || predicateKey) + '</div>' +
+    '</div>' +
     '<button type="button" class="facts-detail-menu-btn" onclick="toggleFactsDetailMenu(' + factId + ')">···</button>' +
     '<div id="facts-detail-menu-' + factId + '" class="facts-detail-menu" style="display:none">' +
     '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsRevisionModal(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + factId + ')">⊕ New Revision</div>' +
@@ -5525,10 +5649,10 @@ async function deleteFactsSkeletonFact(factId) {
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
     if (!res.ok) throw new Error(data.error || '删除失败');
-    // Deleted from inside the detail page -- step back one level instead of
-    // trying to re-render a detail page for a fact that no longer exists.
-    if (factsNavState.level === 'detail' && factsNavState.factId === factId) {
-      factsNavGoTitles(factsNavState.subjectKey, factsNavState.predicateKey);
+    // Deleted from inside the detail overlay -- close it instead of trying to
+    // re-render a card for a fact that no longer exists.
+    if (factsDetailOverlayState && factsDetailOverlayState.factId === factId) {
+      closeFactsDetailOverlay();
     }
     await loadFactsSkeleton();
   } catch (e) {
@@ -5694,7 +5818,7 @@ function renderFactsFilesBlock(attachments) {
 
 function setFactsDetailPhotoIndex(factId, idx) {
   factsDetailPhotoIndex[factId] = idx;
-  renderFactsNav();
+  renderFactsDetailOverlay();
 }
 
 function onFactsPhotoTouchStart(event, factId) {
@@ -5761,7 +5885,7 @@ function renderFactsTagsLine(tags) {
 
 function toggleFactsContentExpand(factId) {
   factsDetailContentExpanded[factId] = !factsDetailContentExpanded[factId];
-  renderFactsNav();
+  renderFactsDetailOverlay();
 }
 
 function renderFactsContentBlock(factId, content) {
@@ -5835,7 +5959,8 @@ function closeFactsCreateModal() {
 }
 
 function openFactsEditModal(factId) {
-  var state = factsNavState;
+  var state = factsDetailOverlayState;
+  if (!state) return;
   var fact = factsFindFact(state.subjectKey, state.predicateKey, factId);
   if (!fact) return;
   factsEditingFactId = factId;
@@ -5937,11 +6062,12 @@ async function submitFactsAdd() {
     if (!res.ok) throw new Error(data.error || '写入失败');
     var landingPredicate = payload.predicate_key;
     closeFactsCreateModal();
+    closeFactsDetailOverlay();
     await loadFactsSkeleton();
-    // Landing on the titles list where the new entry now shows up is the
+    // Landing on the titles column where the new entry now shows up is the
     // confirmation -- a success message here would flash invisibly since
     // the modal that held it just closed.
-    factsNavGoTitles(subjectKey, landingPredicate);
+    factsNavSelectKey(subjectKey, landingPredicate);
   } catch (e) {
     setFactsAddMessage('写入失败: ' + e.message, 'error');
   }
@@ -5964,6 +6090,7 @@ async function loadFactsSkeleton() {
     var realGroupCount = factsSkeletonGroups.filter(function(g) { return !factsIsTestGroup(g); }).length;
     summary.textContent = realGroupCount + ' 类事实';
     renderFactsNav();
+    renderFactsDetailOverlay();
   } catch (e) {
     summary.textContent = '读取失败';
     nav.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
