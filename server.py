@@ -8663,6 +8663,52 @@ async def profile_fact(
     return f"profile_fact→{bucket_id} evidence→{evidence_bucket_id}{moment_note}{edge_note}"
 
 
+# =============================================================
+# Tool 3.6: fact_lookup — query the facts/timeline skeleton layer
+# 工具 3.6：fact_lookup — 查询骨架层（稳定事实/时间线），不受遗忘曲线影响
+# =============================================================
+@mcp.tool()
+async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "") -> str:
+    """只读查询骨架层稳定事实（facts.sqlite），精确检索，不受遗忘曲线影响，不会随时间沉底。
+    不传 at_date：返回当前仍然有效的事实（已被新事实软失效的旧记录不显示）。
+    传 at_date="YYYY-MM-DD"：返回该日期当时为真的历史状态。
+    subject_key 建议用 yi_lan / lin_zhan / relationship；留空则查全部主体。
+    这个工具只回答"事实类"问题（现在多高、现在住哪、某天状态如何）；
+    情绪/关系类问题（为什么难过、怎么看这件事）不要用这个，继续用 breath。"""
+    subject_key = str(subject_key or "").strip()
+    predicate_key = str(predicate_key or "").strip()
+    at_date = str(at_date or "").strip()
+
+    try:
+        if at_date:
+            facts = fact_store.get_facts_at(at_date, subject_key=subject_key)
+            if predicate_key:
+                facts = [f for f in facts if f.get("predicate_key") == predicate_key]
+        else:
+            facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+    except Exception as e:
+        return f"查询骨架层失败: {e}"
+
+    if not facts:
+        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）"
+
+    header = f"=== 骨架层事实（{'截至 ' + at_date if at_date else '当前有效'}） ==="
+    lines = [header]
+    for item in facts:
+        invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
+        title = str(item.get("title") or item.get("object_text") or "")
+        content = str(item.get("content") or "").strip()
+        content_note = f"\n  内容：{content}" if content else ""
+        attachments = item.get("attachments") or []
+        attachment_note = f"\n  （附了 {len(attachments)} 个图片/文件，暂时只能提示存在，无法直接看到内容）" if attachments else ""
+        lines.append(
+            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {title}"
+            f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
+            f"{content_note}{attachment_note}"
+        )
+    return "\n".join(lines)
+
+
 def _profile_fact_body(
     *,
     fact: str,
@@ -9671,6 +9717,105 @@ def _parse_attachments_field(raw) -> list[dict]:
             "source_type": str(item.get("source_type") or "").strip(),
         })
     return cleaned
+
+
+# =============================================================
+# Facts-card attachment uploads (photos / files)
+# 资料卡片附件上传（图片/文件）
+# =============================================================
+FACTS_ATTACHMENTS_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+FACTS_ATTACHMENTS_MAX_FILE_BYTES = 20 * 1024 * 1024
+FACTS_ATTACHMENTS_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+FACTS_ATTACHMENTS_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
+
+
+def _facts_attachments_dir() -> str:
+    path = os.path.join(config["buckets_dir"], "attachments")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+@mcp.custom_route("/api/facts-skeleton/attachments/upload", methods=["POST"])
+async def api_facts_skeleton_upload_attachment(request):
+    """Upload one image/file attachment for a facts-card. Returns an
+    attachment object shaped for _parse_attachments_field (type/url/label/
+    source_type) that the frontend appends to its pending attachments list
+    and sends along with the create/edit request -- this endpoint only
+    stores the file, it doesn't touch facts.sqlite itself.
+
+    Stored under a random filename (not the original name), so the original
+    is kept only as a display label and never used to build a filesystem
+    path -- avoids path-traversal and filename-collision issues."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        return JSONResponse({"error": "expected multipart/form-data"}, status_code=400)
+
+    try:
+        form = await request.form()
+        file_field = form.get("file")
+        if not file_field:
+            return JSONResponse({"error": "No file field"}, status_code=400)
+        original_name = str(getattr(file_field, "filename", "") or "upload")
+        raw_bytes = await file_field.read()
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to read upload: {e}"}, status_code=400)
+
+    if not raw_bytes:
+        return JSONResponse({"error": "空文件"}, status_code=400)
+
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext in FACTS_ATTACHMENTS_IMAGE_EXTENSIONS:
+        kind = "image"
+        max_bytes = FACTS_ATTACHMENTS_MAX_IMAGE_BYTES
+    elif ext in FACTS_ATTACHMENTS_FILE_EXTENSIONS:
+        kind = "file"
+        max_bytes = FACTS_ATTACHMENTS_MAX_FILE_BYTES
+    else:
+        return JSONResponse({"error": f"不支持的文件类型: {ext or '(无扩展名)'}"}, status_code=400)
+
+    if len(raw_bytes) > max_bytes:
+        return JSONResponse(
+            {"error": f"文件太大，超过 {max_bytes // (1024 * 1024)}MB 限制"},
+            status_code=400,
+        )
+
+    stored_name = f"{secrets.token_hex(16)}{ext}"
+    dest_path = os.path.join(_facts_attachments_dir(), stored_name)
+    try:
+        with open(dest_path, "wb") as f:
+            f.write(raw_bytes)
+    except Exception as e:
+        return JSONResponse({"error": f"保存文件失败: {e}"}, status_code=500)
+
+    return JSONResponse({
+        "type": kind,
+        "url": f"/api/facts-skeleton/attachments/{stored_name}",
+        "label": original_name,
+        "source_type": "upload",
+    })
+
+
+@mcp.custom_route("/api/facts-skeleton/attachments/{filename}", methods=["GET"])
+async def api_facts_skeleton_serve_attachment(request):
+    """Serve back an uploaded attachment. Dashboard-auth gated like the rest
+    of the facts-skeleton API -- browsers send the session cookie
+    automatically on <img>/<a> requests, so no separate token is needed
+    client-side. Mirrors the path-traversal guard used by /dashboard-assets."""
+    from starlette.responses import FileResponse, PlainTextResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    filename = str(request.path_params.get("filename") or "").strip().replace("\\", "/")
+    base_dir = os.path.abspath(_facts_attachments_dir())
+    target = os.path.abspath(os.path.join(base_dir, filename))
+    if not target.startswith(base_dir + os.sep) or not os.path.isfile(target):
+        return PlainTextResponse("attachment not found", status_code=404)
+    return FileResponse(target)
 
 
 @mcp.custom_route("/api/facts-skeleton", methods=["POST"])

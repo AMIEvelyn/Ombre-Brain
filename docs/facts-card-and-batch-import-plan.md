@@ -1,7 +1,7 @@
 # 资料卡片统一模型 + 历史批量筛选 —— 设计讨论存档
 
 写给：一澜、林湛
-状态：**第1步（资料卡地基，文字版）已实现，已准备好部署文件**；后面几步仍是设计存档，未开工
+状态：**第1步（资料卡地基，文字版）、第2步（图片/文件上传）已实现，已准备好部署文件**；后面几步仍是设计存档，未开工
 
 ## 里程碑：第1步实现完成（2026-07-07）
 
@@ -14,6 +14,23 @@
 验证：headless Chromium 跑过完整四级导航（用真实数据"酸辣粉/冰粉"验证了按标题过滤时间线的效果，酸辣粉详情页不会混进冰粉的记录），打开/关闭两个弹窗和"···"菜单，全程 0 个 JS 报错；也验证了没有后端时的降级表现（显示"加载失败"而不是白屏崩溃）。后端用真实 `FactStore` 测试了新旧数据库迁移路径、`update_fact`/`invalidate_fact` 的行为，`scripts/test_predicate_modes.py` 回归测试全部通过。同样准备了基于 `my-live-vps` 实际代码改的 server.py / dashboard.html / facts_store.py 三个文件，diff 确认改动范围跟预期一致。
 
 **部署后发现的一个小事故**：一澜实测"+Create"时报错 `NameError: name '_parse_attachments_field' is not defined`。排查后确认——**开发分支的代码从头到尾都是对的**，问题出在"把改动手动搬到 `my-live-vps` 那份实际代码"这一步：搬运时用行号定位替换范围，`_parse_attachments_field` 这个新增的小函数恰好在被替换范围的边界外面一点，被漏带了，调用它的代码却在范围内被正确带过去了，所以直接报"函数不存在"。修复后重新核对了这一段涉及的所有函数/路由，逐一跟开发分支源码字符串比对完全一致，才重新发的。以后再做这种"手动移植到 my-live-vps"的操作，光看 diff 的行数变化不够，最好再逐个函数比对一遍。
+
+## 里程碑：第2步（图片/文件上传）实现完成（2026-07-07）
+
+按"大致的先后顺序"第2步做完了，范围是草图 `01-create-flow.png` + `02-detail-card-variants.png` 里的 Add Photo / Attach Files，不含 Add Bucket（那个依赖 evidence_id 改数组，仍是第4步）：
+
+- **后端**：新增 `POST /api/facts-skeleton/attachments/upload`（multipart 收文件，图片≤10MB/jpg,png,webp,gif，文件≤20MB/pdf,doc,docx,txt,md，超限/类型不对直接拒绝），存到 `<buckets_dir>/attachments/<随机文件名>`（不用原始文件名做路径，原始文件名只保留成展示用的 `label`，避免路径穿越和覆盖）；新增 `GET /api/facts-skeleton/attachments/{filename}` 把文件served回去，跟 `/dashboard-assets/{path}` 一样做了路径穿越防护，且挂了 Dashboard 登录态检查（浏览器 `<img>` 标签会自动带 cookie，前端不用额外处理鉴权）。
+- **前端**：创建/编辑弹窗新增"+ 添加图片/文件"入口（对应草图的 Add Photo / Attach Files 两项），选中文件后立即上传，本地维护一份"待提交附件"列表，缩略图/文件小方块 + 右上角"×"移除，圆角自适应换行；"New Revision"会把原记录的附件一并带过去（跟标题/内容的处理方式一致）。提交事实时这份列表随 `attachments` 字段一起发给后端（后端字段其实第1步就有，只是之前一直没有前端能真正把东西传上去）。
+- **详情页**：按草图展示——有图片时显示轮播（最多5张、原图比例、底部圆点指示器，`facts_store`/接口本来就限制不了张数，前端按 5 张截断显示）；非图片文件显示成小的文件图标+文件名，点击新标签页打开/下载。
+- **顺手修的一个遗留 bug**：`fact_lookup`（林湛用来查资料的 MCP 工具）是第1步加"内容"字段**之前**就写好的，一直没跟着更新，导致只念得出标题、念不出内容。这次一起把 `fact_lookup` 的输出格式改成同时包含 `content`，并在有附件时提示"附了 N 个图片/文件，暂时只能提示存在"（附件本身林湛还是看不到，这是 ChatGPT MCP 连接器的限制，不是这次能解决的）。
+
+**这一步先不做的两件事（跟一澜确认过，都算故意留白，不是漏掉）**：
+1. 不做服务端图片压缩/生成缩略图——详情页轮播直接显示原图，2C4G 的机器现在够用；以后如果照片攒多了、加载明显变慢，再补。
+2. 不做"孤儿文件"清理——事实/附件被删除后，磁盘上的文件不会跟着自动删；现阶段照片数量不多，不影响使用，以后需要再补一个清理脚本。
+
+验证：本地起了一个隔离的沙盒环境（伪造依赖跑通了 `import server`，此前几次记录都因为环境缺 `jieba`/`mcp`/`httpx` 没能完整跑通这步，这次额外做了这个），用 `starlette.testclient.TestClient` 端到端跑了真实 HTTP 请求：登录 → 上传一张图片（校验返回的 `type`/`url`/`label` 字段）→ 用返回的 url 把文件读回来确认字节一致 → 上传一个不支持的扩展名（`.exe`）确认被拒绝 → 对 serve 接口尝试路径穿越（`../../server.py`）确认被拦截 → 创建一条带这个附件的事实 → 确认 `facts.sqlite` 里存的 `content`/`attachments` 都对 → 调用 `fact_lookup` 确认输出里同时包含标题、内容、附件提示。全部通过。另外 `python3 -m py_compile server.py facts_store.py` 通过，`node --check` 过了 dashboard.html 提取出的完整 script，`scripts/test_predicate_modes.py` 回归测试仍全部通过（测试数据已用 `--cleanup` 清理）。
+
+**还没做的事**：这次只在开发分支（`claude/chinese-greeting-vsk9u0`）上实现，还没有准备"基于 my-live-vps 实际代码改的部署文件"——因为 `fact_lookup` 这个工具本身只存在于一澜的实际部署里（`my-live-vps` 这个 git 分支上其实没有，是当初手动加到服务器上、从没同步回任何 git 分支的），而她上次手动移植 Phase 1 代码时又在服务器上直接打了一个补丁（修 `_parse_attachments_field` 缺失的那次），这个补丁同样没有回写进 git。所以现在没有一份"跟她 VPS 上实际跑的代码完全一致"的文件可以拿来 diff——**准备部署文件前，需要先从她的 VPS 上把当前实际跑着的 server.py / dashboard.html / facts_store.py 三个文件取回来（她 WinSCP 下载一份，或者贴内容过来都行）**，在这份实际内容上改，改完逐个函数比对确认改动范围符合预期，再给她，避免重蹈"直接用干净版导致服务崩溃"的教训。
 
 ## 这份文档是什么
 

@@ -2335,6 +2335,123 @@
     cursor: pointer;
     font-size: 18px;
   }
+  .facts-attachment-toolbar { position: relative; display: flex; }
+  .facts-attachment-add-btn {
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .facts-attachment-add-btn:hover { border-color: var(--accent); }
+  .facts-attachment-menu {
+    position: absolute;
+    top: 34px;
+    left: 0;
+    z-index: 5;
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 160px;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle);
+  }
+  .facts-attachment-menu > div {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .facts-attachment-menu > div:hover { background: var(--border); }
+  .facts-attachment-thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .facts-attachment-thumb {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+  }
+  .facts-attachment-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .facts-attachment-thumb-file {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 4px;
+    text-align: center;
+    word-break: break-all;
+  }
+  .facts-attachment-file-icon { font-size: 20px; }
+  .facts-attachment-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .facts-detail-photos {
+    margin: 10px 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface-solid);
+  }
+  .facts-detail-photos img {
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    display: block;
+  }
+  .facts-detail-photo-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0;
+  }
+  .facts-detail-photo-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    cursor: pointer;
+  }
+  .facts-detail-photo-dot.active { background: var(--accent); }
+  .facts-detail-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .facts-detail-file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--text);
+    font-size: 12px;
+    text-decoration: none;
+  }
+  .facts-detail-file-chip:hover { border-color: var(--accent); }
   #facts-add-content, #facts-edit-content {
     width: 100%;
     min-height: 90px;
@@ -3166,6 +3283,21 @@
     <div class="profile-proposal-form">
       <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
       <span></span>
+      <span></span>
+    </div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('add')">+ 添加图片/文件</button>
+      <div id="facts-attach-menu-add" class="facts-attachment-menu" style="display:none">
+        <div onclick="triggerFactsAttachPicker('add','photo')">🖼 Add Photo</div>
+        <div onclick="triggerFactsAttachPicker('add','file')">📄 Attach Files</div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="facts-add-attachments"></div>
+    <input type="file" id="facts-add-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
+    <input type="file" id="facts-add-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
+    <div class="profile-proposal-form">
+      <span></span>
+      <span></span>
       <button type="button" onclick="submitFactsAdd()">添加事实</button>
     </div>
     <div class="profile-proposal-message" id="facts-add-message"></div>
@@ -3186,6 +3318,16 @@
     <div class="profile-proposal-form">
       <textarea id="facts-edit-content" placeholder="内容"></textarea>
     </div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('edit')">+ 添加图片/文件</button>
+      <div id="facts-attach-menu-edit" class="facts-attachment-menu" style="display:none">
+        <div onclick="triggerFactsAttachPicker('edit','photo')">🖼 Add Photo</div>
+        <div onclick="triggerFactsAttachPicker('edit','file')">📄 Attach Files</div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="facts-edit-attachments"></div>
+    <input type="file" id="facts-edit-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
+    <input type="file" id="facts-edit-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
     <div class="profile-proposal-form">
       <span></span>
       <span></span>
@@ -5067,6 +5209,8 @@ var factsSkeletonGroups = [];
 var factsNavState = { level: 'subjects', subjectKey: '', predicateKey: '', factId: null };
 var factsDetailTimelineExpanded = {};
 var factsEditingFactId = null;
+var factsPendingAttachments = { add: [], edit: [] };
+var factsDetailPhotoIndex = {};
 
 function factsSubjectLabel(subjectKey) {
   return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
@@ -5233,6 +5377,7 @@ function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
     '</div>' +
     '</div>' +
     '<div class="facts-detail-title">' + esc(title) + '</div>' +
+    renderFactsAttachmentsBlock(factId, fact.attachments) +
     (fact.content ? '<div class="facts-detail-content">' + esc(fact.content) + '</div>' : '') +
     '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
     '</div>';
@@ -5368,6 +5513,109 @@ function setFactsAddMessage(message, tone) {
   if (tone) el.classList.add(tone);
 }
 
+var FACTS_ATTACHMENT_MAX_ITEMS = 5;
+
+function toggleFactsAttachMenu(target) {
+  var menu = document.getElementById('facts-attach-menu-' + target);
+  if (!menu) return;
+  menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function triggerFactsAttachPicker(target, kind) {
+  toggleFactsAttachMenu(target);
+  var input = document.getElementById('facts-' + target + '-' + kind + '-input');
+  if (input) input.click();
+}
+
+function renderFactsAttachmentThumbs(target) {
+  var container = document.getElementById('facts-' + target + '-attachments');
+  if (!container) return;
+  var items = factsPendingAttachments[target] || [];
+  container.innerHTML = items.map(function(a, idx) {
+    if (a.type === 'image') {
+      return '<div class="facts-attachment-thumb">' +
+        '<img src="' + esc(a.url) + '" alt="' + esc(a.label || '') + '">' +
+        '<span class="facts-attachment-remove" onclick="removeFactsAttachment(\'' + target + '\', ' + idx + ')">×</span>' +
+        '</div>';
+    }
+    return '<div class="facts-attachment-thumb facts-attachment-thumb-file" title="' + esc(a.label || '') + '">' +
+      '<span class="facts-attachment-file-icon">📄</span>' +
+      '<span class="facts-attachment-file-name">' + esc(a.label || '文件') + '</span>' +
+      '<span class="facts-attachment-remove" onclick="removeFactsAttachment(\'' + target + '\', ' + idx + ')">×</span>' +
+      '</div>';
+  }).join('');
+}
+
+function removeFactsAttachment(target, idx) {
+  var items = factsPendingAttachments[target] || [];
+  items.splice(idx, 1);
+  renderFactsAttachmentThumbs(target);
+}
+
+async function onFactsAttachFileChosen(target, inputEl) {
+  var files = Array.prototype.slice.call(inputEl.files || []);
+  inputEl.value = ''; // reset so choosing the same file again later still fires onchange
+  for (var i = 0; i < files.length; i++) {
+    await uploadFactsAttachment(target, files[i]);
+  }
+}
+
+async function uploadFactsAttachment(target, file) {
+  var items = factsPendingAttachments[target] || (factsPendingAttachments[target] = []);
+  if (items.length >= FACTS_ATTACHMENT_MAX_ITEMS) {
+    alert('最多添加 ' + FACTS_ATTACHMENT_MAX_ITEMS + ' 个图片/文件。');
+    return;
+  }
+  var formData = new FormData();
+  formData.append('file', file);
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/attachments/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '上传失败');
+    items.push(data);
+    renderFactsAttachmentThumbs(target);
+  } catch (e) {
+    alert('上传失败: ' + e.message);
+  }
+}
+
+function renderFactsAttachmentsBlock(factId, attachments) {
+  attachments = Array.isArray(attachments) ? attachments : [];
+  var images = attachments.filter(function(a) { return a.type === 'image'; }).slice(0, FACTS_ATTACHMENT_MAX_ITEMS);
+  var files = attachments.filter(function(a) { return a.type !== 'image'; });
+
+  var photosHtml = '';
+  if (images.length) {
+    var idx = factsDetailPhotoIndex[factId] || 0;
+    if (idx >= images.length) idx = 0;
+    var current = images[idx];
+    var dots = images.length > 1 ? '<div class="facts-detail-photo-dots">' + images.map(function(_, i) {
+      return '<span class="facts-detail-photo-dot' + (i === idx ? ' active' : '') + '" onclick="event.stopPropagation();setFactsDetailPhotoIndex(' + factId + ',' + i + ')"></span>';
+    }).join('') + '</div>' : '';
+    photosHtml = '<div class="facts-detail-photos">' +
+      '<img src="' + esc(current.url) + '" alt="' + esc(current.label || '') + '">' +
+      dots +
+      '</div>';
+  }
+
+  var filesHtml = files.length
+    ? '<div class="facts-detail-files">' + files.map(function(f) {
+        return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label || '文件') + '</a>';
+      }).join('') + '</div>'
+    : '';
+
+  return photosHtml + filesHtml;
+}
+
+function setFactsDetailPhotoIndex(factId, idx) {
+  factsDetailPhotoIndex[factId] = idx;
+  renderFactsNav();
+}
+
 function openFactsCreateModal() {
   var titleEl = document.getElementById('facts-create-modal-title');
   if (titleEl) titleEl.textContent = '新建事实';
@@ -5380,6 +5628,10 @@ function openFactsCreateModal() {
   document.getElementById('facts-add-valid-at').value = '';
   setFactsAddMessage('', '');
   populateFactsAddPredicateOptions();
+  factsPendingAttachments.add = [];
+  renderFactsAttachmentThumbs('add');
+  var addMenu = document.getElementById('facts-attach-menu-add');
+  if (addMenu) addMenu.style.display = 'none';
   document.getElementById('facts-create-overlay').style.display = 'flex';
 }
 
@@ -5397,6 +5649,10 @@ function openFactsRevisionModal(subjectKey, predicateKey, factId) {
   document.getElementById('facts-add-content').value = fact ? (fact.content || '') : '';
   document.getElementById('facts-add-valid-at').value = '';
   setFactsAddMessage('', '');
+  factsPendingAttachments.add = fact && Array.isArray(fact.attachments) ? fact.attachments.slice() : [];
+  renderFactsAttachmentThumbs('add');
+  var revisionMenu = document.getElementById('facts-attach-menu-add');
+  if (revisionMenu) revisionMenu.style.display = 'none';
   document.getElementById('facts-create-overlay').style.display = 'flex';
 }
 
@@ -5406,6 +5662,7 @@ function closeFactsCreateModal() {
   var predicateSel = document.getElementById('facts-add-predicate');
   if (subjectSel) subjectSel.disabled = false;
   if (predicateSel) predicateSel.disabled = false;
+  factsPendingAttachments.add = [];
 }
 
 function openFactsEditModal(factId) {
@@ -5417,12 +5674,17 @@ function openFactsEditModal(factId) {
   document.getElementById('facts-edit-content').value = fact.content || '';
   var msg = document.getElementById('facts-edit-message');
   if (msg) { msg.textContent = ''; msg.classList.remove('ok', 'error'); }
+  factsPendingAttachments.edit = Array.isArray(fact.attachments) ? fact.attachments.slice() : [];
+  renderFactsAttachmentThumbs('edit');
+  var editMenu = document.getElementById('facts-attach-menu-edit');
+  if (editMenu) editMenu.style.display = 'none';
   document.getElementById('facts-edit-overlay').style.display = 'flex';
 }
 
 function closeFactsEditModal() {
   document.getElementById('facts-edit-overlay').style.display = 'none';
   factsEditingFactId = null;
+  factsPendingAttachments.edit = [];
 }
 
 async function submitFactsEdit() {
@@ -5438,7 +5700,7 @@ async function submitFactsEdit() {
     var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factsEditingFactId, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ title: title, content: content })
+      body: JSON.stringify({ title: title, content: content, attachments: factsPendingAttachments.edit || [] })
     });
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
@@ -5471,7 +5733,7 @@ async function submitFactsAdd() {
     return;
   }
 
-  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt };
+  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt, attachments: factsPendingAttachments.add || [] };
 
   if (predicateValue === '__new__') {
     var newKeyInput = document.getElementById('facts-add-new-predicate-key');
