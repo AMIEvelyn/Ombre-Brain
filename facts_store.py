@@ -69,17 +69,19 @@ class FactStore:
                 created_at TEXT NOT NULL,
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT NOT NULL DEFAULT '',
-                attachments TEXT NOT NULL DEFAULT '[]'
+                attachments TEXT NOT NULL DEFAULT '[]',
+                tags TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
-        # Backfill columns for databases created before title/content/attachments
+        # Backfill columns for databases created before title/content/attachments/tags
         # existed -- SQLite has no "ADD COLUMN IF NOT EXISTS", so probe and ignore
         # the "duplicate column" error on databases that already have them.
         for column, ddl in (
             ("title", "ALTER TABLE facts ADD COLUMN title TEXT NOT NULL DEFAULT ''"),
             ("content", "ALTER TABLE facts ADD COLUMN content TEXT NOT NULL DEFAULT ''"),
             ("attachments", "ALTER TABLE facts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'"),
+            ("tags", "ALTER TABLE facts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"),
         ):
             try:
                 conn.execute(ddl)
@@ -184,6 +186,7 @@ class FactStore:
         title: str = "",
         content: str = "",
         attachments: list[dict] | None = None,
+        tags: list[str] | None = None,
     ) -> int:
         subject_key = str(subject_key or "").strip()
         predicate_key = str(predicate_key or "").strip()
@@ -193,6 +196,7 @@ class FactStore:
         evidence_type = evidence_type if evidence_type in EVIDENCE_TYPES else "bucket"
         state_key = make_state_key(subject_key, predicate_key)
         attachments_json = json.dumps(attachments or [], ensure_ascii=False)
+        tags_json = json.dumps(tags or [], ensure_ascii=False)
 
         conn = self._connect()
         if mode == "exclusive_current" and invalid_at is None:
@@ -206,14 +210,14 @@ class FactStore:
             INSERT INTO facts (
                 subject_key, predicate_key, object_text, state_key, predicate_mode,
                 valid_at, invalid_at, confidence, evidence_type, evidence_id, evidence_quote, created_at,
-                title, content, attachments
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                title, content, attachments, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 subject_key, predicate_key, str(object_text or ""), state_key, mode,
                 valid_at, invalid_at, max(0.0, min(1.0, float(confidence))),
                 evidence_type, str(evidence_id or ""), str(evidence_quote or ""), self._now_iso(),
-                str(title or ""), str(content or ""), attachments_json,
+                str(title or ""), str(content or ""), attachments_json, tags_json,
             ),
         )
         fact_id = cursor.lastrowid
@@ -229,6 +233,7 @@ class FactStore:
         title: str | None = None,
         content: str | None = None,
         attachments: list[dict] | None = None,
+        tags: list[str] | None = None,
     ) -> bool:
         """Edit a fact in place -- does not touch valid_at/invalid_at and does
         not create a new timeline point. Only fields explicitly passed (not
@@ -242,6 +247,8 @@ class FactStore:
             updates["content"] = str(content)
         if attachments is not None:
             updates["attachments"] = json.dumps(attachments, ensure_ascii=False)
+        if tags is not None:
+            updates["tags"] = json.dumps(tags, ensure_ascii=False)
         if not updates:
             return False
         conn = self._connect()
@@ -276,6 +283,10 @@ class FactStore:
             item["attachments"] = json.loads(item.get("attachments") or "[]")
         except (TypeError, ValueError):
             item["attachments"] = []
+        try:
+            item["tags"] = json.loads(item.get("tags") or "[]")
+        except (TypeError, ValueError):
+            item["tags"] = []
         return item
 
     def get_fact(self, fact_id: int) -> dict | None:

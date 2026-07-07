@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 import httpx
+from rapidfuzz import fuzz
 
 
 # --- Ensure same-directory modules can be imported ---
@@ -8664,20 +8665,51 @@ async def profile_fact(
 
 
 # =============================================================
+# Tags/query matching for facts-card search (title/content/tags)
+# 资料卡搜索用的标签/关键词匹配 —— fact_lookup 和 Dashboard 共用
+# =============================================================
+FACTS_QUERY_FUZZY_THRESHOLD = 70
+
+
+def _facts_query_matches(query: str, item: dict) -> bool:
+    """True if query is a literal substring of title/content/tags, or fuzzy-
+    matches title/tags closely enough (rapidfuzz token_set_ratio, same library
+    already used for bucket-title fuzzy matching elsewhere in this file).
+    Handles both "字面就在标题里" (substring) and "标题里的字被跳过/换序但明显
+    是同一个东西" (fuzzy) -- true synonyms with no shared characters (e.g. 皮筋
+    vs 扎头绳) need an explicit tag instead, fuzzy matching can't infer those."""
+    query = str(query or "").strip()
+    if not query:
+        return True
+    title = str(item.get("title") or item.get("object_text") or "")
+    content = str(item.get("content") or "")
+    tags = [str(t) for t in (item.get("tags") or [])]
+    haystacks = [title, content] + tags
+    if any(query in h for h in haystacks):
+        return True
+    fuzzy_targets = [title] + tags
+    return any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h)
+
+
+# =============================================================
 # Tool 3.6: fact_lookup — query the facts/timeline skeleton layer
 # 工具 3.6：fact_lookup — 查询骨架层（稳定事实/时间线），不受遗忘曲线影响
 # =============================================================
 @mcp.tool()
-async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "") -> str:
+async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "", query: str = "") -> str:
     """只读查询骨架层稳定事实（facts.sqlite），精确检索，不受遗忘曲线影响，不会随时间沉底。
     不传 at_date：返回当前仍然有效的事实（已被新事实软失效的旧记录不显示）。
     传 at_date="YYYY-MM-DD"：返回该日期当时为真的历史状态。
     subject_key 建议用 yi_lan / lin_zhan / relationship；留空则查全部主体。
+    query 可选：在标题/内容/标签里搜关键词（支持字面包含 + 模糊匹配，比如标题是
+    "蓝色星星U盘手链"，搜"手链"或"蓝色星星手链"都能命中）——同一个 predicate_key
+    下东西多、一次性列不过来时用这个缩小范围；不传 query 就跟以前一样列出全部。
     这个工具只回答"事实类"问题（现在多高、现在住哪、某天状态如何）；
     情绪/关系类问题（为什么难过、怎么看这件事）不要用这个，继续用 breath。"""
     subject_key = str(subject_key or "").strip()
     predicate_key = str(predicate_key or "").strip()
     at_date = str(at_date or "").strip()
+    query = str(query or "").strip()
 
     try:
         if at_date:
@@ -8686,11 +8718,13 @@ async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: s
                 facts = [f for f in facts if f.get("predicate_key") == predicate_key]
         else:
             facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+        if query:
+            facts = [f for f in facts if _facts_query_matches(query, f)]
     except Exception as e:
         return f"查询骨架层失败: {e}"
 
     if not facts:
-        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）"
+        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）" if not query else f"没搜到匹配「{query}」的稳定事实。"
 
     header = f"=== 骨架层事实（{'截至 ' + at_date if at_date else '当前有效'}） ==="
     lines = [header]
@@ -8701,10 +8735,12 @@ async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: s
         content_note = f"\n  内容：{content}" if content else ""
         attachments = item.get("attachments") or []
         attachment_note = f"\n  （附了 {len(attachments)} 个图片/文件，暂时只能提示存在，无法直接看到内容）" if attachments else ""
+        tags = [str(t) for t in (item.get("tags") or [])]
+        tags_note = "\n  " + " ".join(f"#{t}" for t in tags) if tags else ""
         lines.append(
             f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {title}"
             f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
-            f"{content_note}{attachment_note}"
+            f"{content_note}{tags_note}{attachment_note}"
         )
     return "\n".join(lines)
 
@@ -9719,6 +9755,20 @@ def _parse_attachments_field(raw) -> list[dict]:
     return cleaned
 
 
+def _parse_tags_field(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    seen = set()
+    for item in raw:
+        tag = str(item or "").strip().lstrip("#").strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        cleaned.append(tag)
+    return cleaned
+
+
 # =============================================================
 # Facts-card attachment uploads (photos / files)
 # 资料卡片附件上传（图片/文件）
@@ -9845,6 +9895,7 @@ async def api_facts_skeleton_create(request):
     title = str(body.get("title") or "").strip()
     content = str(body.get("content") or "").strip()
     attachments = _parse_attachments_field(body.get("attachments"))
+    tags = _parse_tags_field(body.get("tags"))
     valid_at = str(body.get("valid_at") or "").strip() or datetime.now(timezone.utc).date().isoformat()
 
     if subject_key not in {"yi_lan", "lin_zhan", "relationship"}:
@@ -9876,6 +9927,7 @@ async def api_facts_skeleton_create(request):
             title=title,
             content=content,
             attachments=attachments,
+            tags=tags,
         )
         return JSONResponse({"status": "created", "id": fact_id})
     except Exception as e:
@@ -9914,6 +9966,8 @@ async def api_facts_skeleton_update_fact(request):
         kwargs["content"] = str(body.get("content") or "").strip()
     if "attachments" in body:
         kwargs["attachments"] = _parse_attachments_field(body.get("attachments"))
+    if "tags" in body:
+        kwargs["tags"] = _parse_tags_field(body.get("tags"))
 
     try:
         updated = fact_store.update_fact(fact_id, **kwargs)

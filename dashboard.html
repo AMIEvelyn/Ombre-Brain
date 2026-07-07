@@ -2335,6 +2335,33 @@
     cursor: pointer;
     font-size: 18px;
   }
+  .facts-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .facts-tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+  }
+  .facts-tag-remove { cursor: pointer; color: var(--text-dim); font-size: 12px; }
+  .facts-tag-remove:hover { color: var(--negative); }
+  .facts-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 2px 0 10px;
+    font-size: 13px;
+  }
+  .facts-detail-tag { color: var(--accent); }
   .facts-attachment-toolbar { position: relative; display: flex; }
   .facts-attachment-add-btn {
     border: 1px solid var(--border);
@@ -3280,6 +3307,12 @@
     <div class="profile-proposal-form">
       <textarea id="facts-add-content" placeholder="内容（可选）"></textarea>
     </div>
+    <div class="facts-tags-row" id="facts-add-tags"></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-add-tag-input" placeholder="加个标签，回车确认" onkeydown="onFactsTagInputKeydown(event,'add')" />
+      <span></span>
+      <span></span>
+    </div>
     <div class="profile-proposal-form">
       <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
       <span></span>
@@ -3317,6 +3350,12 @@
     </div>
     <div class="profile-proposal-form">
       <textarea id="facts-edit-content" placeholder="内容"></textarea>
+    </div>
+    <div class="facts-tags-row" id="facts-edit-tags"></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onFactsTagInputKeydown(event,'edit')" />
+      <span></span>
+      <span></span>
     </div>
     <div class="facts-attachment-toolbar">
       <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('edit')">+ 添加图片/文件</button>
@@ -5211,6 +5250,7 @@ var factsDetailTimelineExpanded = {};
 var factsEditingFactId = null;
 var factsPendingAttachments = { add: [], edit: [] };
 var factsDetailPhotoIndex = {};
+var factsPendingTags = { add: [], edit: [] };
 
 function factsSubjectLabel(subjectKey) {
   return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
@@ -5377,6 +5417,7 @@ function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
     '</div>' +
     '</div>' +
     '<div class="facts-detail-title">' + esc(title) + '</div>' +
+    renderFactsTagsLine(fact.tags) +
     renderFactsAttachmentsBlock(factId, fact.attachments) +
     (fact.content ? '<div class="facts-detail-content">' + esc(fact.content) + '</div>' : '') +
     '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
@@ -5616,6 +5657,48 @@ function setFactsDetailPhotoIndex(factId, idx) {
   renderFactsNav();
 }
 
+function renderFactsTagPills(target) {
+  var container = document.getElementById('facts-' + target + '-tags');
+  if (!container) return;
+  var tags = factsPendingTags[target] || [];
+  container.innerHTML = tags.map(function(tag, idx) {
+    return '<span class="facts-tag-pill">#' + esc(tag) +
+      '<span class="facts-tag-remove" onclick="removeFactsTag(\'' + target + '\', ' + idx + ')">×</span></span>';
+  }).join('');
+}
+
+function addFactsTagFromInput(target) {
+  var input = document.getElementById('facts-' + target + '-tag-input');
+  if (!input) return;
+  var raw = (input.value || '').trim().replace(/^#/, '');
+  input.value = '';
+  if (!raw) return;
+  var tags = factsPendingTags[target] || (factsPendingTags[target] = []);
+  if (tags.indexOf(raw) === -1) tags.push(raw);
+  renderFactsTagPills(target);
+}
+
+function onFactsTagInputKeydown(event, target) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addFactsTagFromInput(target);
+  }
+}
+
+function removeFactsTag(target, idx) {
+  var tags = factsPendingTags[target] || [];
+  tags.splice(idx, 1);
+  renderFactsTagPills(target);
+}
+
+function renderFactsTagsLine(tags) {
+  tags = Array.isArray(tags) ? tags : [];
+  if (!tags.length) return '';
+  return '<div class="facts-detail-tags">' + tags.map(function(t) {
+    return '<span class="facts-detail-tag">#' + esc(t) + '</span>';
+  }).join('') + '</div>';
+}
+
 function openFactsCreateModal() {
   var titleEl = document.getElementById('facts-create-modal-title');
   if (titleEl) titleEl.textContent = '新建事实';
@@ -5632,6 +5715,10 @@ function openFactsCreateModal() {
   renderFactsAttachmentThumbs('add');
   var addMenu = document.getElementById('facts-attach-menu-add');
   if (addMenu) addMenu.style.display = 'none';
+  factsPendingTags.add = [];
+  renderFactsTagPills('add');
+  var addTagInput = document.getElementById('facts-add-tag-input');
+  if (addTagInput) addTagInput.value = '';
   document.getElementById('facts-create-overlay').style.display = 'flex';
 }
 
@@ -5653,6 +5740,10 @@ function openFactsRevisionModal(subjectKey, predicateKey, factId) {
   renderFactsAttachmentThumbs('add');
   var revisionMenu = document.getElementById('facts-attach-menu-add');
   if (revisionMenu) revisionMenu.style.display = 'none';
+  factsPendingTags.add = fact && Array.isArray(fact.tags) ? fact.tags.slice() : [];
+  renderFactsTagPills('add');
+  var revisionTagInput = document.getElementById('facts-add-tag-input');
+  if (revisionTagInput) revisionTagInput.value = '';
   document.getElementById('facts-create-overlay').style.display = 'flex';
 }
 
@@ -5663,6 +5754,7 @@ function closeFactsCreateModal() {
   if (subjectSel) subjectSel.disabled = false;
   if (predicateSel) predicateSel.disabled = false;
   factsPendingAttachments.add = [];
+  factsPendingTags.add = [];
 }
 
 function openFactsEditModal(factId) {
@@ -5678,6 +5770,10 @@ function openFactsEditModal(factId) {
   renderFactsAttachmentThumbs('edit');
   var editMenu = document.getElementById('facts-attach-menu-edit');
   if (editMenu) editMenu.style.display = 'none';
+  factsPendingTags.edit = Array.isArray(fact.tags) ? fact.tags.slice() : [];
+  renderFactsTagPills('edit');
+  var editTagInput = document.getElementById('facts-edit-tag-input');
+  if (editTagInput) editTagInput.value = '';
   document.getElementById('facts-edit-overlay').style.display = 'flex';
 }
 
@@ -5685,6 +5781,7 @@ function closeFactsEditModal() {
   document.getElementById('facts-edit-overlay').style.display = 'none';
   factsEditingFactId = null;
   factsPendingAttachments.edit = [];
+  factsPendingTags.edit = [];
 }
 
 async function submitFactsEdit() {
@@ -5700,7 +5797,7 @@ async function submitFactsEdit() {
     var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factsEditingFactId, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ title: title, content: content, attachments: factsPendingAttachments.edit || [] })
+      body: JSON.stringify({ title: title, content: content, attachments: factsPendingAttachments.edit || [], tags: factsPendingTags.edit || [] })
     });
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
@@ -5733,7 +5830,7 @@ async function submitFactsAdd() {
     return;
   }
 
-  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt, attachments: factsPendingAttachments.add || [] };
+  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt, attachments: factsPendingAttachments.add || [], tags: factsPendingTags.add || [] };
 
   if (predicateValue === '__new__') {
     var newKeyInput = document.getElementById('facts-add-new-predicate-key');
