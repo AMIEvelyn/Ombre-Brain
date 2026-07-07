@@ -3113,46 +3113,85 @@
       <div class="word-map-actions">
         <button type="button" onclick="loadFactsSkeleton()">刷新</button>
         <button type="button" onclick="backfillFactsSkeletonDisplayNames()">补齐默认类型中文名</button>
+        <button type="button" onclick="openFactsCreateModal()">+ Create</button>
       </div>
     </div>
-    <div class="profile-proposal-panel">
-      <div class="profile-proposal-form">
-        <select id="facts-add-subject">
-          <option value="yi_lan">一澜</option>
-          <option value="lin_zhan">林湛</option>
-          <option value="relationship">我们的关系</option>
-        </select>
-        <select id="facts-add-predicate" onchange="onFactsAddPredicateChange()">
-          <option value="">加载中…</option>
-        </select>
-        <input type="text" id="facts-add-object" placeholder="具体内容，例如 165cm" />
-      </div>
-      <div class="profile-proposal-form" id="facts-add-new-predicate-row" style="display:none">
-        <input type="text" id="facts-add-new-predicate-key" placeholder="新 predicate_key（英文，如 xxx_status）" />
-        <select id="facts-add-new-predicate-mode">
-          <option value="exclusive_current">exclusive_current（新值取代旧值）</option>
-          <option value="multi_current">multi_current（新旧共存）</option>
-          <option value="historical_event">historical_event（一次性事件）</option>
-        </select>
-        <input type="text" id="facts-add-new-predicate-name" placeholder="中文显示名（可选）" />
-      </div>
-      <div class="profile-proposal-form">
-        <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
-        <span></span>
-        <button type="button" onclick="submitFactsAdd()">添加事实</button>
-      </div>
-      <div class="profile-proposal-message" id="facts-add-message"></div>
+    <div class="profile-summary" id="facts-summary">加载中…</div>
+    <div id="facts-nav" class="profile-list">
+      <div class="loading">加载骨架层事实…</div>
     </div>
-    <details style="margin-bottom:16px;">
+    <details style="margin:16px 0;">
       <summary style="cursor:pointer;font-size:14px;color:var(--text-dim);">事实类型管理（改这里对所有用这个类型的人都生效）</summary>
       <div class="profile-list" id="facts-predicate-list" style="padding-top:8px;">
         <div class="loading">加载中…</div>
       </div>
     </details>
-    <div class="profile-summary" id="facts-summary">加载中…</div>
-    <div class="profile-list" id="facts-list">
-      <div class="loading">加载骨架层事实…</div>
+  </div>
+</div>
+
+<div id="facts-create-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeFactsCreateModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeFactsCreateModal()">‹</button>
+      <span id="facts-create-modal-title">新建事实</span>
     </div>
+    <div class="profile-proposal-form">
+      <select id="facts-add-subject">
+        <option value="yi_lan">一澜</option>
+        <option value="lin_zhan">林湛</option>
+        <option value="relationship">我们的关系</option>
+      </select>
+      <select id="facts-add-predicate" onchange="onFactsAddPredicateChange()">
+        <option value="">加载中…</option>
+      </select>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form" id="facts-add-new-predicate-row" style="display:none">
+      <input type="text" id="facts-add-new-predicate-key" placeholder="新 predicate_key（英文，如 xxx_status）" />
+      <select id="facts-add-new-predicate-mode">
+        <option value="exclusive_current">exclusive_current（新值取代旧值）</option>
+        <option value="multi_current">multi_current（新旧共存）</option>
+        <option value="historical_event">historical_event（一次性事件）</option>
+      </select>
+      <input type="text" id="facts-add-new-predicate-name" placeholder="中文显示名（可选）" />
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-add-title" placeholder="标题（必填，列表页显示）" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <textarea id="facts-add-content" placeholder="内容（可选）"></textarea>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
+      <span></span>
+      <button type="button" onclick="submitFactsAdd()">添加事实</button>
+    </div>
+    <div class="profile-proposal-message" id="facts-add-message"></div>
+  </div>
+</div>
+
+<div id="facts-edit-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeFactsEditModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeFactsEditModal()">‹</button>
+      <span>编辑（不留新时间点）</span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-edit-title" placeholder="标题" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <textarea id="facts-edit-content" placeholder="内容"></textarea>
+    </div>
+    <div class="profile-proposal-form">
+      <span></span>
+      <span></span>
+      <button type="button" onclick="submitFactsEdit()">Save 保存</button>
+    </div>
+    <div class="profile-proposal-message" id="facts-edit-message"></div>
   </div>
 </div>
 
@@ -5024,6 +5063,10 @@ var FACTS_SUBJECT_LABELS = {
 };
 
 var factsSkeletonPredicates = [];
+var factsSkeletonGroups = [];
+var factsNavState = { level: 'subjects', subjectKey: '', predicateKey: '', factId: null };
+var factsDetailTimelineExpanded = {};
+var factsEditingFactId = null;
 
 function factsSubjectLabel(subjectKey) {
   return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
@@ -5033,29 +5076,166 @@ function factsIsTestGroup(group) {
   return group.subject_key === 'qa_test' || String(group.predicate_key || '').indexOf('test_') === 0;
 }
 
-function factsDeleteButton(factId) {
-  return '<button type="button" title="删除这条" onclick="deleteFactsSkeletonFact(' + factId + ')" ' +
-    'style="border:none;background:none;color:var(--text-dim);cursor:pointer;padding:0 2px;font-size:12px;">✕</button>';
+function factsGroupFor(subjectKey, predicateKey) {
+  return factsSkeletonGroups.find(function(g) { return g.subject_key === subjectKey && g.predicate_key === predicateKey; });
 }
 
-function renderFactGroup(g) {
-  var currentText = (g.current || []).map(function(c) {
-    return esc(c.object_text || '') + factsDeleteButton(c.id);
-  }).join('、 ') || '（无）';
-  var historyRows = (g.history || []).slice().reverse().map(function(h) {
-    var invalidNote = h.invalid_at ? ('，已于 ' + esc(h.invalid_at) + ' 失效') : '';
-    return '<div style="padding:4px 0 4px 16px;color:var(--text-dim);font-size:12px;display:flex;justify-content:space-between;gap:8px;">' +
-      '<span>' + esc(h.object_text || '') + '（生效于 ' + esc(h.valid_at || '未知') + invalidNote + '）</span>' +
-      factsDeleteButton(h.id) +
-      '</div>';
+function factsFindFact(subjectKey, predicateKey, factId) {
+  var group = factsGroupFor(subjectKey, predicateKey);
+  if (!group) return null;
+  return (group.current || []).concat(group.history || []).find(function(f) { return f.id === factId; }) || null;
+}
+
+// A predicate's history mixes every distinct title under it (e.g. multi_current
+// "喜欢的食物" holds 酸辣粉 AND 冰粉 as separate rows sharing one state_key) --
+// this filters down to just the entries for one specific title, newest first.
+// It's a title-matching convention, not an enforced link: "New Revision"
+// pre-fills the same title on purpose to keep an item's entries grouped.
+function factsHistoryForTitle(group, title) {
+  return (group.history || []).filter(function(h) {
+    return (h.title || h.object_text || '') === title;
+  }).slice().sort(function(a, b) { return String(b.valid_at || '').localeCompare(String(a.valid_at || '')); });
+}
+
+// --- three-level navigation: subjects -> keys -> fact titles -> detail ---
+
+function factsNavGoSubjects() {
+  factsNavState = { level: 'subjects', subjectKey: '', predicateKey: '', factId: null };
+  renderFactsNav();
+}
+function factsNavGoKeys(subjectKey) {
+  factsNavState = { level: 'keys', subjectKey: subjectKey, predicateKey: '', factId: null };
+  renderFactsNav();
+}
+function factsNavGoTitles(subjectKey, predicateKey) {
+  factsNavState = { level: 'titles', subjectKey: subjectKey, predicateKey: predicateKey, factId: null };
+  renderFactsNav();
+}
+function factsNavGoDetail(subjectKey, predicateKey, factId) {
+  factsNavState = { level: 'detail', subjectKey: subjectKey, predicateKey: predicateKey, factId: factId };
+  renderFactsNav();
+}
+
+function renderFactsNav() {
+  var container = document.getElementById('facts-nav');
+  if (!container) return;
+  if (factsNavState.level === 'keys') {
+    container.innerHTML = renderFactsKeysLevel(factsNavState.subjectKey);
+  } else if (factsNavState.level === 'titles') {
+    container.innerHTML = renderFactsTitlesLevel(factsNavState.subjectKey, factsNavState.predicateKey);
+  } else if (factsNavState.level === 'detail') {
+    container.innerHTML = renderFactsDetailLevel(factsNavState.subjectKey, factsNavState.predicateKey, factsNavState.factId);
+  } else {
+    container.innerHTML = renderFactsSubjectsLevel();
+  }
+}
+
+function renderFactsSubjectsLevel() {
+  var seen = {};
+  var order = [];
+  factsSkeletonGroups.forEach(function(g) {
+    if (factsIsTestGroup(g)) return;
+    if (!seen[g.subject_key]) { seen[g.subject_key] = true; order.push(g.subject_key); }
+  });
+  var preferred = ['yi_lan', 'lin_zhan', 'relationship'];
+  var subjects = preferred.filter(function(k) { return seen[k]; });
+  order.forEach(function(k) { if (subjects.indexOf(k) === -1) subjects.push(k); });
+  if (!subjects.length) return '<div class="loading">还没有稳定事实，点右上角 + Create 加一条试试。</div>';
+  return subjects.map(function(s) {
+    return '<div class="facts-nav-row" onclick="factsNavGoKeys(\'' + s + '\')">' +
+      '<b>' + esc(factsSubjectLabel(s)) + '</b><span class="facts-nav-chevron">›</span></div>';
   }).join('');
-  return '<details style="padding:8px 0;border-bottom:1px solid var(--border);">' +
-    '<summary style="cursor:pointer;">' +
-    '<b>' + esc(g.display_name || g.predicate_key) + '</b>：' + currentText +
-    ' <span style="color:var(--text-dim);font-size:12px;">（变动过 ' + (g.change_count || 0) +
-    ' 次，最新变动于 ' + esc(g.last_changed_at || '未知') + '）</span>' +
-    '</summary>' +
-    historyRows + '</details>';
+}
+
+function renderFactsKeysLevel(subjectKey) {
+  var groups = factsSkeletonGroups.filter(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
+  var header = '<div class="facts-nav-back" onclick="factsNavGoSubjects()">‹ 返回</div>' +
+    '<div class="facts-nav-title">' + esc(factsSubjectLabel(subjectKey)) + '</div>';
+  if (!groups.length) return header + '<div class="loading">这个主体下还没有事实。</div>';
+  return header + groups.map(function(g) {
+    return '<div class="facts-nav-row" onclick="factsNavGoTitles(\'' + subjectKey + '\', \'' + g.predicate_key + '\')">' +
+      '<b>' + esc(g.display_name || g.predicate_key) + '</b><span class="facts-nav-chevron">›</span></div>';
+  }).join('');
+}
+
+function renderFactsTitlesLevel(subjectKey, predicateKey) {
+  var group = factsGroupFor(subjectKey, predicateKey);
+  var header = '<div class="facts-nav-back" onclick="factsNavGoKeys(\'' + subjectKey + '\')">‹ 返回</div>' +
+    '<div class="facts-nav-title">' + esc(factsSubjectLabel(subjectKey)) + ' · ' +
+    esc(group ? (group.display_name || group.predicate_key) : predicateKey) + '</div>';
+  if (!group || !(group.current || []).length) return header + '<div class="loading">还没有事实。</div>';
+  return header + group.current.map(function(c) {
+    var title = c.title || c.object_text || '';
+    var ownHistory = factsHistoryForTitle(group, title);
+    var lastChanged = ownHistory.length ? ownHistory[0].valid_at || '未知' : (c.valid_at || '未知');
+    return '<div class="facts-nav-row" onclick="factsNavGoDetail(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + c.id + ')">' +
+      '<div><b>' + esc(title) + '</b>' +
+      '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">变动过 ' + ownHistory.length +
+      ' 次，最新变动于 ' + esc(lastChanged) + '</div></div>' +
+      '<span class="facts-nav-chevron">›</span></div>';
+  }).join('');
+}
+
+function toggleFactsDetailMenu(factId) {
+  var menu = document.getElementById('facts-detail-menu-' + factId);
+  if (!menu) return;
+  var isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : '';
+}
+
+function toggleFactsTimelineExpand(factId) {
+  factsDetailTimelineExpanded[factId] = !factsDetailTimelineExpanded[factId];
+  renderFactsNav();
+}
+
+function toggleFactsTimelineEntry(historyId) {
+  var el = document.getElementById('facts-timeline-entry-' + historyId);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
+  var group = factsGroupFor(subjectKey, predicateKey);
+  var fact = factsFindFact(subjectKey, predicateKey, factId);
+  var backHtml = '<div class="facts-nav-back" onclick="factsNavGoTitles(\'' + subjectKey + '\', \'' + predicateKey + '\')">‹ 返回</div>';
+  if (!group || !fact) return backHtml + '<div class="loading">找不到这条事实（可能刚被删除）。</div>';
+
+  var title = fact.title || fact.object_text || '';
+  var relatedHistory = factsHistoryForTitle(group, title);
+
+  var expanded = !!factsDetailTimelineExpanded[factId];
+  var shown = expanded ? relatedHistory : relatedHistory.slice(0, 3);
+  var timelineRows = shown.map(function(h) {
+    var isInvalid = !!h.invalid_at;
+    return '<div class="facts-timeline-row" style="opacity:' + (isInvalid ? '0.55' : '1') + ';" onclick="toggleFactsTimelineEntry(' + h.id + ')">' +
+      '<span style="color:' + (isInvalid ? 'var(--text-dim)' : 'var(--accent)') + ';">●</span> ' +
+      esc(h.valid_at || '未知') + (isInvalid ? '（已于 ' + esc(h.invalid_at) + ' 失效）' : '') +
+      '<div id="facts-timeline-entry-' + h.id + '" class="facts-timeline-entry-detail" style="display:none;">' +
+      '<div><b>Name</b> ' + esc(h.title || '') + '</div>' +
+      '<div><b>Content</b> ' + esc(h.content || '（无）') + '</div>' +
+      '</div></div>';
+  }).join('');
+  var moreHtml = relatedHistory.length > 3
+    ? '<div class="facts-timeline-more" onclick="toggleFactsTimelineExpand(' + factId + ')">' +
+      (expanded ? '收起' : '查看完整时间线（共 ' + relatedHistory.length + ' 条）') + '</div>'
+    : '';
+
+  return backHtml +
+    '<div class="facts-detail-card">' +
+    '<div class="facts-detail-header">' +
+    '<div class="facts-detail-breadcrumb">' + esc(factsSubjectLabel(subjectKey)) + ' · ' + esc(group.display_name || predicateKey) + '</div>' +
+    '<button type="button" class="facts-detail-menu-btn" onclick="toggleFactsDetailMenu(' + factId + ')">···</button>' +
+    '<div id="facts-detail-menu-' + factId + '" class="facts-detail-menu" style="display:none">' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsRevisionModal(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + factId + ')">⊕ New Revision</div>' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsEditModal(' + factId + ')">✎ Edit</div>' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');invalidateFactsFact(' + factId + ')">🕓 Invalidate</div>' +
+    '<div style="color:var(--negative);" onclick="toggleFactsDetailMenu(' + factId + ');deleteFactsSkeletonFact(' + factId + ')">🗑 Delete</div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="facts-detail-title">' + esc(title) + '</div>' +
+    (fact.content ? '<div class="facts-detail-content">' + esc(fact.content) + '</div>' : '') +
+    '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
+    '</div>';
 }
 
 // 类型（mode）是记在 predicate_registry 上的，跟"这一类事实该怎么处理新旧"绑定，
@@ -5116,9 +5296,31 @@ async function deleteFactsSkeletonFact(factId) {
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
     if (!res.ok) throw new Error(data.error || '删除失败');
+    // Deleted from inside the detail page -- step back one level instead of
+    // trying to re-render a detail page for a fact that no longer exists.
+    if (factsNavState.level === 'detail' && factsNavState.factId === factId) {
+      factsNavGoTitles(factsNavState.subjectKey, factsNavState.predicateKey);
+    }
     await loadFactsSkeleton();
   } catch (e) {
     alert('删除失败: ' + e.message);
+  }
+}
+
+async function invalidateFactsFact(factId) {
+  if (!confirm('把这条标记为失效？不会提供替代值，历史记录会保留。')) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId + '/invalidate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '标失效失败');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('标失效失败: ' + e.message);
   }
 }
 
@@ -5166,26 +5368,110 @@ function setFactsAddMessage(message, tone) {
   if (tone) el.classList.add(tone);
 }
 
+function openFactsCreateModal() {
+  var titleEl = document.getElementById('facts-create-modal-title');
+  if (titleEl) titleEl.textContent = '新建事实';
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) subjectSel.disabled = false;
+  if (predicateSel) predicateSel.disabled = false;
+  document.getElementById('facts-add-title').value = '';
+  document.getElementById('facts-add-content').value = '';
+  document.getElementById('facts-add-valid-at').value = '';
+  setFactsAddMessage('', '');
+  populateFactsAddPredicateOptions();
+  document.getElementById('facts-create-overlay').style.display = 'flex';
+}
+
+function openFactsRevisionModal(subjectKey, predicateKey, factId) {
+  var fact = factsFindFact(subjectKey, predicateKey, factId);
+  var titleEl = document.getElementById('facts-create-modal-title');
+  if (titleEl) titleEl.textContent = 'New Revision（新增时间点）';
+  populateFactsAddPredicateOptions();
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) { subjectSel.value = subjectKey; subjectSel.disabled = true; }
+  if (predicateSel) { predicateSel.value = predicateKey; predicateSel.disabled = true; }
+  onFactsAddPredicateChange();
+  document.getElementById('facts-add-title').value = fact ? (fact.title || fact.object_text || '') : '';
+  document.getElementById('facts-add-content').value = fact ? (fact.content || '') : '';
+  document.getElementById('facts-add-valid-at').value = '';
+  setFactsAddMessage('', '');
+  document.getElementById('facts-create-overlay').style.display = 'flex';
+}
+
+function closeFactsCreateModal() {
+  document.getElementById('facts-create-overlay').style.display = 'none';
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) subjectSel.disabled = false;
+  if (predicateSel) predicateSel.disabled = false;
+}
+
+function openFactsEditModal(factId) {
+  var state = factsNavState;
+  var fact = factsFindFact(state.subjectKey, state.predicateKey, factId);
+  if (!fact) return;
+  factsEditingFactId = factId;
+  document.getElementById('facts-edit-title').value = fact.title || fact.object_text || '';
+  document.getElementById('facts-edit-content').value = fact.content || '';
+  var msg = document.getElementById('facts-edit-message');
+  if (msg) { msg.textContent = ''; msg.classList.remove('ok', 'error'); }
+  document.getElementById('facts-edit-overlay').style.display = 'flex';
+}
+
+function closeFactsEditModal() {
+  document.getElementById('facts-edit-overlay').style.display = 'none';
+  factsEditingFactId = null;
+}
+
+async function submitFactsEdit() {
+  if (!factsEditingFactId) return;
+  var title = (document.getElementById('facts-edit-title').value || '').trim();
+  var content = (document.getElementById('facts-edit-content').value || '').trim();
+  var msg = document.getElementById('facts-edit-message');
+  if (!title) {
+    if (msg) { msg.textContent = '标题不能为空。'; msg.classList.add('error'); }
+    return;
+  }
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factsEditingFactId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ title: title, content: content })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '保存失败');
+    closeFactsEditModal();
+    await loadFactsSkeleton();
+  } catch (e) {
+    if (msg) { msg.textContent = '保存失败: ' + e.message; msg.classList.add('error'); }
+  }
+}
+
 async function submitFactsAdd() {
   var subjectSel = document.getElementById('facts-add-subject');
   var predicateSel = document.getElementById('facts-add-predicate');
-  var objectInput = document.getElementById('facts-add-object');
+  var titleInput = document.getElementById('facts-add-title');
+  var contentInput = document.getElementById('facts-add-content');
   var validAtInput = document.getElementById('facts-add-valid-at');
   var subjectKey = (subjectSel && subjectSel.value) || '';
   var predicateValue = (predicateSel && predicateSel.value) || '';
-  var objectText = ((objectInput && objectInput.value) || '').trim();
+  var title = ((titleInput && titleInput.value) || '').trim();
+  var content = ((contentInput && contentInput.value) || '').trim();
   var validAt = ((validAtInput && validAtInput.value) || '').trim();
 
-  if (!objectText) {
-    setFactsAddMessage('先填具体内容，比如 165cm。', 'error');
+  if (!title) {
+    setFactsAddMessage('先填标题。', 'error');
     return;
   }
   if (!predicateValue) {
-    setFactsAddMessage('先选一个 predicate，或者新建一个。', 'error');
+    setFactsAddMessage('先选一个类型，或者新建一个。', 'error');
     return;
   }
 
-  var payload = { subject_key: subjectKey, object_text: objectText, valid_at: validAt };
+  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt };
 
   if (predicateValue === '__new__') {
     var newKeyInput = document.getElementById('facts-add-new-predicate-key');
@@ -5213,23 +5499,22 @@ async function submitFactsAdd() {
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
     if (!res.ok) throw new Error(data.error || '写入失败');
-    setFactsAddMessage('已添加事实（id ' + data.id + '）。', 'ok');
-    if (objectInput) objectInput.value = '';
-    var newKeyInputAfter = document.getElementById('facts-add-new-predicate-key');
-    var newNameInputAfter = document.getElementById('facts-add-new-predicate-name');
-    if (newKeyInputAfter) newKeyInputAfter.value = '';
-    if (newNameInputAfter) newNameInputAfter.value = '';
+    var landingPredicate = payload.predicate_key;
+    closeFactsCreateModal();
     await loadFactsSkeleton();
+    // Landing on the titles list where the new entry now shows up is the
+    // confirmation -- a success message here would flash invisibly since
+    // the modal that held it just closed.
+    factsNavGoTitles(subjectKey, landingPredicate);
   } catch (e) {
     setFactsAddMessage('写入失败: ' + e.message, 'error');
   }
 }
 
 async function loadFactsSkeleton() {
-  var list = document.getElementById('facts-list');
+  var nav = document.getElementById('facts-nav');
   var summary = document.getElementById('facts-summary');
-  if (!list || !summary) return;
-  list.innerHTML = '<div class="loading">加载骨架层事实…</div>';
+  if (!nav || !summary) return;
   summary.textContent = '读取中…';
   try {
     var res = await authFetch(BASE + '/api/facts-skeleton');
@@ -5237,41 +5522,15 @@ async function loadFactsSkeleton() {
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || '加载失败');
     factsSkeletonPredicates = Array.isArray(data.predicates) ? data.predicates : [];
+    factsSkeletonGroups = Array.isArray(data.groups) ? data.groups : [];
     populateFactsAddPredicateOptions();
     renderPredicateManagementList();
-    var groups = Array.isArray(data.groups) ? data.groups : [];
-    summary.textContent = groups.length + ' 类事实';
-    if (!groups.length) {
-      list.innerHTML = '<div class="loading">还没有稳定事实。</div>';
-      return;
-    }
-
-    var bySubject = {};
-    var testGroups = [];
-    groups.forEach(function(g) {
-      if (factsIsTestGroup(g)) { testGroups.push(g); return; }
-      (bySubject[g.subject_key] = bySubject[g.subject_key] || []).push(g);
-    });
-
-    var html = '';
-    Object.keys(bySubject).forEach(function(subjectKey) {
-      html += '<details open style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;">' +
-        esc(factsSubjectLabel(subjectKey)) + '</summary>' +
-        '<div style="padding-left:8px;">' + bySubject[subjectKey].map(renderFactGroup).join('') + '</div>' +
-        '</details>';
-    });
-    if (testGroups.length) {
-      html += '<details style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;color:var(--text-dim);">' +
-        '测试数据（' + testGroups.length + '）</summary>' +
-        '<div style="padding-left:8px;">' + testGroups.map(renderFactGroup).join('') + '</div>' +
-        '</details>';
-    }
-    list.innerHTML = html;
+    var realGroupCount = factsSkeletonGroups.filter(function(g) { return !factsIsTestGroup(g); }).length;
+    summary.textContent = realGroupCount + ' 类事实';
+    renderFactsNav();
   } catch (e) {
     summary.textContent = '读取失败';
-    list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+    nav.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
   }
 }
 
