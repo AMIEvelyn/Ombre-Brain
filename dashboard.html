@@ -5417,9 +5417,9 @@ function renderFactsDetailLevel(subjectKey, predicateKey, factId) {
     '</div>' +
     '</div>' +
     '<div class="facts-detail-title">' + esc(title) + '</div>' +
-    renderFactsTagsLine(fact.tags) +
     renderFactsAttachmentsBlock(factId, fact.attachments) +
     (fact.content ? '<div class="facts-detail-content">' + esc(fact.content) + '</div>' : '') +
+    renderFactsTagsLine(fact.tags) +
     '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
     '</div>';
 }
