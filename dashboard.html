@@ -2212,28 +2212,35 @@
   .facts-browse-columns {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    overflow-x: auto;
+    gap: 0;
+    padding: 4px 6px 10px 4px;
   }
   .facts-browse-col {
     display: flex;
     flex-direction: column;
     gap: 4px;
     min-width: 0;
+    position: relative;
   }
-  .facts-browse-col-subjects { flex: 0 0 20%; padding: 4px 2px; }
+  .facts-browse-col-subjects { flex: 0 0 22%; padding: 4px 2px; z-index: 1; }
   .facts-browse-col-keys {
-    flex: 0 0 26%;
+    flex: 0 0 30%;
     background: var(--accent-glow);
-    border-radius: 12px;
-    padding: 8px;
+    border-radius: 14px;
+    padding: 10px 8px;
+    margin-left: -14px;
+    z-index: 2;
+    box-shadow: 4px 4px 12px var(--shadow-dark-subtle), -2px -2px 8px var(--shadow-light);
   }
   .facts-browse-col-titles {
     flex: 1 1 auto;
     background: var(--surface-solid);
-    border-radius: 12px;
-    padding: 8px 10px;
+    border-radius: 14px;
+    padding: 10px 12px;
     gap: 8px;
+    margin-left: -14px;
+    z-index: 3;
+    box-shadow: 4px 4px 14px var(--shadow-dark-subtle), -2px -2px 8px var(--shadow-light);
   }
   .facts-browse-item {
     padding: 8px 10px;
