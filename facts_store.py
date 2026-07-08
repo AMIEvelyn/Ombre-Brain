@@ -9,6 +9,9 @@ from typing import Any
 PREDICATE_MODES = {"exclusive_current", "multi_current", "historical_event"}
 DEFAULT_PREDICATE_MODE = "multi_current"  # unclassified predicates default to the safest mode
 EVIDENCE_TYPES = {"bucket", "raw_event", "manual", "tool"}
+FACT_BUCKET_RELATION_TYPES = {"evidence", "origin", "related"}
+DEFAULT_FACT_BUCKET_RELATION_TYPE = "evidence"
+FACT_BUCKET_LINKS_MAX_PER_FACT = 5
 
 
 def make_state_key(subject_key: str, predicate_key: str) -> str:
@@ -107,6 +110,21 @@ class FactStore:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_timeline_edges_from ON timeline_edges(from_bucket_id, from_fact_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_timeline_edges_to ON timeline_edges(to_bucket_id, to_fact_id)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fact_bucket_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fact_id INTEGER NOT NULL,
+                bucket_id TEXT NOT NULL,
+                moment_id TEXT NOT NULL DEFAULT '',
+                relation_type TEXT NOT NULL DEFAULT 'evidence',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(fact_id, bucket_id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_bucket_links_fact ON fact_bucket_links(fact_id)")
         conn.commit()
         conn.close()
 
@@ -373,3 +391,83 @@ class FactStore:
         conn.commit()
         conn.close()
         return edge_id
+
+    # ------------------------------------------------------------------
+    # fact_bucket_links -- many-to-many links between a fact/card and the
+    # memory buckets that back it (evidence / origin / related). Separate
+    # from facts.evidence_id, which stays as the single auto-attributed
+    # source recorded by add_fact()/profile_fact(); this table is for the
+    # facts-card UI's manually curated, possibly-multiple bucket links.
+    # ------------------------------------------------------------------
+    def count_bucket_links(self, fact_id: int) -> int:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ?",
+            (int(fact_id),),
+        ).fetchone()
+        conn.close()
+        return int(row["n"]) if row else 0
+
+    def get_bucket_links(self, fact_id: int) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM fact_bucket_links WHERE fact_id = ? ORDER BY created_at ASC",
+            (int(fact_id),),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def add_bucket_link(
+        self,
+        fact_id: int,
+        bucket_id: str,
+        *,
+        moment_id: str = "",
+        relation_type: str = DEFAULT_FACT_BUCKET_RELATION_TYPE,
+        note: str = "",
+    ) -> int:
+        """Link a memory bucket to a fact/card. Idempotent -- linking the same
+        (fact_id, bucket_id) pair twice returns the existing link's id instead
+        of erroring or duplicating. Raises ValueError if the fact already has
+        FACT_BUCKET_LINKS_MAX_PER_FACT links and this would add a new one."""
+        fact_id = int(fact_id)
+        bucket_id = str(bucket_id or "").strip()
+        if not bucket_id:
+            raise ValueError("bucket_id is required")
+        relation_type = relation_type if relation_type in FACT_BUCKET_RELATION_TYPES else DEFAULT_FACT_BUCKET_RELATION_TYPE
+
+        conn = self._connect()
+        existing = conn.execute(
+            "SELECT id FROM fact_bucket_links WHERE fact_id = ? AND bucket_id = ?",
+            (fact_id, bucket_id),
+        ).fetchone()
+        if existing:
+            conn.close()
+            return int(existing["id"])
+
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ?", (fact_id,)
+        ).fetchone()
+        if int(count_row["n"]) >= FACT_BUCKET_LINKS_MAX_PER_FACT:
+            conn.close()
+            raise ValueError(f"这张卡最多关联 {FACT_BUCKET_LINKS_MAX_PER_FACT} 个记忆桶")
+
+        cursor = conn.execute(
+            """
+            INSERT INTO fact_bucket_links (fact_id, bucket_id, moment_id, relation_type, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (fact_id, bucket_id, str(moment_id or ""), relation_type, str(note or ""), self._now_iso()),
+        )
+        link_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return link_id
+
+    def remove_bucket_link(self, link_id: int) -> bool:
+        conn = self._connect()
+        cursor = conn.execute("DELETE FROM fact_bucket_links WHERE id = ?", (int(link_id),))
+        conn.commit()
+        removed = cursor.rowcount > 0
+        conn.close()
+        return removed

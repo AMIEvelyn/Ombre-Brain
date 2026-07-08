@@ -1,7 +1,7 @@
 # 资料卡片统一模型 + 历史批量筛选 —— 设计讨论存档
 
 写给：一澜、林湛
-状态：**第1步（资料卡地基）、第2步（图片/文件上传）、第3步（视觉打磨）已实现并部署**；额外顺手加了标签+搜索、`fact_lookup` 内容修复；第4/5/6步仍是设计存档，未开工
+状态：**第1步（资料卡地基）、第2步（图片/文件上传）、第3步（视觉打磨）已实现并部署**；额外顺手加了标签+搜索、`fact_lookup` 内容修复；**第4步（关联记忆桶，多对多）后端已完成，UI 待做**；第5/6步仍是设计存档，未开工
 
 ## 给接手的新会话看：现在到哪一步了
 
@@ -13,7 +13,7 @@
 | 2. 图片/文件上传基建 | ✅ 已部署 |
 | 顺手：`fact_lookup` 加 `query` 参数 + 标签搜索、`facts` 表加 `tags` 字段 | ✅ 已部署 |
 | 3. 视觉打磨（毛玻璃→后改实色、思源宋体、照片轮播+滑动、长内容收起展开、**三级导航从"单层+返回键"改成 Miller columns 三栏同显**、点事实变成悬浮详情卡） | ✅ 已部署，一澜确认满意 |
-| 4. 关联记忆桶管理（Add Bucket/View Bucket） | ⏳ 未开工，依赖 `evidence_id` 先改 JSON 数组 |
+| 4. 关联记忆桶管理（Add Bucket/View Bucket） | 🔶 后端已完成，UI 待做（见下方里程碑） |
 | 5. 历史批量筛选（三类事实分别处理） | ⏳ 未开工 |
 | 6. "未来线/成就册"模块 | ⏳ 未开工 |
 | 待办：`docs/Tool Guide.md` 补 `fact_lookup` 用法 | ⏳ 还没做，说好等第3+5步都收尾了再一次性补，现在第3步做完了，还差第5步 |
@@ -89,9 +89,9 @@
 
 `valid_at` 本来就是可以留空的（不是 NOT NULL），这个不用改，下面会用到。
 
-### 已知缺口：`evidence_id` 目前只能存一个来源
+### 已知缺口：`evidence_id` 目前只能存一个来源 —— 已用关联表解决，见下方第4步里程碑
 
-现在的 schema 里 `evidence_id` 是单个字符串，假设一条事实只有一个来源桶。但"关系模式类"事实往往要综合好几个桶才能归纳出来，需要挂多个证据桶。等做到这一块时改成 **JSON 数组**（`["bucket_123", "bucket_456", "bucket_789"]`），不用逗号分隔字符串——林湛提醒过，数组更稳，以后前端展开来源、筛选的时候不用额外做字符串解析。现在先记录，不阻塞其他部分。
+原计划是把 `evidence_id` 单字符串改成 JSON 数组。第4步实现时林湛建议改用**独立的多对多关联表**（`fact_bucket_links`）而不是数组字段，理由是这样能顺带带上 `relation_type`（evidence/origin/related）和 `note`，以后扩展更方便，不用改字段类型。`facts.evidence_id` 本身没动，继续作为 `add_fact()`/`profile_fact()` 自动写入时的单一溯源字段；新表是资料卡 UI 手动维护的、可能多个的关联，两者并存，互不影响。
 
 ## 二、历史批量筛选：三类事实，三种处理方式
 
@@ -249,3 +249,21 @@
 这几轮全是纯 CSS 调整，没碰状态逻辑，每一轮都重新跑过 Playwright 交互脚本（三栏联动、开关详情浮层、无横向滚动条）确认功能没被带坏。一澜最后确认满意，已经准备部署文件。
 
 **部署记录**：只有 `dashboard.html` 变了（这一整段视觉打磨期间没碰过后端），基于她上一次部署的版本（"字体确认+弹窗透明度调整"那次）用 `git diff` 生成累积补丁再手动核对应用，逐个函数/CSS 区块 diff 确认改动范围符合预期，已发给她部署。
+
+## 里程碑：第4步后端（关联记忆桶，多对多）实现完成，UI 待做（2026-07-08）
+
+一澜转达了林湛对第4步的要求：**不要只存单个 `bucket_id`，改成资料卡与记忆桶的多对多关联**，因为像"蓝色星星U盘手链"就至少有"2026-02-18 制作新手链"、"2026-02-26 第一代守护版"两个相关桶，婚戒以后也可能有戴上当天/刻字讨论/照片记录好几条。林湛给的最小可用方案是一张关联表：`fact_id` / `bucket_id` / `moment_id`（可选）/ `relation_type`（可选，evidence/origin/related）/ `note`（可选）/ `created_at`，`moment_id`/`relation_type`/`note` 先预留字段，UI 不用一次做全。这次只做后端，UI（详情页"关联记忆桶"区块、Add Bucket 搜索、View Bucket 列表）等一澜给参考图之后再做，先按上面的表更新了"现在到哪一步了"状态。
+
+**跟原计划的差异**：原来"已知缺口"那节写的是把 `evidence_id` 单字符串改成 JSON 数组，这次改成了独立的 `fact_bucket_links` 关联表（见上方"已知缺口"小节的更新），`facts.evidence_id` 本身没动，两者并存。
+
+**做了什么**：
+- `facts_store.py` 新增 `fact_bucket_links` 表（`CREATE TABLE IF NOT EXISTS`，全新表不用 `ALTER TABLE` 迁移，比 `attachments`/`tags` 当初的迁移还简单），`UNIQUE(fact_id, bucket_id)` 防止同一个桶被重复挂两次。新增方法：`add_bucket_link()`（重复挂同一个桶直接幂等返回已有 link_id，不报错也不建重复行；超过上限抛 `ValueError`）、`remove_bucket_link()`、`get_bucket_links()`、`count_bucket_links()`。
+- **挂载数量上限沿用了之前"大项目代表桶不超过5个"那条**（`FACT_BUCKET_LINKS_MAX_PER_FACT = 5`）——林湛举的例子（手链2个、婚戒大概3-4个）都在这个范围内，先沿用旧上限，以后如果发现不够用（比如某类事实经常超过5个）再单独调整，不是这次判断死的。
+- `server.py` 新增4个接口：`GET /api/facts-skeleton/facts/{fact_id}/buckets`（列出关联桶，带桶标题/日期/内容预览，桶已被删的话该条返回 `bucket: null` 而不是直接从列表消失，方便前端提示"桶已不存在"）、`POST` 同路径（挂载，`relation_type` 不传默认 `evidence`）、`DELETE /api/facts-skeleton/facts/{fact_id}/buckets/{link_id}`（解除关联，不影响记忆桶本身）、`GET /api/facts-skeleton/buckets/search?q=`（Add Bucket 搜索用，精确 bucket_id 命中优先排最前面，再补充 `bucket_mgr.search()` 的模糊/语义搜索结果，复用现成搜索不用另起炉灶）。
+- `fact_lookup` 顺带按林湛的要求更新：现在会提示"关联了 N 个记忆桶"，并带出前3个的 `bucket_id《标题》`，超过3个后面加"等共N个"。
+
+**revision 级关联的取舍**：林湛提到理想状态应该是关联跟具体版本/时间点绑定（婚戒卡以后改正文，旧版本也该知道当时关联了哪些桶），但明确说第一版可以先简单做在 fact/card 上，以后再升级到 revision 级别。这次就是按"先简单做"实现的——`fact_bucket_links.fact_id` 直接挂在当前这一行 fact 记录上，编辑（`update_fact`，不留新时间点）不受影响；但如果以后用"New Revision"开新的时间点，新行是新的 `fact_id`，旧关联不会自动带过去，这是已知的后续升级点，不是这次的疏漏。
+
+**验证**：这次环境仍然缺 `jieba`/`mcp`/`httpx`/`rapidfuzz`/`pytest`，且沙盒没有 PyPI 网络访问（试了 `pip install` 和纯 wheel 安装都失败），没能像第2步那次一样伪造依赖跑通完整 `import server`。改为对 `facts_store.py` 新增的部分做了不依赖这些外部库的直接单元测试（纯 sqlite，隔离临时目录）：验证了挂载/查询/幂等重复挂载/满5个后拒绝挂载/解除关联/非法 `relation_type` 回退默认值这几种情况，全部符合预期。`server.py` 那几个新接口是纯静态审查——确认用到的 `bucket_mgr`、`strip_wikilinks`、`_require_dashboard_auth`、`JSONResponse` 都是文件里已经在用的现成符号，写法跟同一文件里其他 facts-skeleton 接口的模式（鉴权检查、body 校验、错误返回）一致；`python3 -m py_compile server.py facts_store.py` 通过。**没有跑真实 HTTP 请求端到端测试，也没有跑 `scripts/test_predicate_modes.py` 回归测试**——这两项等下次有能跑通依赖的环境时应该补上，目前只能保证语法正确和核心逻辑本身没问题。
+
+**待办**：详情页"关联记忆桶"区块 + Add Bucket 搜索选择器 + View Bucket 列表这三块 UI，等一澜给参考图后再做。

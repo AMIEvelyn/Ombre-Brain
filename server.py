@@ -86,7 +86,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
-from facts_store import FactStore, PREDICATE_MODES
+from facts_store import FactStore, PREDICATE_MODES, FACT_BUCKET_RELATION_TYPES, FACT_BUCKET_LINKS_MAX_PER_FACT
 from entity_edges import EntityEdgeStore, extract_entity_edges_from_bucket
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
@@ -8737,10 +8737,25 @@ async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: s
         attachment_note = f"\n  （附了 {len(attachments)} 个图片/文件，暂时只能提示存在，无法直接看到内容）" if attachments else ""
         tags = [str(t) for t in (item.get("tags") or [])]
         tags_note = "\n  " + " ".join(f"#{t}" for t in tags) if tags else ""
+        links_note = ""
+        try:
+            links = fact_store.get_bucket_links(item.get("id"))
+        except Exception:
+            links = []
+        if links:
+            bits = []
+            for link in links[:3]:
+                summary = await _bucket_link_summary(link["bucket_id"])
+                if summary:
+                    bits.append(f"{link['bucket_id']}《{summary['name']}》")
+                else:
+                    bits.append(f"{link['bucket_id']}（桶已不存在）")
+            more = f" 等共{len(links)}个" if len(links) > 3 else ""
+            links_note = f"\n  关联了 {len(links)} 个记忆桶：{'、'.join(bits)}{more}"
         lines.append(
             f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {title}"
             f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
-            f"{content_note}{tags_note}{attachment_note}"
+            f"{content_note}{tags_note}{attachment_note}{links_note}"
         )
     return "\n".join(lines)
 
@@ -10043,6 +10058,185 @@ async def api_facts_skeleton_delete_fact(request):
     if not deleted:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse({"status": "deleted", "id": fact_id})
+
+
+# =============================================================
+# Facts-card <-> memory-bucket links (many-to-many, Step 4)
+# 资料卡与记忆桶的多对多关联（第4步）
+# =============================================================
+async def _bucket_link_summary(bucket_id: str) -> dict | None:
+    """Light summary (id/name/date/content preview) of a bucket for display
+    inside a fact's "关联记忆桶" list. None if the bucket no longer exists
+    (deleted/forgotten) -- the link row is kept as-is; the frontend shows it
+    as a dangling reference rather than silently dropping it."""
+    bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        return None
+    meta = bucket.get("metadata", {}) or {}
+    return {
+        "id": bucket["id"],
+        "name": meta.get("name", bucket["id"]),
+        "date": meta.get("date"),
+        "created": meta.get("created", ""),
+        "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+    }
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["GET"])
+async def api_facts_skeleton_list_bucket_links(request):
+    """List the memory buckets linked to one fact/card, enriched with a light
+    bucket summary for display. relation_type/note/moment_id are returned as
+    stored even though the UI may not surface all of them yet."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    links = fact_store.get_bucket_links(fact_id)
+    result = []
+    for link in links:
+        result.append({
+            "link_id": link["id"],
+            "bucket_id": link["bucket_id"],
+            "moment_id": link.get("moment_id") or "",
+            "relation_type": link.get("relation_type") or "evidence",
+            "note": link.get("note") or "",
+            "created_at": link.get("created_at") or "",
+            "bucket": await _bucket_link_summary(link["bucket_id"]),
+        })
+    return JSONResponse({"links": result, "max": FACT_BUCKET_LINKS_MAX_PER_FACT})
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["POST"])
+async def api_facts_skeleton_link_bucket(request):
+    """Link a memory bucket to a fact/card. Body: bucket_id required;
+    relation_type (evidence/origin/related, defaults to evidence),
+    moment_id, note optional. Capped at FACT_BUCKET_LINKS_MAX_PER_FACT links
+    per fact -- same "don't dump every related bucket onto one card" rule
+    used for representative buckets on big-project cards."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    bucket_id = str(body.get("bucket_id") or "").strip()
+    if not bucket_id:
+        return JSONResponse({"error": "bucket_id 不能为空"}, status_code=400)
+    bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        return JSONResponse({"error": f"未找到记忆桶: {bucket_id}"}, status_code=404)
+
+    relation_type = str(body.get("relation_type") or "").strip()
+    if relation_type and relation_type not in FACT_BUCKET_RELATION_TYPES:
+        return JSONResponse(
+            {"error": f"relation_type 必须是 {'/'.join(sorted(FACT_BUCKET_RELATION_TYPES))} 之一"},
+            status_code=400,
+        )
+
+    try:
+        link_id = fact_store.add_bucket_link(
+            fact_id,
+            bucket_id,
+            moment_id=str(body.get("moment_id") or "").strip(),
+            relation_type=relation_type or "evidence",
+            note=str(body.get("note") or "").strip(),
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    return JSONResponse({
+        "status": "linked",
+        "link_id": link_id,
+        "bucket": await _bucket_link_summary(bucket_id),
+    })
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets/{link_id}", methods=["DELETE"])
+async def api_facts_skeleton_unlink_bucket(request):
+    """Remove one fact<->bucket link (does not touch the bucket itself)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+        link_id = int(request.path_params["link_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    links = fact_store.get_bucket_links(fact_id)
+    if not any(link["id"] == link_id for link in links):
+        return JSONResponse({"error": "link not found on this fact"}, status_code=404)
+
+    removed = fact_store.remove_bucket_link(link_id)
+    if not removed:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"status": "unlinked", "link_id": link_id})
+
+
+@mcp.custom_route("/api/facts-skeleton/buckets/search", methods=["GET"])
+async def api_facts_skeleton_search_buckets(request):
+    """Search memory buckets to link onto a fact/card (the "Add Bucket"
+    picker). q can be a keyword (reuses bucket_mgr's existing multi-dim
+    search) or an exact bucket id -- an exact id match is tried first and
+    put at the front of the results so pasting a known bucket_id always
+    works even if the fuzzy searcher wouldn't otherwise surface it."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    query = str(request.query_params.get("q") or "").strip()
+    if not query:
+        return JSONResponse({"buckets": []})
+
+    results: list[dict] = []
+    seen_ids: set[str] = set()
+
+    exact = await _bucket_link_summary(query)
+    if exact:
+        results.append(exact)
+        seen_ids.add(exact["id"])
+
+    try:
+        matches = await bucket_mgr.search(query, limit=10, include_archive=True)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    for bucket in matches:
+        if bucket["id"] in seen_ids:
+            continue
+        meta = bucket.get("metadata", {}) or {}
+        results.append({
+            "id": bucket["id"],
+            "name": meta.get("name", bucket["id"]),
+            "date": meta.get("date"),
+            "created": meta.get("created", ""),
+            "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+        })
+        seen_ids.add(bucket["id"])
+
+    return JSONResponse({"buckets": results[:10]})
 
 
 @mcp.custom_route("/api/facts-skeleton/predicates/{predicate_key}", methods=["PATCH"])
