@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 import httpx
+from rapidfuzz import fuzz
 
 
 # --- Ensure same-directory modules can be imported ---
@@ -85,7 +86,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
-from facts_store import FactStore
+from facts_store import FactStore, PREDICATE_MODES
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
     active_facets,
@@ -6773,6 +6774,158 @@ def _has_active_facets(facets: dict | None) -> bool:
 
 
 # =============================================================
+# Facts/timeline skeleton auto-supplement for breath()
+# 骨架层自动补充：breath() 内部自己判断要不要额外查 facts，
+# 不需要调用方（林湛）自己判断该去心脏还是骨架
+#
+# Design intent (见 docs/memzep-plan.md "查询怎么分流"):
+# 默认所有问题都走心脏（原有 breath 检索），只有明确像"要精确事实"
+# 的问题才额外补充骨架层内容；宁可漏查退回心脏，也不误判抢答情绪类问题。
+# 这里只做"补充"（append），从不替换/拦截正常 breath 结果。
+# =============================================================
+
+# 部分 predicate 的常见口语问法跟 display_name 不完全一致，补充同义词
+# 触发词；display_name 本身也会作为触发词参与匹配（见下方函数）。
+# 同义词表是笨办法但故意保持笨——漏查了就是漏了这一条同义词，照着日志
+# 补上就行，不引入"聪明但边界模糊"的判断方式。
+_FACT_QUERY_PREDICATE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "height": ("身高", "多高", "几厘米", "个子", "个头"),
+    "weight": ("体重", "多重", "多少斤", "几斤", "胖瘦"),
+    "food_preference": ("喜欢吃什么", "爱吃什么", "偏好", "口味", "食物喜好"),
+    "current_school_status": ("休学", "在读", "上学状态", "在校状态"),
+    "current_health_status": ("现在身体", "现在感冒", "现在咳嗽", "身体状态"),
+    "current_plan": ("当前计划", "现在的计划", "最近的计划"),
+    "relationship_status": ("关系状态", "复婚了吗", "结婚了吗", "现在是什么关系", "我们现在什么关系", "我们是不是在一起"),
+    "tool_access_status": ("工具权限", "写入权限", "能不能写入"),
+    "budget_status": ("预算状态", "预算够不够"),
+    "preferred_name": ("现在怎么称呼", "现在叫什么", "当前称呼"),
+    "relationship_need": ("关系需求", "亲密关系的需求", "关系需要什么"),
+}
+
+# 这几个 predicate 本身就是"关于情绪/关系的资料"，display_name/同义词很容易在
+# 谈心时被顺口说出来（"冲突""情绪需求"）。裸词命中不算数，必须同时带"像在查档案"
+# 的信号词，才会真的触发骨架——避免谈心谈到一半突然被追加一段资料卡。
+# 注意："记得"故意不算信号词——"你记得我们上次冲突我哭了吗"这种是回忆/谈心，
+# 不是查档案，光凭"记得"太宽，必须是"有哪些/是什么/记录过/骨架里/稳定事实里/
+# 查一下"这类更明确的查档案说法才算数。
+_FACT_SKELETON_SENSITIVE_PREDICATES = {"trauma_trigger", "emotional_need", "relationship_need", "conflict"}
+_FACT_SKELETON_ARCHIVE_INTENT_MARKERS = (
+    "有哪些", "是什么", "记录过", "记录里", "骨架", "稳定事实", "查一下", "查查", "档案",
+)
+
+_FACT_SUBJECT_HINTS: tuple[tuple[str, str], ...] = (
+    ("一澜", "yi_lan"),
+    ("林湛", "lin_zhan"),
+    ("我们", "relationship"),
+    ("咱们", "relationship"),
+)
+
+
+def _facts_skeleton_infer_subject(query: str) -> str:
+    """从问题里猜 subject_key；猜不准就留空（查全部主体），不瞎猜。"""
+    q = query or ""
+    for token, subject_key in _FACT_SUBJECT_HINTS:
+        if token in q:
+            return subject_key
+    has_wo = "我" in q
+    has_ni = "你" in q
+    if has_wo and not has_ni:
+        return "yi_lan"
+    if has_ni and not has_wo:
+        return "lin_zhan"
+    return ""
+
+
+def _facts_skeleton_match_predicates(query: str) -> list[str]:
+    """问题里是否提到了某个已登记 predicate；命中才算"像事实问题"，这是唯一的触发门槛。
+    情绪/关系类敏感 predicate 额外要求带"查档案"的信号词，裸词提及不算命中。"""
+    q = (query or "").strip()
+    if not q:
+        return []
+    matched = []
+    try:
+        predicates = fact_store.list_predicates()
+    except Exception as e:
+        logger.warning("Facts skeleton predicate lookup failed / 骨架层读取 predicate_registry 失败: %s", e)
+        return []
+    has_archive_intent = any(marker in q for marker in _FACT_SKELETON_ARCHIVE_INTENT_MARKERS)
+    for row in predicates:
+        predicate_key = row.get("predicate_key") or ""
+        display_name = (row.get("display_name") or "").strip()
+        hit = bool(display_name) and display_name in q
+        if not hit:
+            for syn in _FACT_QUERY_PREDICATE_SYNONYMS.get(predicate_key, ()):
+                if syn in q:
+                    hit = True
+                    break
+        if hit and predicate_key in _FACT_SKELETON_SENSITIVE_PREDICATES and not has_archive_intent:
+            hit = False
+        if hit:
+            matched.append(predicate_key)
+    return matched
+
+
+def _format_facts_skeleton_entries(facts: list[dict], at_date: str = "") -> str:
+    if not facts:
+        return ""
+    when = f"截至 {at_date}" if at_date else "当前有效"
+    header = (
+        f"（骨架层自动补充，{when}，自动匹配——这是后台结构化数据，"
+        "回复时请用自然语言转述给对方听，不要把下面的字段原样贴出来）"
+    )
+    lines = [header]
+    for item in facts:
+        invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
+        lines.append(
+            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {item.get('object_text')}"
+            f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}）"
+        )
+    return "\n".join(lines)
+
+
+def _format_facts_skeleton_empty_note(at_date: str = "") -> str:
+    when = f"截至 {at_date}" if at_date else "当前"
+    return f"（骨架层已查，{when}暂无这条稳定事实记录——如实告知对方查不到，不要自己编。）"
+
+
+def _facts_skeleton_supplement(query: str, at_date: str = "") -> str:
+    """query 像"要精确事实"才补充骨架层内容，否则原样返回空字符串、绝不介入。
+    三种状态都会写日志：not_triggered / triggered_found / triggered_empty，
+    方便以后从日志里发现"这句话本该触发但漏查了"，照着补同义词。"""
+    query_snippet = _clip_text(query or "", 60)
+    predicate_keys = _facts_skeleton_match_predicates(query)
+    if not predicate_keys:
+        logger.info("[facts-skeleton] state=not_triggered query=%r", query_snippet)
+        return ""
+    subject_key = _facts_skeleton_infer_subject(query)
+    try:
+        collected: list[dict] = []
+        for predicate_key in predicate_keys:
+            if at_date:
+                rows = fact_store.get_facts_at(at_date, subject_key=subject_key)
+                rows = [r for r in rows if r.get("predicate_key") == predicate_key]
+            else:
+                rows = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+            collected.extend(rows)
+    except Exception as e:
+        logger.warning("Facts skeleton auto-supplement failed / 骨架层自动补充失败: %s", e)
+        return ""
+
+    if collected:
+        logger.info(
+            "[facts-skeleton] state=triggered_found predicates=%s subject=%s count=%d query=%r",
+            predicate_keys, subject_key or "(all)", len(collected), query_snippet,
+        )
+        return _format_facts_skeleton_entries(collected, at_date=at_date)
+
+    logger.info(
+        "[facts-skeleton] state=triggered_empty predicates=%s subject=%s query=%r",
+        predicate_keys, subject_key or "(all)", query_snippet,
+    )
+    return _format_facts_skeleton_empty_note(at_date=at_date)
+
+
+# =============================================================
 # Tool 1: breath — Breathe
 # 工具 1：breath — 呼吸
 #
@@ -6907,7 +7060,7 @@ async def breath(
 
     if date_key:
         domain_filter = [d.strip() for d in domain.split(",") if d.strip()] or None
-        return await _read_breath_date(
+        date_result = await _read_breath_date(
             date_key=date_key,
             label=date_label,
             query=query,
@@ -6915,6 +7068,8 @@ async def breath(
             max_results=max_results,
             domain_filter=domain_filter,
         )
+        facts_supplement = _facts_skeleton_supplement(query, at_date=date_key)
+        return f"{date_result}\n\n{facts_supplement}" if facts_supplement else date_result
 
     # --- No args or empty query: surfacing mode (weight pool active push) ---
     # --- 无参数或空query：浮现模式（权重池主动推送）---
@@ -7619,14 +7774,20 @@ async def breath(
             + "\n".join(_format_suppressed_recall_candidate(moment, seed_diagnostics) for moment in suppressed_moments[:10])
         )
 
+    facts_supplement = _facts_skeleton_supplement(query)
+
     if not response_parts:
         if recall_thresholds.get("has_explicit_entity") and suppressed_moments:
-            return dream_block or "没有找到可靠命中。"
-        return dream_block or "未找到相关记忆。"
+            base = dream_block or "没有找到可靠命中。"
+        else:
+            base = dream_block or "未找到相关记忆。"
+        return f"{base}\n\n{facts_supplement}" if facts_supplement else base
 
     response_text = "\n\n".join(response_parts)
     if dream_block:
         response_text += "\n\n" + dream_block
+    if facts_supplement:
+        response_text += "\n\n" + facts_supplement
     return response_text
 
 
@@ -8431,20 +8592,51 @@ async def profile_fact(
 
 
 # =============================================================
+# Tags/query matching for facts-card search (title/content/tags)
+# 资料卡搜索用的标签/关键词匹配 —— fact_lookup 和 Dashboard 共用
+# =============================================================
+FACTS_QUERY_FUZZY_THRESHOLD = 70
+
+
+def _facts_query_matches(query: str, item: dict) -> bool:
+    """True if query is a literal substring of title/content/tags, or fuzzy-
+    matches title/tags closely enough (rapidfuzz token_set_ratio, same library
+    already used for bucket-title fuzzy matching elsewhere in this file).
+    Handles both "字面就在标题里" (substring) and "标题里的字被跳过/换序但明显
+    是同一个东西" (fuzzy) -- true synonyms with no shared characters (e.g. 皮筋
+    vs 扎头绳) need an explicit tag instead, fuzzy matching can't infer those."""
+    query = str(query or "").strip()
+    if not query:
+        return True
+    title = str(item.get("title") or item.get("object_text") or "")
+    content = str(item.get("content") or "")
+    tags = [str(t) for t in (item.get("tags") or [])]
+    haystacks = [title, content] + tags
+    if any(query in h for h in haystacks):
+        return True
+    fuzzy_targets = [title] + tags
+    return any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h)
+
+
+# =============================================================
 # Tool 3.6: fact_lookup — query the facts/timeline skeleton layer
 # 工具 3.6：fact_lookup — 查询骨架层（稳定事实/时间线），不受遗忘曲线影响
 # =============================================================
 @mcp.tool()
-async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "") -> str:
+async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: str = "", query: str = "") -> str:
     """只读查询骨架层稳定事实（facts.sqlite），精确检索，不受遗忘曲线影响，不会随时间沉底。
     不传 at_date：返回当前仍然有效的事实（已被新事实软失效的旧记录不显示）。
     传 at_date="YYYY-MM-DD"：返回该日期当时为真的历史状态。
     subject_key 建议用 yi_lan / lin_zhan / relationship；留空则查全部主体。
+    query 可选：在标题/内容/标签里搜关键词（支持字面包含 + 模糊匹配，比如标题是
+    "蓝色星星U盘手链"，搜"手链"或"蓝色星星手链"都能命中）——同一个 predicate_key
+    下东西多、一次性列不过来时用这个缩小范围；不传 query 就跟以前一样列出全部。
     这个工具只回答"事实类"问题（现在多高、现在住哪、某天状态如何）；
     情绪/关系类问题（为什么难过、怎么看这件事）不要用这个，继续用 breath。"""
     subject_key = str(subject_key or "").strip()
     predicate_key = str(predicate_key or "").strip()
     at_date = str(at_date or "").strip()
+    query = str(query or "").strip()
 
     try:
         if at_date:
@@ -8453,19 +8645,29 @@ async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: s
                 facts = [f for f in facts if f.get("predicate_key") == predicate_key]
         else:
             facts = fact_store.get_current_facts(subject_key=subject_key, predicate_key=predicate_key)
+        if query:
+            facts = [f for f in facts if _facts_query_matches(query, f)]
     except Exception as e:
         return f"查询骨架层失败: {e}"
 
     if not facts:
-        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）"
+        return "没有查到符合条件的稳定事实。（这一层刚建好，数据还很少，正常）" if not query else f"没搜到匹配「{query}」的稳定事实。"
 
     header = f"=== 骨架层事实（{'截至 ' + at_date if at_date else '当前有效'}） ==="
     lines = [header]
     for item in facts:
         invalid_note = "" if not item.get("invalid_at") else f"，已于 {item['invalid_at']} 失效"
+        title = str(item.get("title") or item.get("object_text") or "")
+        content = str(item.get("content") or "").strip()
+        content_note = f"\n  内容：{content}" if content else ""
+        attachments = item.get("attachments") or []
+        attachment_note = f"\n  （附了 {len(attachments)} 个图片/文件，暂时只能提示存在，无法直接看到内容）" if attachments else ""
+        tags = [str(t) for t in (item.get("tags") or [])]
+        tags_note = "\n  " + " ".join(f"#{t}" for t in tags) if tags else ""
         lines.append(
-            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {item.get('object_text')}"
+            f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {title}"
             f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
+            f"{content_note}{tags_note}{attachment_note}"
         )
     return "\n".join(lines)
 
@@ -9400,6 +9602,7 @@ async def api_facts_skeleton(request):
                 "subject_key": item["subject_key"],
                 "predicate_key": item["predicate_key"],
                 "display_name": (predicate_meta.get(item["predicate_key"]) or {}).get("display_name") or "",
+                "mode": (predicate_meta.get(item["predicate_key"]) or {}).get("mode") or "",
                 "current": [],
             })
             group["current"].append(item)
@@ -9415,6 +9618,404 @@ async def api_facts_skeleton(request):
         return JSONResponse({"groups": result, "predicates": predicates})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _parse_attachments_field(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        cleaned.append({
+            "type": str(item.get("type") or "link").strip() or "link",
+            "url": url,
+            "label": str(item.get("label") or "").strip(),
+            "source_type": str(item.get("source_type") or "").strip(),
+        })
+    return cleaned
+
+
+def _parse_tags_field(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    seen = set()
+    for item in raw:
+        tag = str(item or "").strip().lstrip("#").strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        cleaned.append(tag)
+    return cleaned
+
+
+# =============================================================
+# Facts-card attachment uploads (photos / files)
+# 资料卡片附件上传（图片/文件）
+# =============================================================
+FACTS_ATTACHMENTS_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+FACTS_ATTACHMENTS_MAX_FILE_BYTES = 20 * 1024 * 1024
+FACTS_ATTACHMENTS_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+FACTS_ATTACHMENTS_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
+
+
+def _facts_attachments_dir() -> str:
+    path = os.path.join(config["buckets_dir"], "attachments")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+@mcp.custom_route("/api/facts-skeleton/attachments/upload", methods=["POST"])
+async def api_facts_skeleton_upload_attachment(request):
+    """Upload one image/file attachment for a facts-card. Returns an
+    attachment object shaped for _parse_attachments_field (type/url/label/
+    source_type) that the frontend appends to its pending attachments list
+    and sends along with the create/edit request -- this endpoint only
+    stores the file, it doesn't touch facts.sqlite itself.
+
+    Stored under a random filename (not the original name), so the original
+    is kept only as a display label and never used to build a filesystem
+    path -- avoids path-traversal and filename-collision issues."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        return JSONResponse({"error": "expected multipart/form-data"}, status_code=400)
+
+    try:
+        form = await request.form()
+        file_field = form.get("file")
+        if not file_field:
+            return JSONResponse({"error": "No file field"}, status_code=400)
+        original_name = str(getattr(file_field, "filename", "") or "upload")
+        raw_bytes = await file_field.read()
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to read upload: {e}"}, status_code=400)
+
+    if not raw_bytes:
+        return JSONResponse({"error": "空文件"}, status_code=400)
+
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext in FACTS_ATTACHMENTS_IMAGE_EXTENSIONS:
+        kind = "image"
+        max_bytes = FACTS_ATTACHMENTS_MAX_IMAGE_BYTES
+    elif ext in FACTS_ATTACHMENTS_FILE_EXTENSIONS:
+        kind = "file"
+        max_bytes = FACTS_ATTACHMENTS_MAX_FILE_BYTES
+    else:
+        return JSONResponse({"error": f"不支持的文件类型: {ext or '(无扩展名)'}"}, status_code=400)
+
+    if len(raw_bytes) > max_bytes:
+        return JSONResponse(
+            {"error": f"文件太大，超过 {max_bytes // (1024 * 1024)}MB 限制"},
+            status_code=400,
+        )
+
+    stored_name = f"{secrets.token_hex(16)}{ext}"
+    dest_path = os.path.join(_facts_attachments_dir(), stored_name)
+    try:
+        with open(dest_path, "wb") as f:
+            f.write(raw_bytes)
+    except Exception as e:
+        return JSONResponse({"error": f"保存文件失败: {e}"}, status_code=500)
+
+    return JSONResponse({
+        "type": kind,
+        "url": f"/api/facts-skeleton/attachments/{stored_name}",
+        "label": original_name,
+        "source_type": "upload",
+    })
+
+
+@mcp.custom_route("/api/facts-skeleton/attachments/{filename}", methods=["GET"])
+async def api_facts_skeleton_serve_attachment(request):
+    """Serve back an uploaded attachment. Dashboard-auth gated like the rest
+    of the facts-skeleton API -- browsers send the session cookie
+    automatically on <img>/<a> requests, so no separate token is needed
+    client-side. Mirrors the path-traversal guard used by /dashboard-assets."""
+    from starlette.responses import FileResponse, PlainTextResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    filename = str(request.path_params.get("filename") or "").strip().replace("\\", "/")
+    base_dir = os.path.abspath(_facts_attachments_dir())
+    target = os.path.abspath(os.path.join(base_dir, filename))
+    if not target.startswith(base_dir + os.sep) or not os.path.isfile(target):
+        return PlainTextResponse("attachment not found", status_code=404)
+    return FileResponse(target)
+
+
+@mcp.custom_route("/api/facts-skeleton", methods=["POST"])
+async def api_facts_skeleton_create(request):
+    """Manually add one stable fact to the skeleton layer from the Dashboard.
+    Body: subject_key (yi_lan/lin_zhan/relationship), predicate_key, title
+    required; content/attachments/valid_at optional (valid_at defaults to
+    today). title also mirrors into object_text so existing consumers
+    (breath()'s auto-supplement, fact_lookup on deployments that have it)
+    keep working unchanged. If predicate_key isn't in predicate_registry yet,
+    mode is required (display_name optional) to register it first -- this
+    keeps typos from silently creating orphan predicates that never show up
+    grouped with anything."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    subject_key = str(body.get("subject_key") or "").strip()
+    predicate_key = str(body.get("predicate_key") or "").strip()
+    title = str(body.get("title") or "").strip()
+    content = str(body.get("content") or "").strip()
+    attachments = _parse_attachments_field(body.get("attachments"))
+    tags = _parse_tags_field(body.get("tags"))
+    valid_at = str(body.get("valid_at") or "").strip() or datetime.now(timezone.utc).date().isoformat()
+
+    if subject_key not in {"yi_lan", "lin_zhan", "relationship"}:
+        return JSONResponse({"error": "subject_key 必须是 yi_lan / lin_zhan / relationship"}, status_code=400)
+    if not predicate_key:
+        return JSONResponse({"error": "predicate_key 不能为空"}, status_code=400)
+    if not title:
+        return JSONResponse({"error": "标题不能为空"}, status_code=400)
+
+    try:
+        existing_predicates = {p["predicate_key"] for p in fact_store.list_predicates()}
+        if predicate_key not in existing_predicates:
+            mode = str(body.get("mode") or "").strip()
+            if mode not in PREDICATE_MODES:
+                return JSONResponse(
+                    {"error": "这是个新 predicate，需要指定 mode（exclusive_current/multi_current/historical_event）"},
+                    status_code=400,
+                )
+            display_name = str(body.get("display_name") or "").strip()
+            fact_store.upsert_predicate(predicate_key, mode=mode, display_name=display_name or predicate_key)
+
+        fact_id = fact_store.add_fact(
+            subject_key,
+            predicate_key,
+            title,
+            valid_at=valid_at,
+            evidence_type="manual",
+            evidence_id="dashboard",
+            title=title,
+            content=content,
+            attachments=attachments,
+            tags=tags,
+        )
+        return JSONResponse({"status": "created", "id": fact_id})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}", methods=["PATCH"])
+async def api_facts_skeleton_update_fact(request):
+    """Edit action: change a fact's title/content/attachments in place --
+    does not touch valid_at/invalid_at and does not create a new timeline
+    point (that's what "New Revision" via POST /api/facts-skeleton is for).
+    Only fields present in the body are changed."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    kwargs: dict = {}
+    if "title" in body:
+        kwargs["title"] = str(body.get("title") or "").strip()
+        kwargs["object_text"] = kwargs["title"]  # keep mirrored for old consumers
+    if "content" in body:
+        kwargs["content"] = str(body.get("content") or "").strip()
+    if "attachments" in body:
+        kwargs["attachments"] = _parse_attachments_field(body.get("attachments"))
+    if "tags" in body:
+        kwargs["tags"] = _parse_tags_field(body.get("tags"))
+
+    try:
+        updated = fact_store.update_fact(fact_id, **kwargs)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not updated:
+        return JSONResponse({"error": "nothing to update"}, status_code=400)
+    return JSONResponse({"status": "updated", "fact": fact_store.get_fact(fact_id)})
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/invalidate", methods=["POST"])
+async def api_facts_skeleton_invalidate_fact(request):
+    """Invalidate action: manually mark a fact as no longer true, with no
+    replacement value. Different from the automatic supersede-on-new-value
+    behavior for exclusive_current predicates in add_fact()."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    invalid_at = str(body.get("invalid_at") or "").strip() or None
+    try:
+        ok = fact_store.invalidate_fact(fact_id, invalid_at=invalid_at)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not ok:
+        return JSONResponse({"error": "already invalidated"}, status_code=400)
+    return JSONResponse({"status": "invalidated", "fact": fact_store.get_fact(fact_id)})
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}", methods=["DELETE"])
+async def api_facts_skeleton_delete_fact(request):
+    """Delete one fact row from the skeleton layer (e.g. added under the
+    wrong predicate/mode by mistake). Requires confirm: "DELETE" in the body,
+    same convention as /api/profile-facts/{bucket_id} DELETE."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    if body.get("confirm") != "DELETE":
+        return JSONResponse({"error": "confirmation required"}, status_code=400)
+    try:
+        deleted = fact_store.delete_fact(fact_id)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not deleted:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"status": "deleted", "id": fact_id})
+
+
+@mcp.custom_route("/api/facts-skeleton/predicates/{predicate_key}", methods=["PATCH"])
+async def api_facts_skeleton_update_predicate(request):
+    """Change an existing predicate's mode/display_name/notes -- e.g. fixing
+    a predicate that got created under the wrong mode (like a one-time
+    calendar date accidentally left as exclusive_current instead of
+    historical_event). Partial update: only fields present in the body are
+    changed, the rest keep their current value."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    predicate_key = str(request.path_params.get("predicate_key") or "").strip()
+    if not predicate_key:
+        return JSONResponse({"error": "invalid predicate_key"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    existing = fact_store.get_predicate(predicate_key)
+    if not existing:
+        return JSONResponse({"error": "predicate not found"}, status_code=404)
+
+    mode = str(body.get("mode") or "").strip() or existing["mode"]
+    if mode not in PREDICATE_MODES:
+        return JSONResponse({"error": "mode 必须是 exclusive_current/multi_current/historical_event"}, status_code=400)
+    display_name = body.get("display_name")
+    display_name = existing["display_name"] if display_name is None else str(display_name).strip()
+    notes = body.get("notes")
+    notes = existing["notes"] if notes is None else str(notes).strip()
+
+    try:
+        fact_store.upsert_predicate(predicate_key, mode=mode, display_name=display_name, notes=notes)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"status": "updated", "predicate": fact_store.get_predicate(predicate_key)})
+
+
+@mcp.custom_route("/api/facts-skeleton/predicates/backfill-display-names", methods=["POST"])
+async def api_facts_skeleton_backfill_display_names(request):
+    """One-click fix for predicates that exist in predicate_registry with no
+    Chinese display_name yet (this happens when a predicate got registered
+    through actual fact-writing before the hand-written seed list with
+    display names was ever applied). Reads resources/predicate_registry_seed.json
+    bundled with the app; only fills in display_name/notes for predicates
+    whose display_name is currently empty, and never touches mode or any
+    predicate the seed file doesn't know about (e.g. custom ones added from
+    the Dashboard) -- safe to click more than once."""
+    from starlette.responses import JSONResponse
+    import json
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    seed_path = os.path.join(os.path.dirname(__file__), "resources", "predicate_registry_seed.json")
+    try:
+        with open(seed_path, "r", encoding="utf-8") as f:
+            seed_items = json.load(f)
+    except Exception as e:
+        return JSONResponse({"error": f"读取 predicate_registry_seed.json 失败: {e}"}, status_code=500)
+
+    seed_by_key: dict[str, dict] = {}
+    for item in seed_items:
+        key = str(item.get("predicate_key") or "").strip()
+        if key and item.get("mode") in PREDICATE_MODES:
+            seed_by_key[key] = item
+
+    updated = []
+    try:
+        for row in fact_store.list_predicates():
+            key = row["predicate_key"]
+            if row.get("display_name"):
+                continue
+            seed = seed_by_key.get(key)
+            if not seed:
+                continue
+            fact_store.upsert_predicate(
+                key,
+                mode=row["mode"],
+                display_name=seed.get("display_name", "") or key,
+                notes=seed.get("notes", "") or row.get("notes", ""),
+            )
+            updated.append(key)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"status": "ok", "updated": updated, "count": len(updated)})
 
 
 @mcp.custom_route("/api/profile-facts", methods=["GET"])

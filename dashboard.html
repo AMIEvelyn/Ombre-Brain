@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ombre Brain</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #FDFCF0;
@@ -53,7 +53,7 @@
     z-index: 50;
   }
   .header h1 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 26px;
     font-weight: 600;
     color: var(--accent);
@@ -312,7 +312,7 @@
     margin-bottom: 18px;
   }
   .todo-title h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 28px;
     color: var(--accent);
     margin-bottom: 4px;
@@ -533,7 +533,7 @@
     color: var(--accent);
   }
   .detail-panel h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 20px;
     font-weight: 600;
     margin-bottom: 20px;
@@ -878,7 +878,7 @@
     box-shadow: 6px 6px 14px var(--shadow-dark-subtle), -6px -6px 14px var(--shadow-light);
   }
   .config-section h3 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 16px;
     font-weight: 600;
     color: var(--accent);
@@ -1131,7 +1131,7 @@
     gap: 20px;
   }
   .persona-toolbar h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 28px;
     font-weight: 600;
     color: var(--accent);
@@ -1257,7 +1257,7 @@
   }
   .persona-card h3,
   .persona-events h3 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 18px;
     color: var(--accent);
     margin-bottom: 16px;
@@ -1714,7 +1714,7 @@
     margin-bottom: 22px;
   }
   .reflection-title h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 30px;
     font-weight: 600;
     color: var(--accent);
@@ -1903,7 +1903,7 @@
   .dream-shell { max-width: 760px; margin: 0 auto; }
   .dream-toolbar { margin-bottom: 18px; }
   .dream-toolbar h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 30px;
     font-weight: 600;
     color: var(--accent);
@@ -1941,7 +1941,7 @@
     margin-bottom: 18px;
   }
   .profile-toolbar h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     color: var(--accent);
     font-size: 28px;
     font-weight: 600;
@@ -2103,7 +2103,8 @@
     gap: 10px;
     align-items: center;
   }
-  .profile-proposal-form input {
+  .profile-proposal-form input,
+  .profile-proposal-form select {
     min-height: 34px;
     padding: 8px 12px;
     border: 1px solid var(--border);
@@ -2157,6 +2158,443 @@
   .profile-proposal-message.error { color: var(--negative); }
   .profile-proposal-message.ok { color: var(--positive); }
   .profile-list { display: flex; flex-direction: column; gap: 10px; }
+  .facts-nav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 2px;
+    cursor: pointer;
+  }
+  .facts-nav-row:hover .facts-nav-chevron { color: var(--accent); }
+  .facts-nav-chevron { color: var(--text-dim); }
+  .facts-browse-columns {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    width: 100%;
+    min-height: 720px;
+    border-radius: 14px;
+    box-shadow: 2px 2px 6px var(--shadow-dark-subtle);
+    overflow: hidden;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+  }
+  .facts-browse-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .facts-browse-col-subjects {
+    flex: 0 0 26%;
+    background: #DAD0BB;
+    padding: 16px 10px;
+  }
+  .facts-browse-col-keys {
+    flex: 0 0 26%;
+    background: #E6DCC7;
+    padding: 16px 10px;
+  }
+  .facts-browse-col-titles {
+    flex: 1 1 auto;
+    background: var(--surface-solid);
+    padding: 16px 14px;
+    gap: 10px;
+  }
+  .facts-browse-item {
+    padding: 10px 8px;
+    border-radius: 8px 0 0 8px;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--text-dim);
+    cursor: pointer;
+    word-break: break-word;
+  }
+  .facts-browse-item:hover { color: var(--text); }
+  /* selected item bleeds all the way to both the column's own outer edge and
+     the next column's edge, so the highlight fills the full column width and
+     reads as physically continuous with that column, instead of a chip with
+     visible unselected-color slivers on either side. */
+  .facts-browse-col-subjects .facts-browse-item.active {
+    background: #E6DCC7;
+    color: var(--text);
+    font-weight: 600;
+    margin: 0 -10px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .facts-browse-col-keys .facts-browse-item.active {
+    background: var(--surface-solid);
+    color: var(--text);
+    font-weight: 600;
+    margin: 0 -10px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  /* if the selected item is also the first/last row, bleed its highlight to
+     the column's true top/bottom edge too, flush with the other columns --
+     not just the side edges -- instead of leaving a sliver of unselected
+     color above/below it */
+  .facts-browse-col-subjects .facts-browse-item.active:first-child,
+  .facts-browse-col-keys .facts-browse-item.active:first-child {
+    margin-top: -16px;
+    padding-top: 26px;
+  }
+  .facts-browse-col-subjects .facts-browse-item.active:last-child,
+  .facts-browse-col-keys .facts-browse-item.active:last-child {
+    margin-bottom: -16px;
+    padding-bottom: 26px;
+  }
+  .facts-nav-back {
+    display: inline-block;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 6px 4px;
+    margin: -6px 0 -2px -4px;
+  }
+  .facts-nav-back:hover { color: var(--accent); }
+  .facts-nav-title {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    font-size: 20px;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .facts-detail-card {
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
+    width: min(520px, 92vw);
+    max-height: 86vh;
+    overflow-y: auto;
+  }
+  .facts-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+  }
+  .facts-detail-header-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .facts-detail-breadcrumb {
+    color: var(--text-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .facts-detail-close-btn {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    flex: 0 0 auto;
+  }
+  .facts-detail-close-btn:hover { background: var(--surface-solid); }
+  .facts-detail-menu-btn {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    flex: 0 0 auto;
+  }
+  .facts-detail-menu-btn:hover { background: var(--surface-solid); }
+  .facts-detail-menu {
+    position: absolute;
+    top: 28px;
+    right: 0;
+    z-index: 5;
+    background: var(--surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 160px;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle);
+  }
+  .facts-detail-menu > div {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .facts-detail-menu > div:hover { background: var(--border); }
+  .facts-detail-title {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    font-size: 24px;
+    margin: 12px 0 6px;
+  }
+  .facts-detail-content {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    margin-bottom: 16px;
+  }
+  .facts-detail-content-toggle {
+    display: inline-block;
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+    padding: 4px 2px;
+    margin-left: 2px;
+  }
+  .facts-detail-timeline { border-top: 1px solid var(--border); padding-top: 10px; }
+  .facts-timeline-row {
+    font-size: 13px;
+    color: var(--text);
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .facts-timeline-entry-detail {
+    margin: 6px 0 6px 16px;
+    padding: 8px 12px;
+    background: var(--surface-solid);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .facts-timeline-more {
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+    padding-top: 6px;
+  }
+  .facts-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+  }
+  .facts-detail-overlay {
+    z-index: 55;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  .facts-modal-panel {
+    background: rgba(247, 242, 232, 0.72);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 20px;
+    width: min(480px, 92vw);
+    max-height: 86vh;
+    overflow-y: auto;
+    box-shadow: 4px 4px 16px var(--shadow-dark-subtle);
+  }
+  .facts-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    font-size: 18px;
+    color: var(--accent);
+  }
+  .facts-modal-back {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 6px 10px;
+    margin: -6px 0 -6px -10px;
+  }
+  .facts-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .facts-tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+  }
+  .facts-tag-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 4px;
+    margin: -4px -4px -4px 0;
+  }
+  .facts-tag-remove:hover { color: var(--negative); }
+  .facts-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 2px 0 10px;
+    font-size: 13px;
+  }
+  .facts-detail-tag { color: var(--accent); }
+  .facts-attachment-toolbar { position: relative; display: flex; }
+  .facts-attachment-add-btn {
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .facts-attachment-add-btn:hover { border-color: var(--accent); }
+  .facts-attachment-menu {
+    position: absolute;
+    top: 34px;
+    left: 0;
+    z-index: 5;
+    background: var(--surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 160px;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle);
+  }
+  .facts-attachment-menu > div {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .facts-attachment-menu > div:hover { background: var(--border); }
+  .facts-attachment-thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .facts-attachment-thumb {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+  }
+  .facts-attachment-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .facts-attachment-thumb-file {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 4px;
+    text-align: center;
+    word-break: break-all;
+  }
+  .facts-attachment-file-icon { font-size: 20px; }
+  .facts-attachment-remove {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .facts-detail-photos {
+    margin: 10px 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface-solid);
+    touch-action: pan-y;
+  }
+  .facts-detail-photos img {
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    display: block;
+  }
+  .facts-detail-photo-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0;
+  }
+  .facts-detail-photo-dot {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .facts-detail-photo-dot::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+  .facts-detail-photo-dot.active::before { background: var(--accent); }
+  .facts-detail-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .facts-detail-file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--text);
+    font-size: 12px;
+    text-decoration: none;
+  }
+  .facts-detail-file-chip:hover { border-color: var(--accent); }
+  #facts-add-content, #facts-edit-content {
+    width: 100%;
+    min-height: 90px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-solid);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    grid-column: 1 / -1;
+  }
   .profile-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -2235,7 +2673,7 @@
     margin-bottom: 18px;
   }
   .word-map-toolbar h2 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     color: var(--accent);
     font-size: 28px;
     font-weight: 600;
@@ -2771,13 +3209,130 @@
         <h2>骨架层 · 稳定事实</h2>
         <p>facts.sqlite 里的当前有效事实；不受遗忘曲线影响，不会随时间沉底。情绪/关系类问题不在这里，仍由 OB 记忆池负责。</p>
       </div>
-      <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+      <div class="word-map-actions">
+        <button type="button" onclick="loadFactsSkeleton()">刷新</button>
+        <button type="button" onclick="backfillFactsSkeletonDisplayNames()">补齐默认类型中文名</button>
+        <button type="button" onclick="openFactsCreateModal()">+ Create</button>
+      </div>
     </div>
     <div class="profile-summary" id="facts-summary">加载中…</div>
-    <div class="profile-list" id="facts-list">
+    <div id="facts-nav" class="profile-list">
       <div class="loading">加载骨架层事实…</div>
     </div>
+    <details style="margin:16px 0;">
+      <summary style="cursor:pointer;font-size:14px;color:var(--text-dim);">事实类型管理（改这里对所有用这个类型的人都生效）</summary>
+      <div class="profile-list" id="facts-predicate-list" style="padding-top:8px;">
+        <div class="loading">加载中…</div>
+      </div>
+    </details>
   </div>
+</div>
+
+<div id="facts-create-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeFactsCreateModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeFactsCreateModal()">‹</button>
+      <span id="facts-create-modal-title">新建事实</span>
+    </div>
+    <div class="profile-proposal-form">
+      <select id="facts-add-subject">
+        <option value="yi_lan">一澜</option>
+        <option value="lin_zhan">林湛</option>
+        <option value="relationship">我们</option>
+      </select>
+      <select id="facts-add-predicate" onchange="onFactsAddPredicateChange()">
+        <option value="">加载中…</option>
+      </select>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form" id="facts-add-new-predicate-row" style="display:none">
+      <input type="text" id="facts-add-new-predicate-key" placeholder="新 predicate_key（英文，如 xxx_status）" />
+      <select id="facts-add-new-predicate-mode">
+        <option value="exclusive_current">exclusive_current（新值取代旧值）</option>
+        <option value="multi_current">multi_current（新旧共存）</option>
+        <option value="historical_event">historical_event（一次性事件）</option>
+      </select>
+      <input type="text" id="facts-add-new-predicate-name" placeholder="中文显示名（可选）" />
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-add-title" placeholder="标题（必填，列表页显示）" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <textarea id="facts-add-content" placeholder="内容（可选）"></textarea>
+    </div>
+    <div class="facts-tags-row" id="facts-add-tags"></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-add-tag-input" placeholder="加个标签，回车确认" onkeydown="onFactsTagInputKeydown(event,'add')" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="date" id="facts-add-valid-at" placeholder="生效日期（留空=今天）" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('add')">+ 添加图片/文件</button>
+      <div id="facts-attach-menu-add" class="facts-attachment-menu" style="display:none">
+        <div onclick="triggerFactsAttachPicker('add','photo')">🖼 Add Photo</div>
+        <div onclick="triggerFactsAttachPicker('add','file')">📄 Attach Files</div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="facts-add-attachments"></div>
+    <input type="file" id="facts-add-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
+    <input type="file" id="facts-add-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
+    <div class="profile-proposal-form">
+      <span></span>
+      <span></span>
+      <button type="button" onclick="submitFactsAdd()">Add</button>
+    </div>
+    <div class="profile-proposal-message" id="facts-add-message"></div>
+  </div>
+</div>
+
+<div id="facts-edit-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeFactsEditModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeFactsEditModal()">‹</button>
+      <span>编辑（不留新时间点）</span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-edit-title" placeholder="标题" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <textarea id="facts-edit-content" placeholder="内容"></textarea>
+    </div>
+    <div class="facts-tags-row" id="facts-edit-tags"></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="facts-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onFactsTagInputKeydown(event,'edit')" />
+      <span></span>
+      <span></span>
+    </div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('edit')">+ 添加图片/文件</button>
+      <div id="facts-attach-menu-edit" class="facts-attachment-menu" style="display:none">
+        <div onclick="triggerFactsAttachPicker('edit','photo')">🖼 Add Photo</div>
+        <div onclick="triggerFactsAttachPicker('edit','file')">📄 Attach Files</div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="facts-edit-attachments"></div>
+    <input type="file" id="facts-edit-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
+    <input type="file" id="facts-edit-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
+    <div class="profile-proposal-form">
+      <span></span>
+      <span></span>
+      <button type="button" onclick="submitFactsEdit()">Save</button>
+    </div>
+    <div class="profile-proposal-message" id="facts-edit-message"></div>
+  </div>
+</div>
+
+<div id="facts-detail-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) closeFactsDetailOverlay()">
+  <div id="facts-detail-modal-body"></div>
 </div>
 
 <div class="content" id="word-map-view" style="display:none">
@@ -3198,7 +3753,7 @@
 
 <div id="auth-overlay" style="position:fixed;inset:0;z-index:9999;background:var(--bg-gradient);background-attachment:fixed;display:flex;align-items:center;justify-content:center;">
   <div style="background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:20px;padding:40px 34px;max-width:400px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.12);">
-    <h2 style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--accent);margin-bottom:8px;">◐ Ombre Brain</h2>
+    <h2 style="font-family:'Cormorant Garamond','Noto Serif SC',serif;font-size:28px;color:var(--accent);margin-bottom:8px;">◐ Ombre Brain</h2>
     <p style="color:var(--text-dim);font-size:13px;margin-bottom:24px;" id="auth-subtitle">验证身份</p>
     <div id="auth-setup-form" style="display:none;">
       <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">首次使用，请设置访问密码</p>
@@ -4154,9 +4709,22 @@ async function loadProfileFacts() {
 var FACTS_SUBJECT_LABELS = {
   yi_lan: '一澜',
   lin_zhan: '林湛',
-  relationship: '我们的关系',
+  relationship: '我们',
   qa_test: '测试数据',
 };
+
+var factsSkeletonPredicates = [];
+var factsSkeletonGroups = [];
+var factsNavState = { subjectKey: '', predicateKey: '' };
+var factsDetailOverlayState = null;
+var factsDetailTimelineExpanded = {};
+var factsEditingFactId = null;
+var factsPendingAttachments = { add: [], edit: [] };
+var factsDetailPhotoIndex = {};
+var factsPendingTags = { add: [], edit: [] };
+var factsPhotoSwipeState = {};
+var factsDetailContentExpanded = {};
+var FACTS_CONTENT_COLLAPSE_CHARS = 120;
 
 function factsSubjectLabel(subjectKey) {
   return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
@@ -4166,66 +4734,726 @@ function factsIsTestGroup(group) {
   return group.subject_key === 'qa_test' || String(group.predicate_key || '').indexOf('test_') === 0;
 }
 
-function renderFactGroup(g) {
-  var currentText = (g.current || []).map(function(c) { return esc(c.object_text || ''); }).join('、') || '（无）';
-  var historyRows = (g.history || []).slice().reverse().map(function(h) {
-    var invalidNote = h.invalid_at ? ('，已于 ' + esc(h.invalid_at) + ' 失效') : '';
-    return '<div style="padding:4px 0 4px 16px;color:var(--text-dim);font-size:12px;">' +
-      esc(h.object_text || '') + '（生效于 ' + esc(h.valid_at || '未知') + invalidNote + '）' +
+function factsGroupFor(subjectKey, predicateKey) {
+  return factsSkeletonGroups.find(function(g) { return g.subject_key === subjectKey && g.predicate_key === predicateKey; });
+}
+
+function factsFindFact(subjectKey, predicateKey, factId) {
+  var group = factsGroupFor(subjectKey, predicateKey);
+  if (!group) return null;
+  return (group.current || []).concat(group.history || []).find(function(f) { return f.id === factId; }) || null;
+}
+
+// A predicate's history mixes every distinct title under it (e.g. multi_current
+// "喜欢的食物" holds 酸辣粉 AND 冰粉 as separate rows sharing one state_key) --
+// this filters down to just the entries for one specific title, newest first.
+// It's a title-matching convention, not an enforced link: "New Revision"
+// pre-fills the same title on purpose to keep an item's entries grouped.
+function factsHistoryForTitle(group, title) {
+  return (group.history || []).filter(function(h) {
+    return (h.title || h.object_text || '') === title;
+  }).slice().sort(function(a, b) { return String(b.valid_at || '').localeCompare(String(a.valid_at || '')); });
+}
+
+// --- browse navigation: subjects/keys/titles as three simultaneous columns, no back button.
+// Clicking a title opens the detail card as a floating overlay on top -- it's not a fourth
+// column/page, closing it just returns to whatever the three columns were already showing.
+
+function factsOrderedSubjects() {
+  var seen = {};
+  var order = [];
+  factsSkeletonGroups.forEach(function(g) {
+    if (factsIsTestGroup(g)) return;
+    if (!seen[g.subject_key]) { seen[g.subject_key] = true; order.push(g.subject_key); }
+  });
+  var preferred = ['yi_lan', 'lin_zhan', 'relationship'];
+  var subjects = preferred.filter(function(k) { return seen[k]; });
+  order.forEach(function(k) { if (subjects.indexOf(k) === -1) subjects.push(k); });
+  return subjects;
+}
+
+function factsFirstPredicateForSubject(subjectKey) {
+  var group = factsSkeletonGroups.find(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
+  return group ? group.predicate_key : '';
+}
+
+// Called before every browse render so a stale/missing selection (first load, or the
+// selected subject/key having no data anymore) always resolves to something valid instead
+// of rendering an empty column 2/3 for no reason.
+function factsEnsureBrowseSelection() {
+  var subjects = factsOrderedSubjects();
+  if (!subjects.length) {
+    factsNavState.subjectKey = '';
+    factsNavState.predicateKey = '';
+    return;
+  }
+  if (subjects.indexOf(factsNavState.subjectKey) === -1) {
+    factsNavState.subjectKey = subjects[0];
+    factsNavState.predicateKey = '';
+  }
+  var stillValid = factsSkeletonGroups.some(function(g) {
+    return g.subject_key === factsNavState.subjectKey && g.predicate_key === factsNavState.predicateKey && !factsIsTestGroup(g);
+  });
+  if (!stillValid) {
+    factsNavState.predicateKey = factsFirstPredicateForSubject(factsNavState.subjectKey);
+  }
+}
+
+function factsNavSelectSubject(subjectKey) {
+  factsNavState = { subjectKey: subjectKey, predicateKey: factsFirstPredicateForSubject(subjectKey) };
+  renderFactsNav();
+}
+
+function factsNavSelectKey(subjectKey, predicateKey) {
+  factsNavState = { subjectKey: subjectKey, predicateKey: predicateKey };
+  renderFactsNav();
+}
+
+function factsNavGoDetail(subjectKey, predicateKey, factId) {
+  factsDetailOverlayState = { subjectKey: subjectKey, predicateKey: predicateKey, factId: factId };
+  renderFactsDetailOverlay();
+}
+
+function closeFactsDetailOverlay() {
+  factsDetailOverlayState = null;
+  var overlay = document.getElementById('facts-detail-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function renderFactsDetailOverlay() {
+  var overlay = document.getElementById('facts-detail-overlay');
+  var body = document.getElementById('facts-detail-modal-body');
+  if (!overlay || !body) return;
+  if (!factsDetailOverlayState) { overlay.style.display = 'none'; return; }
+  var fact = factsFindFact(factsDetailOverlayState.subjectKey, factsDetailOverlayState.predicateKey, factsDetailOverlayState.factId);
+  if (!fact) { closeFactsDetailOverlay(); return; }
+  body.innerHTML = renderFactsDetailCard(factsDetailOverlayState.subjectKey, factsDetailOverlayState.predicateKey, factsDetailOverlayState.factId);
+  overlay.style.display = 'flex';
+}
+
+function renderFactsNav() {
+  var container = document.getElementById('facts-nav');
+  if (!container) return;
+  factsEnsureBrowseSelection();
+  container.innerHTML = renderFactsBrowseLevel();
+}
+
+function renderFactsBrowseLevel() {
+  var subjects = factsOrderedSubjects();
+  if (!subjects.length) return '<div class="loading">还没有稳定事实，点右上角 + Create 加一条试试。</div>';
+
+  var subjectKey = factsNavState.subjectKey;
+  var predicateKey = factsNavState.predicateKey;
+
+  var col1 = subjects.map(function(s) {
+    return '<div class="facts-browse-item' + (s === subjectKey ? ' active' : '') + '" onclick="factsNavSelectSubject(\'' + s + '\')">' +
+      esc(factsSubjectLabel(s)) + '</div>';
+  }).join('');
+
+  var keyGroups = factsSkeletonGroups.filter(function(g) { return g.subject_key === subjectKey && !factsIsTestGroup(g); });
+  var col2 = keyGroups.length
+    ? keyGroups.map(function(g) {
+        return '<div class="facts-browse-item' + (g.predicate_key === predicateKey ? ' active' : '') + '" onclick="factsNavSelectKey(\'' + subjectKey + '\', \'' + g.predicate_key + '\')">' +
+          esc(g.display_name || g.predicate_key) + '</div>';
+      }).join('')
+    : '<div class="loading">还没有事实。</div>';
+
+  var group = factsGroupFor(subjectKey, predicateKey);
+  var col3;
+  if (!group || !(group.current || []).length) {
+    col3 = '<div class="loading">还没有事实。</div>';
+  } else {
+    col3 = group.current.map(function(c) {
+      var title = c.title || c.object_text || '';
+      var ownHistory = factsHistoryForTitle(group, title);
+      var lastChanged = ownHistory.length ? ownHistory[0].valid_at || '未知' : (c.valid_at || '未知');
+      return '<div class="facts-nav-row" onclick="factsNavGoDetail(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + c.id + ')">' +
+        '<div><b>' + esc(title) + '</b>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">变动过 ' + ownHistory.length +
+        ' 次<br>最新变动于 ' + esc(lastChanged) + '</div></div>' +
+        '<span class="facts-nav-chevron">›</span></div>';
+    }).join('');
+  }
+
+  return '<div class="facts-browse-columns">' +
+    '<div class="facts-browse-col facts-browse-col-subjects">' + col1 + '</div>' +
+    '<div class="facts-browse-col facts-browse-col-keys">' + col2 + '</div>' +
+    '<div class="facts-browse-col facts-browse-col-titles">' + col3 + '</div>' +
+    '</div>';
+}
+
+function toggleFactsDetailMenu(factId) {
+  var menu = document.getElementById('facts-detail-menu-' + factId);
+  if (!menu) return;
+  var isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : '';
+}
+
+function toggleFactsTimelineExpand(factId) {
+  factsDetailTimelineExpanded[factId] = !factsDetailTimelineExpanded[factId];
+  renderFactsDetailOverlay();
+}
+
+function toggleFactsTimelineEntry(historyId) {
+  var el = document.getElementById('facts-timeline-entry-' + historyId);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function renderFactsDetailCard(subjectKey, predicateKey, factId) {
+  var group = factsGroupFor(subjectKey, predicateKey);
+  var fact = factsFindFact(subjectKey, predicateKey, factId);
+  if (!group || !fact) return '<div class="loading">找不到这条事实（可能刚被删除）。</div>';
+
+  var title = fact.title || fact.object_text || '';
+  var relatedHistory = factsHistoryForTitle(group, title);
+
+  var expanded = !!factsDetailTimelineExpanded[factId];
+  var shown = expanded ? relatedHistory : relatedHistory.slice(0, 3);
+  var timelineRows = shown.map(function(h) {
+    var isInvalid = !!h.invalid_at;
+    return '<div class="facts-timeline-row" style="opacity:' + (isInvalid ? '0.55' : '1') + ';" onclick="toggleFactsTimelineEntry(' + h.id + ')">' +
+      '<span style="color:' + (isInvalid ? 'var(--text-dim)' : 'var(--accent)') + ';">●</span> ' +
+      esc(h.valid_at || '未知') + (isInvalid ? '（已于 ' + esc(h.invalid_at) + ' 失效）' : '') +
+      '<div id="facts-timeline-entry-' + h.id + '" class="facts-timeline-entry-detail" style="display:none;">' +
+      '<div><b>Name</b> ' + esc(h.title || '') + '</div>' +
+      '<div><b>Content</b> ' + esc(h.content || '（无）') + '</div>' +
+      '</div></div>';
+  }).join('');
+  var moreHtml = relatedHistory.length > 3
+    ? '<div class="facts-timeline-more" onclick="toggleFactsTimelineExpand(' + factId + ')">' +
+      (expanded ? '收起' : '查看完整时间线（共 ' + relatedHistory.length + ' 条）') + '</div>'
+    : '';
+
+  return '<div class="facts-detail-card">' +
+    '<div class="facts-detail-header">' +
+    '<div class="facts-detail-header-left">' +
+    '<button type="button" class="facts-detail-close-btn" onclick="closeFactsDetailOverlay()">✕</button>' +
+    '<div class="facts-detail-breadcrumb">' + esc(factsSubjectLabel(subjectKey)) + ' · ' + esc(group.display_name || predicateKey) + '</div>' +
+    '</div>' +
+    '<button type="button" class="facts-detail-menu-btn" onclick="toggleFactsDetailMenu(' + factId + ')">···</button>' +
+    '<div id="facts-detail-menu-' + factId + '" class="facts-detail-menu" style="display:none">' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsRevisionModal(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + factId + ')">⊕ New Revision</div>' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsEditModal(' + factId + ')">✎ Edit</div>' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');invalidateFactsFact(' + factId + ')">🕓 Invalidate</div>' +
+    '<div style="color:var(--negative);" onclick="toggleFactsDetailMenu(' + factId + ');deleteFactsSkeletonFact(' + factId + ')">🗑 Delete</div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="facts-detail-title">' + esc(title) + '</div>' +
+    renderFactsPhotosBlock(factId, fact.attachments) +
+    renderFactsContentBlock(factId, fact.content) +
+    renderFactsTagsLine(fact.tags) +
+    renderFactsFilesBlock(fact.attachments) +
+    '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
+    '</div>';
+}
+
+
+// 类型（mode）是记在 predicate_registry 上的，跟"这一类事实该怎么处理新旧"绑定，
+// 不属于某个具体的人或某一条记录——同一个 predicate_key 被哪几个 subject 共用，
+// 改一次就对所有人生效。所以编辑入口放在这个单独的"事实类型管理"列表里（每个
+// predicate_key 只出现一次），不再放在按 subject 分组的事实卡片里，避免造成
+// "好像是在单独改某个人的类型"的误解。
+function renderPredicateManagementRow(p) {
+  var key = p.predicate_key;
+  var modeOptions = ['exclusive_current', 'multi_current', 'historical_event'].map(function(m) {
+    return '<option value="' + m + '"' + (m === p.mode ? ' selected' : '') + '>' + m + '</option>';
+  }).join('');
+  return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+    '<span style="min-width:160px;">' + esc(p.display_name || key) + ' <span style="color:var(--text-dim);font-size:12px;">(' + esc(key) + ')</span></span>' +
+    '<select id="predicate-mode-select-' + esc(key) + '">' + modeOptions + '</select>' +
+    '<button type="button" onclick="submitPredicateModeChange(\'' + esc(key) + '\')">保存</button>' +
+    '</div>';
+}
+
+function renderPredicateManagementList() {
+  var list = document.getElementById('facts-predicate-list');
+  if (!list) return;
+  var predicates = (factsSkeletonPredicates || []).slice().sort(function(a, b) {
+    return String(a.display_name || a.predicate_key).localeCompare(String(b.display_name || b.predicate_key), 'zh');
+  });
+  list.innerHTML = predicates.length
+    ? predicates.map(renderPredicateManagementRow).join('')
+    : '<div class="loading">还没有登记过的事实类型。</div>';
+}
+
+async function submitPredicateModeChange(predicateKey) {
+  var sel = document.getElementById('predicate-mode-select-' + predicateKey);
+  var mode = sel && sel.value;
+  if (!mode) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/predicates/' + encodeURIComponent(predicateKey), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mode: mode })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '修改失败');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('改类型失败: ' + e.message);
+  }
+}
+
+async function deleteFactsSkeletonFact(factId) {
+  if (!confirm('删除这条稳定事实？删掉之后没法撤销。')) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId, {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ confirm: 'DELETE' })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '删除失败');
+    // Deleted from inside the detail overlay -- close it instead of trying to
+    // re-render a card for a fact that no longer exists.
+    if (factsDetailOverlayState && factsDetailOverlayState.factId === factId) {
+      closeFactsDetailOverlay();
+    }
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+async function invalidateFactsFact(factId) {
+  if (!confirm('把这条标记为失效？不会提供替代值，历史记录会保留。')) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId + '/invalidate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '标失效失败');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('标失效失败: ' + e.message);
+  }
+}
+
+async function backfillFactsSkeletonDisplayNames() {
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/predicates/backfill-display-names', { method: 'POST' });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '补齐失败');
+    alert('补齐了 ' + (data.count || 0) + ' 个类型的中文名。');
+    await loadFactsSkeleton();
+  } catch (e) {
+    alert('补齐失败: ' + e.message);
+  }
+}
+
+function populateFactsAddPredicateOptions() {
+  var sel = document.getElementById('facts-add-predicate');
+  if (!sel) return;
+  var previous = sel.value;
+  var options = factsSkeletonPredicates.slice().sort(function(a, b) {
+    return String(a.display_name || a.predicate_key).localeCompare(String(b.display_name || b.predicate_key), 'zh');
+  }).map(function(p) {
+    return '<option value="' + esc(p.predicate_key) + '">' + esc(p.display_name || p.predicate_key) + ' (' + esc(p.predicate_key) + ')</option>';
+  }).join('');
+  sel.innerHTML = options + '<option value="__new__">+ 新建 predicate…</option>';
+  if (previous && factsSkeletonPredicates.some(function(p) { return p.predicate_key === previous; })) {
+    sel.value = previous;
+  }
+  onFactsAddPredicateChange();
+}
+
+function onFactsAddPredicateChange() {
+  var sel = document.getElementById('facts-add-predicate');
+  var isNew = !!sel && sel.value === '__new__';
+  var row = document.getElementById('facts-add-new-predicate-row');
+  if (row) row.style.display = isNew ? '' : 'none';
+}
+
+function setFactsAddMessage(message, tone) {
+  var el = document.getElementById('facts-add-message');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('ok', 'error');
+  if (tone) el.classList.add(tone);
+}
+
+var FACTS_ATTACHMENT_MAX_ITEMS = 5;
+
+function toggleFactsAttachMenu(target) {
+  var menu = document.getElementById('facts-attach-menu-' + target);
+  if (!menu) return;
+  menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function triggerFactsAttachPicker(target, kind) {
+  toggleFactsAttachMenu(target);
+  var input = document.getElementById('facts-' + target + '-' + kind + '-input');
+  if (input) input.click();
+}
+
+function renderFactsAttachmentThumbs(target) {
+  var container = document.getElementById('facts-' + target + '-attachments');
+  if (!container) return;
+  var items = factsPendingAttachments[target] || [];
+  container.innerHTML = items.map(function(a, idx) {
+    if (a.type === 'image') {
+      return '<div class="facts-attachment-thumb">' +
+        '<img src="' + esc(a.url) + '" alt="' + esc(a.label || '') + '">' +
+        '<span class="facts-attachment-remove" onclick="removeFactsAttachment(\'' + target + '\', ' + idx + ')">×</span>' +
+        '</div>';
+    }
+    return '<div class="facts-attachment-thumb facts-attachment-thumb-file" title="' + esc(a.label || '') + '">' +
+      '<span class="facts-attachment-file-icon">📄</span>' +
+      '<span class="facts-attachment-file-name">' + esc(a.label || '文件') + '</span>' +
+      '<span class="facts-attachment-remove" onclick="removeFactsAttachment(\'' + target + '\', ' + idx + ')">×</span>' +
       '</div>';
   }).join('');
-  return '<details style="padding:8px 0;border-bottom:1px solid var(--border);">' +
-    '<summary style="cursor:pointer;">' +
-    '<b>' + esc(g.display_name || g.predicate_key) + '</b>：' + currentText +
-    ' <span style="color:var(--text-dim);font-size:12px;">（变动过 ' + (g.change_count || 0) +
-    ' 次，最新变动于 ' + esc(g.last_changed_at || '未知') + '）</span>' +
-    '</summary>' + historyRows + '</details>';
+}
+
+function removeFactsAttachment(target, idx) {
+  var items = factsPendingAttachments[target] || [];
+  items.splice(idx, 1);
+  renderFactsAttachmentThumbs(target);
+}
+
+async function onFactsAttachFileChosen(target, inputEl) {
+  var files = Array.prototype.slice.call(inputEl.files || []);
+  inputEl.value = ''; // reset so choosing the same file again later still fires onchange
+  for (var i = 0; i < files.length; i++) {
+    await uploadFactsAttachment(target, files[i]);
+  }
+}
+
+async function uploadFactsAttachment(target, file) {
+  var items = factsPendingAttachments[target] || (factsPendingAttachments[target] = []);
+  if (items.length >= FACTS_ATTACHMENT_MAX_ITEMS) {
+    alert('最多添加 ' + FACTS_ATTACHMENT_MAX_ITEMS + ' 个图片/文件。');
+    return;
+  }
+  var formData = new FormData();
+  formData.append('file', file);
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/attachments/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '上传失败');
+    items.push(data);
+    renderFactsAttachmentThumbs(target);
+  } catch (e) {
+    alert('上传失败: ' + e.message);
+  }
+}
+
+function renderFactsPhotosBlock(factId, attachments) {
+  attachments = Array.isArray(attachments) ? attachments : [];
+  var images = attachments.filter(function(a) { return a.type === 'image'; }).slice(0, FACTS_ATTACHMENT_MAX_ITEMS);
+  if (!images.length) return '';
+  var idx = factsDetailPhotoIndex[factId] || 0;
+  if (idx >= images.length) idx = 0;
+  var current = images[idx];
+  var dots = images.length > 1 ? '<div class="facts-detail-photo-dots">' + images.map(function(_, i) {
+    return '<span class="facts-detail-photo-dot' + (i === idx ? ' active' : '') + '" onclick="event.stopPropagation();setFactsDetailPhotoIndex(' + factId + ',' + i + ')"></span>';
+  }).join('') + '</div>' : '';
+  return '<div class="facts-detail-photos" ontouchstart="onFactsPhotoTouchStart(event, ' + factId + ')" ontouchend="onFactsPhotoTouchEnd(event, ' + factId + ', ' + images.length + ')">' +
+    '<img src="' + esc(current.url) + '" alt="' + esc(current.label || '') + '">' +
+    dots +
+    '</div>';
+}
+
+function renderFactsFilesBlock(attachments) {
+  attachments = Array.isArray(attachments) ? attachments : [];
+  var files = attachments.filter(function(a) { return a.type !== 'image'; });
+  if (!files.length) return '';
+  return '<div class="facts-detail-files">' + files.map(function(f) {
+    return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label || '文件') + '</a>';
+  }).join('') + '</div>';
+}
+
+function setFactsDetailPhotoIndex(factId, idx) {
+  factsDetailPhotoIndex[factId] = idx;
+  renderFactsDetailOverlay();
+}
+
+function onFactsPhotoTouchStart(event, factId) {
+  var t = event.touches[0];
+  if (!t) return;
+  factsPhotoSwipeState[factId] = { startX: t.clientX, startY: t.clientY };
+}
+
+function onFactsPhotoTouchEnd(event, factId, count) {
+  var state = factsPhotoSwipeState[factId];
+  delete factsPhotoSwipeState[factId];
+  if (!state || count < 2) return;
+  var t = event.changedTouches[0];
+  if (!t) return;
+  var dx = t.clientX - state.startX;
+  var dy = t.clientY - state.startY;
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return; // ignore taps and mostly-vertical scrolls
+  var idx = factsDetailPhotoIndex[factId] || 0;
+  idx = dx < 0 ? Math.min(idx + 1, count - 1) : Math.max(idx - 1, 0);
+  setFactsDetailPhotoIndex(factId, idx);
+}
+
+function renderFactsTagPills(target) {
+  var container = document.getElementById('facts-' + target + '-tags');
+  if (!container) return;
+  var tags = factsPendingTags[target] || [];
+  container.innerHTML = tags.map(function(tag, idx) {
+    return '<span class="facts-tag-pill">#' + esc(tag) +
+      '<span class="facts-tag-remove" onclick="removeFactsTag(\'' + target + '\', ' + idx + ')">×</span></span>';
+  }).join('');
+}
+
+function addFactsTagFromInput(target) {
+  var input = document.getElementById('facts-' + target + '-tag-input');
+  if (!input) return;
+  var raw = (input.value || '').trim().replace(/^#/, '');
+  input.value = '';
+  if (!raw) return;
+  var tags = factsPendingTags[target] || (factsPendingTags[target] = []);
+  if (tags.indexOf(raw) === -1) tags.push(raw);
+  renderFactsTagPills(target);
+}
+
+function onFactsTagInputKeydown(event, target) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addFactsTagFromInput(target);
+  }
+}
+
+function removeFactsTag(target, idx) {
+  var tags = factsPendingTags[target] || [];
+  tags.splice(idx, 1);
+  renderFactsTagPills(target);
+}
+
+function renderFactsTagsLine(tags) {
+  tags = Array.isArray(tags) ? tags : [];
+  if (!tags.length) return '';
+  return '<div class="facts-detail-tags">' + tags.map(function(t) {
+    return '<span class="facts-detail-tag">#' + esc(t) + '</span>';
+  }).join('') + '</div>';
+}
+
+function toggleFactsContentExpand(factId) {
+  factsDetailContentExpanded[factId] = !factsDetailContentExpanded[factId];
+  renderFactsDetailOverlay();
+}
+
+function renderFactsContentBlock(factId, content) {
+  content = String(content || '');
+  if (!content) return '';
+  var expanded = !!factsDetailContentExpanded[factId];
+  var overLimit = content.length > FACTS_CONTENT_COLLAPSE_CHARS;
+  var shown = (expanded || !overLimit) ? content : content.slice(0, FACTS_CONTENT_COLLAPSE_CHARS) + '…';
+  var toggle = overLimit
+    ? '<span class="facts-detail-content-toggle" onclick="toggleFactsContentExpand(' + factId + ')">' + (expanded ? '收起' : '展开') + '</span>'
+    : '';
+  return '<div class="facts-detail-content">' + esc(shown) + toggle + '</div>';
+}
+
+function openFactsCreateModal() {
+  var titleEl = document.getElementById('facts-create-modal-title');
+  if (titleEl) titleEl.textContent = '新建事实';
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) subjectSel.disabled = false;
+  if (predicateSel) predicateSel.disabled = false;
+  document.getElementById('facts-add-title').value = '';
+  document.getElementById('facts-add-content').value = '';
+  document.getElementById('facts-add-valid-at').value = '';
+  setFactsAddMessage('', '');
+  populateFactsAddPredicateOptions();
+  factsPendingAttachments.add = [];
+  renderFactsAttachmentThumbs('add');
+  var addMenu = document.getElementById('facts-attach-menu-add');
+  if (addMenu) addMenu.style.display = 'none';
+  factsPendingTags.add = [];
+  renderFactsTagPills('add');
+  var addTagInput = document.getElementById('facts-add-tag-input');
+  if (addTagInput) addTagInput.value = '';
+  document.getElementById('facts-create-overlay').style.display = 'flex';
+}
+
+function openFactsRevisionModal(subjectKey, predicateKey, factId) {
+  var fact = factsFindFact(subjectKey, predicateKey, factId);
+  var titleEl = document.getElementById('facts-create-modal-title');
+  if (titleEl) titleEl.textContent = 'New Revision（新增时间点）';
+  populateFactsAddPredicateOptions();
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) { subjectSel.value = subjectKey; subjectSel.disabled = true; }
+  if (predicateSel) { predicateSel.value = predicateKey; predicateSel.disabled = true; }
+  onFactsAddPredicateChange();
+  document.getElementById('facts-add-title').value = fact ? (fact.title || fact.object_text || '') : '';
+  document.getElementById('facts-add-content').value = fact ? (fact.content || '') : '';
+  document.getElementById('facts-add-valid-at').value = '';
+  setFactsAddMessage('', '');
+  factsPendingAttachments.add = fact && Array.isArray(fact.attachments) ? fact.attachments.slice() : [];
+  renderFactsAttachmentThumbs('add');
+  var revisionMenu = document.getElementById('facts-attach-menu-add');
+  if (revisionMenu) revisionMenu.style.display = 'none';
+  factsPendingTags.add = fact && Array.isArray(fact.tags) ? fact.tags.slice() : [];
+  renderFactsTagPills('add');
+  var revisionTagInput = document.getElementById('facts-add-tag-input');
+  if (revisionTagInput) revisionTagInput.value = '';
+  document.getElementById('facts-create-overlay').style.display = 'flex';
+}
+
+function closeFactsCreateModal() {
+  document.getElementById('facts-create-overlay').style.display = 'none';
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  if (subjectSel) subjectSel.disabled = false;
+  if (predicateSel) predicateSel.disabled = false;
+  factsPendingAttachments.add = [];
+  factsPendingTags.add = [];
+}
+
+function openFactsEditModal(factId) {
+  var state = factsDetailOverlayState;
+  if (!state) return;
+  var fact = factsFindFact(state.subjectKey, state.predicateKey, factId);
+  if (!fact) return;
+  factsEditingFactId = factId;
+  document.getElementById('facts-edit-title').value = fact.title || fact.object_text || '';
+  document.getElementById('facts-edit-content').value = fact.content || '';
+  var msg = document.getElementById('facts-edit-message');
+  if (msg) { msg.textContent = ''; msg.classList.remove('ok', 'error'); }
+  factsPendingAttachments.edit = Array.isArray(fact.attachments) ? fact.attachments.slice() : [];
+  renderFactsAttachmentThumbs('edit');
+  var editMenu = document.getElementById('facts-attach-menu-edit');
+  if (editMenu) editMenu.style.display = 'none';
+  factsPendingTags.edit = Array.isArray(fact.tags) ? fact.tags.slice() : [];
+  renderFactsTagPills('edit');
+  var editTagInput = document.getElementById('facts-edit-tag-input');
+  if (editTagInput) editTagInput.value = '';
+  document.getElementById('facts-edit-overlay').style.display = 'flex';
+}
+
+function closeFactsEditModal() {
+  document.getElementById('facts-edit-overlay').style.display = 'none';
+  factsEditingFactId = null;
+  factsPendingAttachments.edit = [];
+  factsPendingTags.edit = [];
+}
+
+async function submitFactsEdit() {
+  if (!factsEditingFactId) return;
+  var title = (document.getElementById('facts-edit-title').value || '').trim();
+  var content = (document.getElementById('facts-edit-content').value || '').trim();
+  var msg = document.getElementById('facts-edit-message');
+  if (!title) {
+    if (msg) { msg.textContent = '标题不能为空。'; msg.classList.add('error'); }
+    return;
+  }
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factsEditingFactId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ title: title, content: content, attachments: factsPendingAttachments.edit || [], tags: factsPendingTags.edit || [] })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '保存失败');
+    closeFactsEditModal();
+    await loadFactsSkeleton();
+  } catch (e) {
+    if (msg) { msg.textContent = '保存失败: ' + e.message; msg.classList.add('error'); }
+  }
+}
+
+
+
+async function submitFactsAdd() {
+  var subjectSel = document.getElementById('facts-add-subject');
+  var predicateSel = document.getElementById('facts-add-predicate');
+  var titleInput = document.getElementById('facts-add-title');
+  var contentInput = document.getElementById('facts-add-content');
+  var validAtInput = document.getElementById('facts-add-valid-at');
+  var subjectKey = (subjectSel && subjectSel.value) || '';
+  var predicateValue = (predicateSel && predicateSel.value) || '';
+  var title = ((titleInput && titleInput.value) || '').trim();
+  var content = ((contentInput && contentInput.value) || '').trim();
+  var validAt = ((validAtInput && validAtInput.value) || '').trim();
+
+  if (!title) {
+    setFactsAddMessage('先填标题。', 'error');
+    return;
+  }
+  if (!predicateValue) {
+    setFactsAddMessage('先选一个类型，或者新建一个。', 'error');
+    return;
+  }
+
+  var payload = { subject_key: subjectKey, title: title, content: content, valid_at: validAt, attachments: factsPendingAttachments.add || [], tags: factsPendingTags.add || [] };
+
+  if (predicateValue === '__new__') {
+    var newKeyInput = document.getElementById('facts-add-new-predicate-key');
+    var newModeSel = document.getElementById('facts-add-new-predicate-mode');
+    var newNameInput = document.getElementById('facts-add-new-predicate-name');
+    var newKey = ((newKeyInput && newKeyInput.value) || '').trim();
+    if (!newKey) {
+      setFactsAddMessage('新 predicate 要填 predicate_key（英文，比如 xxx_status）。', 'error');
+      return;
+    }
+    payload.predicate_key = newKey;
+    payload.mode = (newModeSel && newModeSel.value) || '';
+    payload.display_name = ((newNameInput && newNameInput.value) || '').trim();
+  } else {
+    payload.predicate_key = predicateValue;
+  }
+
+  setFactsAddMessage('写入中…', '');
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '写入失败');
+    var landingPredicate = payload.predicate_key;
+    closeFactsCreateModal();
+    closeFactsDetailOverlay();
+    await loadFactsSkeleton();
+    // Landing on the titles column where the new entry now shows up is the
+    // confirmation -- a success message here would flash invisibly since
+    // the modal that held it just closed.
+    factsNavSelectKey(subjectKey, landingPredicate);
+  } catch (e) {
+    setFactsAddMessage('写入失败: ' + e.message, 'error');
+  }
 }
 
 async function loadFactsSkeleton() {
-  var list = document.getElementById('facts-list');
+  var nav = document.getElementById('facts-nav');
   var summary = document.getElementById('facts-summary');
-  if (!list || !summary) return;
-  list.innerHTML = '<div class="loading">加载骨架层事实…</div>';
+  if (!nav || !summary) return;
   summary.textContent = '读取中…';
   try {
     var res = await authFetch(BASE + '/api/facts-skeleton');
     if (!res) return;
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || '加载失败');
-    var groups = Array.isArray(data.groups) ? data.groups : [];
-    summary.textContent = groups.length + ' 类事实';
-    if (!groups.length) {
-      list.innerHTML = '<div class="loading">还没有稳定事实。</div>';
-      return;
-    }
-
-    var bySubject = {};
-    var testGroups = [];
-    groups.forEach(function(g) {
-      if (factsIsTestGroup(g)) { testGroups.push(g); return; }
-      (bySubject[g.subject_key] = bySubject[g.subject_key] || []).push(g);
-    });
-
-    var html = '';
-    Object.keys(bySubject).forEach(function(subjectKey) {
-      html += '<details open style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;">' +
-        esc(factsSubjectLabel(subjectKey)) + '</summary>' +
-        '<div style="padding-left:8px;">' + bySubject[subjectKey].map(renderFactGroup).join('') + '</div>' +
-        '</details>';
-    });
-    if (testGroups.length) {
-      html += '<details style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;font-size:16px;font-weight:600;padding:6px 0;color:var(--text-dim);">' +
-        '测试数据（' + testGroups.length + '）</summary>' +
-        '<div style="padding-left:8px;">' + testGroups.map(renderFactGroup).join('') + '</div>' +
-        '</details>';
-    }
-    list.innerHTML = html;
+    factsSkeletonPredicates = Array.isArray(data.predicates) ? data.predicates : [];
+    factsSkeletonGroups = Array.isArray(data.groups) ? data.groups : [];
+    populateFactsAddPredicateOptions();
+    renderPredicateManagementList();
+    var realGroupCount = factsSkeletonGroups.filter(function(g) { return !factsIsTestGroup(g); }).length;
+    summary.textContent = realGroupCount + ' 类事实';
+    renderFactsNav();
+    renderFactsDetailOverlay();
   } catch (e) {
     summary.textContent = '读取失败';
-    list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+    nav.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
   }
 }
 
