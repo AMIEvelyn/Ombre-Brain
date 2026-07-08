@@ -2267,6 +2267,14 @@
     margin-right: -10px;
     padding-right: 18px;
   }
+  /* if the selected item is also the first row, bleed its highlight up to the
+     column's true top edge too, flush with the other columns -- not just
+     the right edge -- instead of leaving a sliver of unselected color above it */
+  .facts-browse-col-subjects .facts-browse-item.active:first-child,
+  .facts-browse-col-keys .facts-browse-item.active:first-child {
+    margin-top: -16px;
+    padding-top: 26px;
+  }
   .facts-nav-back {
     display: inline-block;
     color: var(--text-dim);
