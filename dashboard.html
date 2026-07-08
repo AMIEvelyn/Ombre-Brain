@@ -2569,6 +2569,124 @@
     font-size: 13px;
     cursor: pointer;
   }
+  .facts-bucket-picker-panel {
+    position: absolute;
+    top: 34px;
+    left: 0;
+    z-index: 6;
+    background: var(--surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    width: min(320px, 80vw);
+    max-height: 320px;
+    overflow-y: auto;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle);
+  }
+  .facts-bucket-picker-panel input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+  }
+  .facts-bucket-result-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 6px;
+    border-radius: 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .facts-bucket-result-row:last-child { border-bottom: none; }
+  .facts-bucket-result-info { flex: 1; min-width: 0; }
+  .facts-bucket-result-name {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .facts-bucket-result-meta { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+  .facts-bucket-result-add {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    line-height: 22px;
+    text-align: center;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 15px;
+  }
+  .facts-bucket-result-add.added { border-color: var(--border); color: var(--text-dim); cursor: default; }
+  .facts-bucket-pending-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .facts-bucket-pending-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+    max-width: 220px;
+  }
+  .facts-bucket-pending-chip span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .facts-bucket-links-overlay { z-index: 58; padding: 16px; box-sizing: border-box; }
+  .facts-bucket-links-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .facts-bucket-links-row:last-child { border-bottom: none; }
+  .facts-bucket-links-name {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    color: var(--text);
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .facts-bucket-links-row.expanded .facts-bucket-links-name {
+    white-space: normal;
+  }
+  .facts-bucket-links-meta { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
+  .facts-bucket-links-content {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+  }
+  .facts-bucket-links-unlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    color: var(--negative);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .facts-bucket-links-more {
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+    padding-top: 10px;
+    text-align: center;
+  }
   .facts-detail-photos {
     margin: 10px 0;
     border-radius: 14px;
@@ -3463,13 +3581,19 @@
       <span></span>
     </div>
     <div class="facts-attachment-toolbar">
-      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('add')">+ 添加图片/文件</button>
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('add')">+ 添加图片/文件/关联桶</button>
       <div id="facts-attach-menu-add" class="facts-attachment-menu" style="display:none">
         <div onclick="triggerFactsAttachPicker('add','photo')">🖼 Add Photo</div>
         <div onclick="triggerFactsAttachPicker('add','file')">📄 Attach Files</div>
+        <div onclick="toggleFactsAttachMenu('add');toggleFactsBucketPicker('add')">🫙 Add Bucket</div>
+      </div>
+      <div id="facts-bucket-picker-add" class="facts-bucket-picker-panel" style="display:none">
+        <input type="text" id="facts-bucket-search-add" placeholder="搜关键词或粘贴 bucket_id" oninput="onFactsBucketSearchInput('add')" />
+        <div id="facts-bucket-search-results-add"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
       </div>
     </div>
     <div class="facts-attachment-thumbs" id="facts-add-attachments"></div>
+    <div class="facts-bucket-pending-row" id="facts-add-bucket-links"></div>
     <input type="file" id="facts-add-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
     <input type="file" id="facts-add-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('add', this)" />
     <div class="profile-proposal-form">
@@ -3502,13 +3626,19 @@
       <span></span>
     </div>
     <div class="facts-attachment-toolbar">
-      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('edit')">+ 添加图片/文件</button>
+      <button type="button" class="facts-attachment-add-btn" onclick="toggleFactsAttachMenu('edit')">+ 添加图片/文件/关联桶</button>
       <div id="facts-attach-menu-edit" class="facts-attachment-menu" style="display:none">
         <div onclick="triggerFactsAttachPicker('edit','photo')">🖼 Add Photo</div>
         <div onclick="triggerFactsAttachPicker('edit','file')">📄 Attach Files</div>
+        <div onclick="toggleFactsAttachMenu('edit');toggleFactsBucketPicker('edit')">🫙 Add Bucket</div>
+      </div>
+      <div id="facts-bucket-picker-edit" class="facts-bucket-picker-panel" style="display:none">
+        <input type="text" id="facts-bucket-search-edit" placeholder="搜关键词或粘贴 bucket_id" oninput="onFactsBucketSearchInput('edit')" />
+        <div id="facts-bucket-search-results-edit"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
       </div>
     </div>
     <div class="facts-attachment-thumbs" id="facts-edit-attachments"></div>
+    <div class="facts-bucket-pending-row" id="facts-edit-bucket-links"></div>
     <input type="file" id="facts-edit-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
     <input type="file" id="facts-edit-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="onFactsAttachFileChosen('edit', this)" />
     <div class="profile-proposal-form">
@@ -3522,6 +3652,10 @@
 
 <div id="facts-detail-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) closeFactsDetailOverlay()">
   <div id="facts-detail-modal-body"></div>
+</div>
+
+<div id="facts-bucket-links-overlay" class="facts-modal-overlay facts-bucket-links-overlay" style="display:none" onclick="if(event.target===this) closeFactsBucketLinksOverlay()">
+  <div class="facts-modal-panel" id="facts-bucket-links-body"></div>
 </div>
 
 <div class="content" id="word-map-view" style="display:none">
@@ -5403,6 +5537,15 @@ var factsPendingTags = { add: [], edit: [] };
 var factsPhotoSwipeState = {};
 var factsDetailContentExpanded = {};
 var FACTS_CONTENT_COLLAPSE_CHARS = 120;
+// bucket_id -> {bucket_id,name,date,domain,relation_type} picks not yet POSTed
+// (flushed to /api/facts-skeleton/facts/{id}/buckets on Add/Save, same
+// "queue then flush" pattern as attachments/tags).
+var factsPendingBucketLinks = { add: [], edit: [] };
+var factsBucketSearchTimer = null;
+var factsBucketSearchResults = { add: [], edit: [] }; // last search hits, referenced by index from result-row onclicks
+var factsBucketLinksOverlayState = null; // { factId, expandedLinkId, relatedOffset }
+var factsBucketLinksData = null; // { links, counts_by_relation, total } for the open fact
+var FACTS_BUCKET_LINKS_PAGE_SIZE = 20;
 
 function factsSubjectLabel(subjectKey) {
   return FACTS_SUBJECT_LABELS[subjectKey] || subjectKey || '未知主体';
@@ -5509,6 +5652,159 @@ function renderFactsDetailOverlay() {
   overlay.style.display = 'flex';
 }
 
+// ------------------------------------------------------------------
+// View Bucket -- read-only list of the memory buckets linked to one fact,
+// opened from the "···" menu. Layers on top of the (still-open) detail
+// overlay, mirroring how create/edit modals stack on top of it.
+// ------------------------------------------------------------------
+async function openFactsBucketLinksOverlay(factId) {
+  factsBucketLinksOverlayState = { factId: factId, expandedLinkId: null, relatedOffset: 0 };
+  factsBucketLinksData = null;
+  document.getElementById('facts-bucket-links-overlay').style.display = 'flex';
+  renderFactsBucketLinksOverlay(); // loading state first
+  await loadFactsBucketLinks();
+}
+
+function closeFactsBucketLinksOverlay() {
+  factsBucketLinksOverlayState = null;
+  factsBucketLinksData = null;
+  var overlay = document.getElementById('facts-bucket-links-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function loadFactsBucketLinks() {
+  var state = factsBucketLinksOverlayState;
+  if (!state) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + state.factId + '/buckets?limit=' +
+      (state.showAll ? '' : '3'));
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '加载失败');
+    factsBucketLinksData = data;
+  } catch (e) {
+    factsBucketLinksData = { error: e.message };
+  }
+  renderFactsBucketLinksOverlay();
+}
+
+function factsBucketLinksShowAll() {
+  factsBucketLinksOverlayState.showAll = true;
+  factsBucketLinksOverlayState.relatedLimit = FACTS_BUCKET_LINKS_PAGE_SIZE;
+  loadFactsBucketLinks();
+}
+
+function factsBucketLinksShowMoreRelated() {
+  factsBucketLinksOverlayState.relatedLimit = (factsBucketLinksOverlayState.relatedLimit || FACTS_BUCKET_LINKS_PAGE_SIZE) + FACTS_BUCKET_LINKS_PAGE_SIZE;
+  renderFactsBucketLinksOverlay();
+}
+
+function toggleFactsBucketLinkExpand(linkId) {
+  var state = factsBucketLinksOverlayState;
+  if (!state) return;
+  state.expandedLinkId = state.expandedLinkId === linkId ? null : linkId;
+  renderFactsBucketLinksOverlay();
+}
+
+async function unlinkFactsBucket(factId, linkId) {
+  if (!confirm('取消这条关联？（只解除关联，不会删除记忆桶本身）')) return;
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId + '/buckets/' + linkId, { method: 'DELETE' });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '取消关联失败');
+    await loadFactsBucketLinks();
+  } catch (e) {
+    alert('取消关联失败: ' + e.message);
+  }
+}
+
+function renderFactsBucketLinksRow(link) {
+  var state = factsBucketLinksOverlayState;
+  var expanded = state.expandedLinkId === link.link_id;
+  var bucket = link.bucket;
+  var name = bucket ? bucket.name : '（桶已不存在）';
+  var meta = bucket ? factsBucketMetaLine(bucket, link.relation_type) : esc(link.relation_type + ' / ' + link.bucket_id);
+  var body = '';
+  if (expanded) {
+    var content = bucket ? (bucket.fullContent || '加载中…') : '这个记忆桶已经被删除或遗忘了，只留下了关联记录。';
+    body = '<div class="facts-bucket-links-content">' + esc(content) + '</div>' +
+      '<span class="facts-bucket-links-unlink" onclick="event.stopPropagation();unlinkFactsBucket(' + state.factId + ', ' + link.link_id + ')">🗑 Delete（取消关联）</span>';
+  }
+  return '<div class="facts-bucket-links-row' + (expanded ? ' expanded' : '') + '" onclick="onFactsBucketLinkRowClick(' + link.link_id + ', \'' + (bucket ? bucket.id : '') + '\')">' +
+    '<div class="facts-bucket-links-name">' + esc(name) + '</div>' +
+    '<div class="facts-bucket-links-meta">' + meta + '</div>' +
+    body +
+    '</div>';
+}
+
+async function onFactsBucketLinkRowClick(linkId, bucketId) {
+  var state = factsBucketLinksOverlayState;
+  var wasExpanded = state.expandedLinkId === linkId;
+  toggleFactsBucketLinkExpand(linkId);
+  if (wasExpanded || !bucketId) return;
+  var link = (factsBucketLinksData.links || []).find(function(l) { return l.link_id === linkId; });
+  if (!link || !link.bucket || link.bucket.fullContent) return;
+  try {
+    var res = await authFetch(BASE + '/api/bucket/' + encodeURIComponent(bucketId));
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (res.ok) link.bucket.fullContent = data.content || '（无内容）';
+  } catch (e) {
+    link.bucket.fullContent = '（加载失败: ' + e.message + '）';
+  }
+  renderFactsBucketLinksOverlay();
+}
+
+function renderFactsBucketLinksOverlay() {
+  var body = document.getElementById('facts-bucket-links-body');
+  var state = factsBucketLinksOverlayState;
+  if (!body || !state) return;
+  var header = '<div class="facts-modal-header"><span>🫙 关联记忆桶</span>' +
+    '<button type="button" class="facts-detail-close-btn" style="margin-left:auto;" onclick="closeFactsBucketLinksOverlay()">✕</button></div>';
+  if (!factsBucketLinksData) {
+    body.innerHTML = header + '<div class="loading">加载中…</div>';
+    return;
+  }
+  if (factsBucketLinksData.error) {
+    body.innerHTML = header + '<div class="loading">加载失败: ' + esc(factsBucketLinksData.error) + '</div>';
+    return;
+  }
+  var links = factsBucketLinksData.links || [];
+  var total = factsBucketLinksData.total || 0;
+  var counts = factsBucketLinksData.counts_by_relation || {};
+  if (!links.length) {
+    body.innerHTML = header + '<div class="loading">还没有关联任何记忆桶。</div>';
+    return;
+  }
+  var summary = '<div class="facts-bucket-links-meta" style="margin-bottom:8px;">共 ' + total + ' 个 —— evidence ' +
+    (counts.evidence || 0) + ' / origin ' + (counts.origin || 0) + ' / related ' + (counts.related || 0) + '</div>';
+
+  var shownLinks, relatedTailHtml;
+  if (!state.showAll) {
+    // Default view: top 3 (already priority-sorted origin -> evidence ->
+    // related by the backend), plain "查看全部" to expand.
+    shownLinks = links;
+    relatedTailHtml = (total > links.length)
+      ? '<div class="facts-bucket-links-more" onclick="factsBucketLinksShowAll()">查看全部（共 ' + total + ' 个）</div>'
+      : '';
+  } else {
+    // Expanded view: show every evidence/origin link (small by construction),
+    // but page through "related" client-side FACTS_BUCKET_LINKS_PAGE_SIZE at
+    // a time instead of dumping a potentially huge list -- 林湛's "超过20条
+    // 分页" requirement, done client-side since we already fetched everything.
+    var nonRelated = links.filter(function(l) { return l.relation_type !== 'related'; });
+    var related = links.filter(function(l) { return l.relation_type === 'related'; });
+    var relatedLimit = state.relatedLimit || FACTS_BUCKET_LINKS_PAGE_SIZE;
+    shownLinks = nonRelated.concat(related.slice(0, relatedLimit));
+    relatedTailHtml = related.length > relatedLimit
+      ? '<div class="facts-bucket-links-more" onclick="factsBucketLinksShowMoreRelated()">查看更多相关记忆（还有 ' + (related.length - relatedLimit) + ' 条）</div>'
+      : '';
+  }
+  var rows = shownLinks.map(renderFactsBucketLinksRow).join('');
+  body.innerHTML = header + summary + rows + relatedTailHtml;
+}
+
 function renderFactsNav() {
   var container = document.getElementById('facts-nav');
   if (!container) return;
@@ -5613,6 +5909,7 @@ function renderFactsDetailCard(subjectKey, predicateKey, factId) {
     '<div id="facts-detail-menu-' + factId + '" class="facts-detail-menu" style="display:none">' +
     '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsRevisionModal(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + factId + ')">⊕ New Revision</div>' +
     '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsEditModal(' + factId + ')">✎ Edit</div>' +
+    '<div onclick="toggleFactsDetailMenu(' + factId + ');openFactsBucketLinksOverlay(' + factId + ')">🫙 View Bucket</div>' +
     '<div onclick="toggleFactsDetailMenu(' + factId + ');invalidateFactsFact(' + factId + ')">🕓 Invalidate</div>' +
     '<div style="color:var(--negative);" onclick="toggleFactsDetailMenu(' + factId + ');deleteFactsSkeletonFact(' + factId + ')">🗑 Delete</div>' +
     '</div>' +
@@ -5826,6 +6123,127 @@ async function uploadFactsAttachment(target, file) {
   }
 }
 
+// ------------------------------------------------------------------
+// Add Bucket picker (Create/New Revision/Edit forms) -- queues picks
+// client-side and flushes them via POST .../buckets once the fact itself
+// has a fact_id (on Add/Save), same "queue then flush" pattern already
+// used for attachments/tags in these same forms.
+// ------------------------------------------------------------------
+function toggleFactsBucketPicker(target) {
+  var panel = document.getElementById('facts-bucket-picker-' + target);
+  if (!panel) return;
+  var willShow = panel.style.display === 'none';
+  panel.style.display = willShow ? '' : 'none';
+  if (willShow) {
+    var input = document.getElementById('facts-bucket-search-' + target);
+    if (input) { input.value = ''; input.focus(); }
+    document.getElementById('facts-bucket-search-results-' + target).innerHTML =
+      '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>';
+  }
+}
+
+function factsBucketMetaLine(bucket, relationType) {
+  var domain = Array.isArray(bucket.domain) && bucket.domain.length ? bucket.domain.join('·') : '未分类';
+  return esc([relationType || 'evidence', bucket.id, bucket.date || bucket.created || '未知日期', domain].join(' / '));
+}
+
+function onFactsBucketSearchInput(target) {
+  clearTimeout(factsBucketSearchTimer);
+  factsBucketSearchTimer = setTimeout(function() { runFactsBucketSearch(target); }, 300);
+}
+
+async function runFactsBucketSearch(target) {
+  var input = document.getElementById('facts-bucket-search-' + target);
+  var resultsEl = document.getElementById('facts-bucket-search-results-' + target);
+  if (!input || !resultsEl) return;
+  var q = (input.value || '').trim();
+  if (!q) {
+    resultsEl.innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>';
+    return;
+  }
+  resultsEl.innerHTML = '<div class="loading" style="font-size:12px;">搜索中…</div>';
+  try {
+    var res = await authFetch(BASE + '/api/facts-skeleton/buckets/search?q=' + encodeURIComponent(q));
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '搜索失败');
+    var buckets = Array.isArray(data.buckets) ? data.buckets : [];
+    if (!buckets.length) {
+      resultsEl.innerHTML = '<div class="loading" style="font-size:12px;">没搜到匹配的记忆桶。</div>';
+      return;
+    }
+    factsBucketSearchResults[target] = buckets;
+    var pendingIds = (factsPendingBucketLinks[target] || []).map(function(p) { return p.bucket_id; });
+    resultsEl.innerHTML = buckets.map(function(b, idx) {
+      var already = pendingIds.indexOf(b.id) !== -1;
+      return '<div class="facts-bucket-result-row">' +
+        '<div class="facts-bucket-result-info">' +
+        '<div class="facts-bucket-result-name">' + esc(b.name || b.id) + '</div>' +
+        '<div class="facts-bucket-result-meta">' + factsBucketMetaLine(b, 'evidence') + '</div>' +
+        '</div>' +
+        '<span class="facts-bucket-result-add' + (already ? ' added' : '') + '" onclick="' +
+        (already ? '' : 'addPendingFactsBucketLink(\'' + target + '\', ' + idx + ')') +
+        '">' + (already ? '✓' : '+') + '</span>' +
+        '</div>';
+    }).join('');
+  } catch (e) {
+    resultsEl.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function addPendingFactsBucketLink(target, resultIdx) {
+  var bucket = (factsBucketSearchResults[target] || [])[resultIdx];
+  if (!bucket) return;
+  var items = factsPendingBucketLinks[target] || (factsPendingBucketLinks[target] = []);
+  if (items.some(function(p) { return p.bucket_id === bucket.id; })) return;
+  items.push({ bucket_id: bucket.id, name: bucket.name || bucket.id, date: bucket.date, domain: bucket.domain, relation_type: 'evidence' });
+  renderFactsBucketPendingChips(target);
+  runFactsBucketSearch(target); // re-render results so the added row flips to a checkmark
+}
+
+function removePendingFactsBucketLink(target, idx) {
+  var items = factsPendingBucketLinks[target] || [];
+  items.splice(idx, 1);
+  renderFactsBucketPendingChips(target);
+}
+
+function renderFactsBucketPendingChips(target) {
+  var container = document.getElementById('facts-' + target + '-bucket-links');
+  if (!container) return;
+  var items = factsPendingBucketLinks[target] || [];
+  container.innerHTML = items.map(function(p, idx) {
+    return '<span class="facts-bucket-pending-chip" title="' + esc(p.bucket_id) + '">' +
+      '<span>🫙 ' + esc(p.name) + '</span>' +
+      '<span class="facts-tag-remove" onclick="removePendingFactsBucketLink(\'' + target + '\', ' + idx + ')">×</span>' +
+      '</span>';
+  }).join('');
+}
+
+// Best-effort: called after the fact itself is created/saved and has a
+// fact_id. Link failures are collected and reported but don't block the
+// fact-level success -- the fact was already written either way.
+async function flushPendingFactsBucketLinks(target, factId) {
+  var items = factsPendingBucketLinks[target] || [];
+  if (!items.length) return [];
+  var errors = [];
+  for (var i = 0; i < items.length; i++) {
+    try {
+      var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId + '/buckets', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ bucket_id: items[i].bucket_id, relation_type: items[i].relation_type || 'evidence' })
+      });
+      if (!res) continue;
+      var data = await res.json().catch(function() { return {}; });
+      if (!res.ok) errors.push(items[i].name + ': ' + (data.error || '失败'));
+    } catch (e) {
+      errors.push(items[i].name + ': ' + e.message);
+    }
+  }
+  factsPendingBucketLinks[target] = [];
+  return errors;
+}
+
 function renderFactsPhotosBlock(factId, attachments) {
   attachments = Array.isArray(attachments) ? attachments : [];
   var images = attachments.filter(function(a) { return a.type === 'image'; }).slice(0, FACTS_ATTACHMENT_MAX_ITEMS);
@@ -5955,10 +6373,14 @@ function openFactsCreateModal() {
   renderFactsTagPills('add');
   var addTagInput = document.getElementById('facts-add-tag-input');
   if (addTagInput) addTagInput.value = '';
+  factsPendingBucketLinks.add = [];
+  renderFactsBucketPendingChips('add');
+  var addBucketPicker = document.getElementById('facts-bucket-picker-add');
+  if (addBucketPicker) addBucketPicker.style.display = 'none';
   document.getElementById('facts-create-overlay').style.display = 'flex';
 }
 
-function openFactsRevisionModal(subjectKey, predicateKey, factId) {
+async function openFactsRevisionModal(subjectKey, predicateKey, factId) {
   var fact = factsFindFact(subjectKey, predicateKey, factId);
   var titleEl = document.getElementById('facts-create-modal-title');
   if (titleEl) titleEl.textContent = 'New Revision（新增时间点）';
@@ -5976,11 +6398,30 @@ function openFactsRevisionModal(subjectKey, predicateKey, factId) {
   renderFactsAttachmentThumbs('add');
   var revisionMenu = document.getElementById('facts-attach-menu-add');
   if (revisionMenu) revisionMenu.style.display = 'none';
+  var revisionBucketPicker = document.getElementById('facts-bucket-picker-add');
+  if (revisionBucketPicker) revisionBucketPicker.style.display = 'none';
   factsPendingTags.add = fact && Array.isArray(fact.tags) ? fact.tags.slice() : [];
   renderFactsTagPills('add');
   var revisionTagInput = document.getElementById('facts-add-tag-input');
   if (revisionTagInput) revisionTagInput.value = '';
+  // New Revision carries the old record's bucket links forward, same as it
+  // already does for attachments/tags -- re-linked under the new fact_id
+  // once submitFactsAdd() creates it.
+  factsPendingBucketLinks.add = [];
+  renderFactsBucketPendingChips('add');
   document.getElementById('facts-create-overlay').style.display = 'flex';
+  if (fact) {
+    try {
+      var res = await authFetch(BASE + '/api/facts-skeleton/facts/' + factId + '/buckets');
+      if (res && res.ok) {
+        var data = await res.json().catch(function() { return {}; });
+        factsPendingBucketLinks.add = (data.links || []).filter(function(l) { return l.bucket; }).map(function(l) {
+          return { bucket_id: l.bucket_id, name: l.bucket.name, date: l.bucket.date, domain: l.bucket.domain, relation_type: l.relation_type };
+        });
+        renderFactsBucketPendingChips('add');
+      }
+    } catch (e) { /* carrying links forward is best-effort, title/content still work without it */ }
+  }
 }
 
 function closeFactsCreateModal() {
@@ -5991,6 +6432,7 @@ function closeFactsCreateModal() {
   if (predicateSel) predicateSel.disabled = false;
   factsPendingAttachments.add = [];
   factsPendingTags.add = [];
+  factsPendingBucketLinks.add = [];
 }
 
 function openFactsEditModal(factId) {
@@ -6011,6 +6453,12 @@ function openFactsEditModal(factId) {
   renderFactsTagPills('edit');
   var editTagInput = document.getElementById('facts-edit-tag-input');
   if (editTagInput) editTagInput.value = '';
+  // Edit only queues *new* picks made in this session -- buckets already
+  // linked to this fact are managed from View Bucket, not re-listed here.
+  factsPendingBucketLinks.edit = [];
+  renderFactsBucketPendingChips('edit');
+  var editBucketPicker = document.getElementById('facts-bucket-picker-edit');
+  if (editBucketPicker) editBucketPicker.style.display = 'none';
   document.getElementById('facts-edit-overlay').style.display = 'flex';
 }
 
@@ -6019,6 +6467,7 @@ function closeFactsEditModal() {
   factsEditingFactId = null;
   factsPendingAttachments.edit = [];
   factsPendingTags.edit = [];
+  factsPendingBucketLinks.edit = [];
 }
 
 async function submitFactsEdit() {
@@ -6039,8 +6488,10 @@ async function submitFactsEdit() {
     if (!res) return;
     var data = await res.json().catch(function() { return {}; });
     if (!res.ok) throw new Error(data.error || '保存失败');
+    var linkErrors = await flushPendingFactsBucketLinks('edit', factsEditingFactId);
     closeFactsEditModal();
     await loadFactsSkeleton();
+    if (linkErrors.length) alert('事实保存成功，但有关联桶没挂上：\n' + linkErrors.join('\n'));
   } catch (e) {
     if (msg) { msg.textContent = '保存失败: ' + e.message; msg.classList.add('error'); }
   }
@@ -6096,6 +6547,7 @@ async function submitFactsAdd() {
     var data = await res.json().catch(function() { return {}; });
     if (!res.ok) throw new Error(data.error || '写入失败');
     var landingPredicate = payload.predicate_key;
+    var linkErrors = await flushPendingFactsBucketLinks('add', data.id);
     closeFactsCreateModal();
     closeFactsDetailOverlay();
     await loadFactsSkeleton();
@@ -6103,6 +6555,7 @@ async function submitFactsAdd() {
     // confirmation -- a success message here would flash invisibly since
     // the modal that held it just closed.
     factsNavSelectKey(subjectKey, landingPredicate);
+    if (linkErrors.length) alert('事实写入成功，但有关联桶没挂上：\n' + linkErrors.join('\n'));
   } catch (e) {
     setFactsAddMessage('写入失败: ' + e.message, 'error');
   }

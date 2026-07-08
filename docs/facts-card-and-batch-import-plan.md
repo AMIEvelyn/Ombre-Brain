@@ -1,7 +1,7 @@
 # 资料卡片统一模型 + 历史批量筛选 —— 设计讨论存档
 
 写给：一澜、林湛
-状态：**第1步（资料卡地基）、第2步（图片/文件上传）、第3步（视觉打磨）已实现并部署**；额外顺手加了标签+搜索、`fact_lookup` 内容修复；**第4步（关联记忆桶，多对多）后端已完成，UI 待做**；第5/6步仍是设计存档，未开工
+状态：**第1步（资料卡地基）、第2步（图片/文件上传）、第3步（视觉打磨）已实现并部署**；额外顺手加了标签+搜索、`fact_lookup` 内容修复；**第4步（关联记忆桶，多对多）后端+UI 均已实现，一澜自己部署**；第5/6步仍是设计存档，未开工
 
 ## 给接手的新会话看：现在到哪一步了
 
@@ -13,7 +13,7 @@
 | 2. 图片/文件上传基建 | ✅ 已部署 |
 | 顺手：`fact_lookup` 加 `query` 参数 + 标签搜索、`facts` 表加 `tags` 字段 | ✅ 已部署 |
 | 3. 视觉打磨（毛玻璃→后改实色、思源宋体、照片轮播+滑动、长内容收起展开、**三级导航从"单层+返回键"改成 Miller columns 三栏同显**、点事实变成悬浮详情卡） | ✅ 已部署，一澜确认满意 |
-| 4. 关联记忆桶管理（Add Bucket/View Bucket） | 🔶 后端已完成，UI 待做（见下方里程碑） |
+| 4. 关联记忆桶管理（Add Bucket/View Bucket） | ✅ 后端+UI 已实现（Playwright 模拟数据验证过，未跑真实后端），一澜自己部署 |
 | 5. 历史批量筛选（三类事实分别处理） | ⏳ 未开工 |
 | 6. "未来线/成就册"模块 | ⏳ 未开工 |
 | 待办：`docs/Tool Guide.md` 补 `fact_lookup` 用法 | ⏳ 还没做，说好等第3+5步都收尾了再一次性补，现在第3步做完了，还差第5步 |
@@ -267,8 +267,44 @@
 - **排序和分页为"默认展示前3条"的 UI 需求做了准备**：`get_bucket_links()` 现在按 `origin → evidence → related` 排优先级、同类型内按时间新到旧排序，前端如果只想要"最重要的3条"直接 `limit=3` 不用自己再排一遍；`related` 想要分页/搜索就用 `limit`/`offset`，超过软上限20条时"关联很多"的提示文案由前端根据 `counts_by_relation.related` 判断展示。
 - 没有实现"关联桶内部按关键词搜索"（一澜原话提到的"超过20条时…详情页分页/搜索"里的"搜索"部分）——分页做了，桶内关键词过滤这次没做，先记录成一个待补项，等做 UI 时如果发现分页不够用再加。
 
-**revision 级关联的取舍**：林湛提到理想状态应该是关联跟具体版本/时间点绑定（婚戒卡以后改正文，旧版本也该知道当时关联了哪些桶），但明确说第一版可以先简单做在 fact/card 上，以后再升级到 revision 级别。这次就是按"先简单做"实现的——`fact_bucket_links.fact_id` 直接挂在当前这一行 fact 记录上，编辑（`update_fact`，不留新时间点）不受影响；但如果以后用"New Revision"开新的时间点，新行是新的 `fact_id`，旧关联不会自动带过去，这是已知的后续升级点，不是这次的疏漏。
+**revision 级关联的取舍**：林湛提到理想状态应该是关联跟具体版本/时间点绑定（婚戒卡以后改正文，旧版本也该知道当时关联了哪些桶），但明确说第一版可以先简单做在 fact/card 上，以后再升级到 revision 级别。这次就是按"先简单做"实现的——`fact_bucket_links.fact_id` 直接挂在当前这一行 fact 记录上，编辑（`update_fact`，不留新时间点）不受影响；用"New Revision"开新时间点时是新的 `fact_id`，后端不会自动带旧关联过去（表结构上就是各自独立的行），但前端做了一层"体验上的搬运"——`openFactsRevisionModal()` 打开时会读一次旧 fact 当前的关联桶列表，预填进待提交的 Add Bucket 队列，提交时跟着新 fact_id 一起重新挂上，效果上跟附件/标签的"New Revision 带过去"一致；真正的 revision 级历史追溯（旧版本知道当时关联了哪些桶）仍然是后续升级点，不是这次做的。
 
 **验证**：这次环境仍然缺 `jieba`/`mcp`/`httpx`/`rapidfuzz`/`pytest`，且沙盒没有 PyPI 网络访问（试了 `pip install` 和纯 wheel 安装都失败），没能像第2步那次一样伪造依赖跑通完整 `import server`。改为对 `facts_store.py` 新增/改动的部分做了不依赖这些外部库的直接单元测试（纯 sqlite，隔离临时目录）：挂载/查询/幂等重复挂载/解除关联/非法 `relation_type` 回退默认值验证过一轮；软上限改版后又单独测了一轮——evidence 推到7个、origin推到4个、related推到25个，确认前5/3/20个不返回 warning、超过后才返回且不再重复因为幂等重放报警、`count_bucket_links_by_relation` 计数准确、`limit=3` 精确切出优先级最高的3条 origin、`related` 分页 `limit=10&offset=10` 精确返回第11-20条，全部符合预期。`server.py` 那几个新接口是纯静态审查——确认用到的 `bucket_mgr`、`strip_wikilinks`、`_require_dashboard_auth`、`JSONResponse` 都是文件里已经在用的现成符号，写法跟同一文件里其他 facts-skeleton 接口的模式（鉴权检查、body 校验、错误返回）一致；`python3 -m py_compile server.py facts_store.py` 通过。**没有跑真实 HTTP 请求端到端测试，也没有跑 `scripts/test_predicate_modes.py` 回归测试**——这两项等下次有能跑通依赖的环境时应该补上，目前只能保证语法正确和核心逻辑本身没问题。
 
 **待办**：详情页"关联记忆桶"区块 + Add Bucket 搜索选择器 + View Bucket 列表这三块 UI，等一澜给参考图后再做。
+
+## 里程碑：第4步 UI（Add Bucket 搜索选择器 + View Bucket 列表）实现完成（2026-07-08）
+
+一澜给了草图截图（Create 弹窗里的 Add Bucket 搜索流程 + View Bucket 关联桶列表/单条展开/取消关联三张图）。做之前她额外提了两点：
+1. Create 弹窗画的 Add Bucket 流程，**New Revision 和 Edit 页面也要照着加**，草图只画了 Create 那一版
+2. 关联桶列表里桶标题下面那行元信息，因为现在有 `relation_type` 了，要**多加一行变成"origin（或其他）/id/date/域"**这种格式
+
+都按这个做了：
+
+**Add Bucket 搜索选择器**（Create / New Revision / Edit 三处共用同一套组件）：
+- "+ 添加图片/文件/关联桶"工具栏的下拉菜单加了第三项 🫙 Add Bucket，点开是一个搜索框 + 结果列表的浮层（复用 `.facts-attachment-menu` 的下拉定位方式，同一个组件三处共用，不是各写一份）
+- 输入关键词 300ms 防抖后调 `/api/facts-skeleton/buckets/search?q=`，结果每条显示标题 + 元信息行（`evidence / bucket_id / date / 域`）+ 一个"+"按钮；点了变成"✓"（已加入）
+- 选中的桶**不会立刻写库**——先存进一个前端待提交队列（`factsPendingBucketLinks`），跟附件/标签走的是同一套"排队，提交事实本身时才一起 flush"模式：Create/New Revision 在 `submitFactsAdd()` 拿到新 `fact_id` 后循环调 link 接口；Edit 在 `submitFactsEdit()` 保存成功后循环调。链接失败不会挡住事实本身的保存成功，会在事实保存成功后单独弹一条"哪几个桶没挂上"的提示
+- **New Revision 额外做了"带过去"**：打开 New Revision 弹窗时会先读一次旧 fact 当前挂的关联桶，预填进待提交队列，效果上跟"附件/标签会带过去"一致（见上面"revision 级关联的取舍"更新）
+- **Edit 页面的范围只到"这次新加的"**：已经挂在这条事实上的旧关联桶不会重新列出来给你在 Edit 弹窗里管理，要看/删旧关联去 View Bucket——两个入口分工明确，不重复造轮子
+- relation_type 这一步没有做选择器，picker 里加的桶固定给 `evidence`（林湛说的"UI 上先简单就行"），要标成 origin/related 目前只能手动改数据库；这是有意简化，不是漏做
+
+**View Bucket 列表**（"···"菜单新加一项 🫙 View Bucket）：
+- 关联桶列表以浮层形式盖在详情卡上面（跟 create/edit 弹窗一样是独立叠层，z-index 58，卡在详情卡 55 和 create/edit 弹窗 60 之间），顶部一个"✕"关闭
+- **桶标题下面那一行按一澜的要求做成`relation_type / bucket_id / date / 域`格式**（比如 `origin / bucket_aaa / 2026-02-18 / relationship·event`），域是桶的 `domain` 数组用 `·` 连起来，取代了草图旧版画的三行 ID/date/relationship·event，改成一行更紧凑
+- 默认只显示后端已经排好优先级的前3条（origin→evidence→related，同类型内新到旧），有"查看全部"展开；展开后 evidence/origin 全展示（本来就少），`related` 超过20条时不会一次性全塞进页面，用客户端分页"查看更多相关记忆"一次加载20条，避免像《慁》那种大项目关联几十条时页面被拖垮
+- 点一条桶行内展开（不跳新页面），懒加载真实全文——列表本身只有 200 字预览，点开第一次才去调 `GET /api/bucket/{id}` 把完整内容拉回来并缓存住，不会每次展开都重新请求
+- 桶已经被删的关联行会显示"（桶已不存在）"而不是直接从列表消失，元信息行退化成`relation_type / bucket_id`（没有桶数据就没有日期/域可显示）
+- 展开态底部有"🗑 Delete（取消关联）"，点了要二次确认，调 unlink 接口只删关联记录，不动记忆桶本身
+
+**没做的**：桶内关键词搜索（分页做了，搜索一直是记录在案的待补项，见上面第一版里程碑）；relation_type 在 UI 上手动改（目前只能通过数据库或以后再加的接口调用改）。
+
+**验证**：这次做的是纯前端改动（配合早前已经做的4个后端接口 + 这次给 `_bucket_link_summary` / buckets/search 补的 `domain`/`type` 字段），起了一个隔离的静态文件 server 只发 `dashboard.html`，用 Playwright（`/opt/node22/lib/node_modules/playwright` 全局包 + `/opt/pw-browsers/chromium`，`--no-sandbox`）拦截 `fetch` 请求返回假数据，绕开真实登录和后端，直接调用现成的 JS 函数验证交互：
+- Add Bucket 搜索：打开 Create 弹窗、开 picker 面板、搜"手链"、结果里的元信息行格式确认是 `evidence / bucket_aaa / 2026-02-18 / relationship·event`、点"+"确认待提交队列多一条、按钮翻转成"✓"、chip 正确显示、点 chip 的"×"确认队列清空回0
+- View Bucket 列表：打开浮层、汇总行"共 3 个 —— evidence 1 / origin 1 / related 1"正确、三条 row 的元信息行分别是 `origin / bucket_aaa / 2026-02-18 / relationship·event`、`evidence / bucket_bbb / 2026-02-26 / relationship`、`related / bucket_deleted`（模拟了一个已删除的桶，正确显示"桶已不存在"且元信息行退化成只有 relation_type/id）
+- 点开第一条展开，确认懒加载拉回的是完整原文（不是200字预览），"🗑 Delete"控件正确出现
+- 全程 `pageerror`/`console.error` 只有测试环境本身请求 `/auth/status`、`chat-memory.js` 产生的、跟这次改动无关的404（因为是直接拿静态文件当页面测，不走真实路由），跟功能代码无关，没有 JS 报错
+- `node --check` 过了 dashboard.html 提取出的完整 inline script；`python3 -m py_compile server.py facts_store.py` 通过
+- **没有跑真实后端端到端**（同样卡在这个沙盒装不上 `jieba`/`mcp`/`httpx` 这个老问题），部署前建议在真实环境里跑一遍完整流程确认无误
+
+**部署**：一澜说这步她自己来部署。

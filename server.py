@@ -10065,10 +10065,12 @@ async def api_facts_skeleton_delete_fact(request):
 # 资料卡与记忆桶的多对多关联（第4步）
 # =============================================================
 async def _bucket_link_summary(bucket_id: str) -> dict | None:
-    """Light summary (id/name/date/content preview) of a bucket for display
-    inside a fact's "关联记忆桶" list. None if the bucket no longer exists
-    (deleted/forgotten) -- the link row is kept as-is; the frontend shows it
-    as a dangling reference rather than silently dropping it."""
+    """Light summary (id/name/date/domain/content preview) of a bucket for
+    display inside a fact's "关联记忆桶" list -- domain feeds the Dashboard's
+    "relation_type / id / date / domain" meta line. None if the bucket no
+    longer exists (deleted/forgotten) -- the link row is kept as-is; the
+    frontend shows it as a dangling reference rather than silently dropping
+    it."""
     bucket = await bucket_mgr.get(bucket_id)
     if not bucket:
         return None
@@ -10078,6 +10080,8 @@ async def _bucket_link_summary(bucket_id: str) -> dict | None:
         "name": meta.get("name", bucket["id"]),
         "date": meta.get("date"),
         "created": meta.get("created", ""),
+        "domain": meta.get("domain", []),
+        "type": meta.get("type", "dynamic"),
         "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
     }
 
@@ -10262,6 +10266,8 @@ async def api_facts_skeleton_search_buckets(request):
             "name": meta.get("name", bucket["id"]),
             "date": meta.get("date"),
             "created": meta.get("created", ""),
+            "domain": meta.get("domain", []),
+            "type": meta.get("type", "dynamic"),
             "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
         })
         seen_ids.add(bucket["id"])
