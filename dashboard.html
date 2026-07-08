@@ -232,23 +232,6 @@
     background: linear-gradient(145deg, var(--accent-light), var(--accent));
     box-shadow: inset 3px 3px 6px rgba(0,0,0,0.2), inset -2px -2px 4px rgba(255,255,255,0.05);
   }
-  .filter-sort-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    min-width: 48px;
-    padding-inline: 14px;
-    white-space: nowrap;
-    letter-spacing: 0;
-  }
-  .filter-sort-toggle .sort-mode-symbol,
-  .filter-sort-toggle .sort-direction {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }
 
   .bucket-tools {
     display: flex;
@@ -284,21 +267,26 @@
     color: #6F3333;
     border-color: rgba(139, 74, 74, 0.58);
   }
-  .bucket-tools select,
-  .bucket-tools input {
-    min-height: 34px;
-    padding: 7px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 12px;
-  }
-  .bucket-tools input {
-    width: 160px;
-  }
   .bucket-tools .bulk-hidden { display: none; }
+    .bucket-tools .flag-btn {
+      background: linear-gradient(145deg, var(--accent-light), var(--accent));
+      color: #F0EDE4;
+      border: none;
+      font-weight: 600;
+      box-shadow: 4px 4px 8px rgba(40,65,65,0.25), -3px -3px 6px var(--shadow-light);
+}
+    .bucket-tools .flag-btn:hover { transform: translateY(-1px); }
+    .bucket-tools .flag-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .bucket-row .row-flag { display: flex; align-items: center; justify-content: center; }
+    .bucket-row .row-flag select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-solid);
+      color: var(--accent);
+      font-size: 14px;
+      padding: 3px;
+      cursor: pointer;
+}
   .bucket-bulk-status {
     font-size: 12px;
     color: var(--text-dim);
@@ -414,7 +402,7 @@
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
   .bucket-row {
     display: grid;
-    grid-template-columns: 32px 200px 100px 80px 60px 100px 1fr;
+    grid-template-columns: 32px 200px 100px 80px 60px 100px 1fr 44px;
     gap: 12px;
     padding: 14px 20px;
     border-radius: 16px;
@@ -427,7 +415,7 @@
     box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
   }
   .bucket-row.bulk {
-    grid-template-columns: 28px 32px 200px 100px 80px 60px 100px 1fr;
+    grid-template-columns: 28px 32px 200px 100px 80px 60px 100px 1fr 44px;
   }
   .bucket-row.selected {
     border-color: rgba(47, 79, 79, 0.45);
@@ -1836,23 +1824,16 @@
   }
   .reflection-day.empty { visibility: hidden; pointer-events: none; }
   .reflection-day-number { line-height: 1; }
-  .reflection-day-dots {
+  .reflection-day-dot {
     position: absolute;
     left: 50%;
     bottom: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    transform: translateX(-50%);
-  }
-  .reflection-day-dot {
     width: 4px;
     height: 4px;
     border-radius: 999px;
+    transform: translateX(-50%);
     border: 1px solid rgba(255,255,255,0.72);
   }
-  .reflection-day-dot.event { background: #A67C52; }
   .reflection-card .reflection-day.selected .reflection-day-dot {
     background: #F7F2E8 !important;
     border-color: rgba(255,255,255,0.88);
@@ -1901,28 +1882,6 @@
     font-size: 13px;
     line-height: 1.7;
     white-space: pre-wrap;
-  }
-  .reflection-entry-sources {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-  .reflection-source-chip {
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(255,255,255,0.34);
-    color: var(--text-light);
-    padding: 4px 9px;
-    font-size: 11px;
-    line-height: 1.2;
-    cursor: pointer;
-  }
-  .reflection-source-note {
-    color: var(--text-light);
-    font-size: 11px;
-    line-height: 1.5;
-    width: 100%;
   }
   .reflection-entry-action {
     width: 34px;
@@ -2946,52 +2905,6 @@
     font-size: 13px;
     margin-bottom: 4px;
   }
-  .word-map-card-meta {
-    margin-top: 6px;
-    color: var(--text-light);
-    font-size: 11px;
-  }
-  .chat-memory-board {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .chat-memory-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .chat-memory-card {
-    display: grid;
-    grid-template-rows: auto 1fr auto auto;
-    gap: 9px;
-    min-width: 0;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.26);
-    color: var(--text-dim);
-    font-size: 13px;
-    line-height: 1.65;
-    box-shadow: inset 1px 1px 2px rgba(90, 72, 52, 0.04);
-  }
-  .chat-memory-card strong {
-    display: block;
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.4;
-  }
-  .chat-memory-card-body {
-    overflow-wrap: anywhere;
-  }
-  .chat-memory-card-meta {
-    color: var(--text-light);
-    font-size: 11px;
-  }
-  .chat-memory-card-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 2px;
-  }
 
   @media (max-width: 768px) {
     .header { padding: 20px; flex-wrap: wrap; }
@@ -3074,7 +2987,6 @@
   <div class="tab" data-tab="todos">待办</div>
   <div class="tab" data-tab="breath">Breath 模拟</div>
   <div class="tab" data-tab="reflection">日印象</div>
-  <div class="tab" data-tab="chat-memory">自动记忆</div>
   <div class="tab" data-tab="dreams">梦境</div>
   <div class="tab" data-tab="persona">Persona</div>
   <div class="tab" data-tab="profile">画像</div>
@@ -3083,7 +2995,6 @@
   <div class="tab" data-tab="network">记忆网络</div>
   <div class="tab" data-tab="config">配置</div>
   <div class="tab" data-tab="upstream-config">上游模型</div>
-  <div class="tab" data-tab="model-config">模型配置</div>
   <div class="tab" data-tab="memory-config">记忆浮现</div>
   <div class="tab" data-tab="import">导入</div>
 </div>
@@ -3094,16 +3005,9 @@
     <button type="button" id="bucket-bulk-toggle" onclick="toggleBucketBulkMode()">批量选择</button>
     <button type="button" class="bulk-hidden" data-bulk-action="select-current" onclick="selectCurrentBuckets()">全选当前筛选</button>
     <button type="button" class="bulk-hidden" data-bulk-action="clear" onclick="clearBucketSelection()">清空</button>
-    <select class="bulk-hidden" id="bucket-bulk-domain" aria-label="批量主域"></select>
-    <button type="button" class="bulk-hidden" data-bulk-action="domain" onclick="changeSelectedBucketDomain()">改主域</button>
-    <input class="bulk-hidden" id="bucket-bulk-tags" type="text" placeholder="tags，用逗号分隔" />
-    <button type="button" class="bulk-hidden" data-bulk-action="tags-add" onclick="updateSelectedBucketListField('tags', 'add')">加 tags</button>
-    <button type="button" class="bulk-hidden" data-bulk-action="tags-remove" onclick="updateSelectedBucketListField('tags', 'remove')">删 tags</button>
-    <input class="bulk-hidden" id="bucket-bulk-facets" type="text" placeholder="facets，用逗号分隔" />
-    <button type="button" class="bulk-hidden" data-bulk-action="facets-add" onclick="updateSelectedBucketListField('facets', 'add')">加 facets</button>
-    <button type="button" class="bulk-hidden" data-bulk-action="facets-remove" onclick="updateSelectedBucketListField('facets', 'remove')">删 facets</button>
-    <button type="button" class="bulk-hidden" data-bulk-action="archive" onclick="setSelectedBucketStatus('archived')">归档</button>
-    <button type="button" class="bulk-hidden" data-bulk-action="active" onclick="setSelectedBucketStatus('active')">恢复 active</button>
+    <button type="button" class="bulk-hidden flag-btn" data-bulk-action="pin" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'pin')">🔒 永久保留</button>
+       <button type="button" class="bulk-hidden flag-btn" data-bulk-action="anchor" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'anchor')">⚓ 受保护/button>
+    <button type="button" class="bulk-hidden flag-btn" data-bulk-action="important" onclick="applyBucketFlag(Array.from(selectedBucketIds), 'important')">⭐ 加强权重</button>
     <button type="button" class="bulk-hidden danger" data-bulk-action="delete" onclick="deleteSelectedBuckets()">删除选中</button>
     <span class="bucket-bulk-status bulk-hidden" id="bucket-bulk-status">未选择</span>
   </div>
@@ -3118,7 +3022,7 @@
     <div class="todo-toolbar">
       <div class="todo-title">
         <h2>待办</h2>
-        <p>从记忆桶里的 followup / todo 派生；标完成只改待办表，不改原记忆桶，已完成不会再进入 handoff。</p>
+        <p>从记忆桶里的 followup / todo 派生；标完成只改待办表，写回时才归档到 followup_log。</p>
       </div>
       <div class="todo-actions">
         <button type="button" class="filter-btn active" data-todo-status="open" onclick="setTodoStatusFilter('open')">未完成</button>
@@ -3225,7 +3129,7 @@
         <label>直命中预算</label>
         <input type="number" id="cfg-recalled-memory-budget" min="0" max="4000" />
       </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认 900，控制 Recalled Memory 直命中最多带多少内容</div>
+      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认 400，控制 Recalled Memory 直命中最多带多少内容</div>
       <div class="config-row">
         <label>扩散预算</label>
         <input type="number" id="cfg-related-memory-budget" min="0" max="4000" />
@@ -3265,14 +3169,6 @@
         </select>
       </div>
       <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">graph 是 p0 图召回；bucket 是接近 main 的直命中对照档</div>
-      <div class="config-row">
-        <label>Operit 拆包</label>
-        <select id="cfg-operit-context-rewrite-enabled">
-          <option value="false">关闭</option>
-          <option value="true">开启</option>
-        </select>
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">仅处理 Operit 文本轮；工具轮和图片/文件轮会跳过，避免破坏工具协议</div>
       <div class="config-row">
         <label>词图辅助</label>
         <select id="cfg-word-map-hint-enabled">
@@ -3349,69 +3245,6 @@
   </div>
 </div>
 
-<div class="content" id="model-config-view" style="display:none">
-  <div style="max-width:760px;margin:0 auto;">
-    <div class="config-section">
-      <h3>召回模型</h3>
-      <div class="config-row">
-        <label>主域哨兵</label>
-        <select id="cfg-domain-sentinel-enabled">
-          <option value="true">开启</option>
-          <option value="false">关闭</option>
-        </select>
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">hook recall 只让它判断开哪些域，不让它决定有没有记忆</div>
-      <div class="config-row">
-        <label>主域模型</label>
-        <input type="text" id="cfg-domain-sentinel-model" placeholder="Qwen/Qwen3-8B" />
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认 Qwen/Qwen3-8B；失败会回到规则分类；思考强制关闭</div>
-      <div class="config-row">
-        <label>Base URL</label>
-        <input type="text" id="cfg-domain-sentinel-url" placeholder="留空复用 Embedding 地址" />
-      </div>
-      <div class="config-row">
-        <label>API Key</label>
-        <input type="password" id="cfg-domain-sentinel-key" placeholder="当前: 加载中…" />
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">留空复用 Embedding 配置；点击“保存密钥到 .env”后重启仍保留</div>
-    </div>
-
-    <div class="config-section">
-      <h3>自动记忆模型</h3>
-      <div class="config-row">
-        <label>模型</label>
-        <input type="text" id="cfg-reflection-model" placeholder="留空复用 Embedding/Persona/脱水模型" />
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">同一个模型负责候选和整理；用于决定写什么、怎么写、写到哪个主域</div>
-      <div class="config-row">
-        <label>思考</label>
-        <select id="cfg-reflection-thinking">
-          <option value="">跟随模型默认</option>
-          <option value="disabled">关闭</option>
-          <option value="enabled">开启</option>
-        </select>
-      </div>
-      <div class="config-row">
-        <label>Base URL</label>
-        <input type="text" id="cfg-reflection-url" placeholder="留空复用 Embedding 地址" />
-      </div>
-      <div class="config-row">
-        <label>API Key</label>
-        <input type="password" id="cfg-reflection-key" placeholder="当前: 加载中…" />
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">留空不改；点击“保存密钥到 .env”后重启仍保留</div>
-    </div>
-
-    <div style="display:flex;gap:12px;margin-top:8px;">
-      <button class="btn-primary" onclick="saveConfig(false)">应用（仅运行时）</button>
-      <button class="btn-secondary" onclick="saveConfig(true)">应用并写入 config.yaml</button>
-      <button class="btn-secondary" onclick="saveConfig(true, true)">应用并保存密钥到 .env</button>
-    </div>
-    <div id="model-config-status" style="margin-top:16px;font-size:13px;"></div>
-  </div>
-</div>
-
 <div class="content" id="reflection-view" style="display:none">
   <div class="reflection-shell">
     <div class="reflection-toolbar">
@@ -3436,28 +3269,6 @@
         <div class="reflection-calendar" id="reflection-calendar"></div>
       </section>
       <section class="reflection-card reflection-day-panel" id="reflection-day-panel"></section>
-    </div>
-  </div>
-</div>
-
-<div class="content" id="chat-memory-view" style="display:none">
-  <div class="reflection-shell">
-    <div class="reflection-toolbar">
-      <div class="reflection-title">
-        <h2>记忆候选</h2>
-        <p>每天本地零点后从原文保险箱里挑长期记忆；默认自动写入，review 模式下在这里确认。</p>
-      </div>
-    </div>
-    <div class="bucket-bulk-message" id="daily-chat-memory-message"></div>
-    <div class="reflection-board chat-memory-board">
-      <section class="reflection-card">
-        <div class="reflection-card-head">
-          <h3>待确认</h3>
-        </div>
-        <div class="chat-memory-list" id="daily-chat-memory-pending">
-          <div class="loading">暂无待确认候选。</div>
-        </div>
-      </section>
     </div>
   </div>
 </div>
@@ -3987,17 +3798,17 @@
     </div>
 
     <div class="config-section">
-      <h3>关系记忆整理</h3>
+      <h3>记忆关系整理</h3>
       <div class="config-row">
         <label>整理引擎</label>
         <select id="cfg-reflection-enabled"><option value="true">开启</option><option value="false">关闭</option></select>
       </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">总开关；关闭后此区域的关系整理、日印象、自动记忆都不运行</div>
+      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">总开关；关闭后不再做关系整理、日印象和写入打标</div>
       <div class="config-row">
         <label>自动整理</label>
         <select id="cfg-reflection-auto"><option value="true">开启</option><option value="false">关闭</option></select>
       </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">后台定时任务；开启后跑零点自动记忆、日印象，并给已有记忆补 tags、affect_anchor、边关系</div>
+      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">关闭后只保留手动触发</div>
       <div class="config-row">
         <label>日印象</label>
         <select id="cfg-reflection-daily"><option value="true">开启</option><option value="false">关闭</option></select>
@@ -4014,20 +3825,6 @@
       </div>
       <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认 0；大于 0 时读取当天短期对话原文作为日印象材料</div>
       <div class="config-row">
-        <label>自动记忆</label>
-        <select id="cfg-reflection-chat-memory-mode">
-          <option value="auto">自动存</option>
-          <option value="review">挑选后确认</option>
-          <option value="off">关闭</option>
-        </select>
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认自动存；每天本地 0 点后整理前一天原文并写入长期记忆</div>
-      <div class="config-row">
-        <label>自动记忆轮次</label>
-        <input type="number" id="cfg-reflection-chat-memory-turns" min="0" max="10000" />
-      </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">默认 0；0 表示按日期读取当天全部原文，只影响自动记忆候选</div>
-      <div class="config-row">
         <label>普通记忆和弦</label>
         <select id="cfg-reflection-memory-anchor"><option value="true">开启</option><option value="false">关闭</option></select>
       </div>
@@ -4037,6 +3834,19 @@
         <select id="cfg-reflection-weather-anchor"><option value="true">开启</option><option value="false">关闭</option></select>
       </div>
       <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">控制日印象/关系天气正文里的 affect_anchor</div>
+      <div class="config-row">
+        <label>Model</label>
+        <input type="text" id="cfg-reflection-model" placeholder="留空复用 Persona/脱水模型" />
+      </div>
+      <div class="config-row">
+        <label>Base URL</label>
+        <input type="text" id="cfg-reflection-url" placeholder="留空复用 Persona/脱水地址" />
+      </div>
+      <div class="config-row">
+        <label>API Key</label>
+        <input type="password" id="cfg-reflection-key" placeholder="当前: 加载中…" />
+      </div>
+      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">留空不改；点击“保存密钥到 .env”后重启仍保留</div>
     </div>
 
     <div class="config-section">
@@ -4136,12 +3946,10 @@ let profileFactProposals = [];
 let anchorProposals = [];
 let wordMapData = null;
 let identitySemanticData = null;
-let domainOptions = [];
 let currentFilter = 'all';
-let bucketSortMode = 'time';
-let bucketSortDescending = true;
 let bucketBulkMode = false;
 let selectedBucketIds = new Set();
+let bucketSortMode = 'score'; // score | newest | oldest
 let dashboardCommentAuthor = 'Rain';
 let dashboardAiAuthor = 'Haven';
 let reflectionSelectedDate = formatLocalDate(new Date());
@@ -4179,7 +3987,7 @@ function showAuthOverlay(setupNeeded) {
 }
 
 function clearAuthSensitiveFields(password) {
-  ['auth-login-pwd', 'auth-setup-pwd', 'auth-setup-pwd2', 'cfg-dehy-key', 'cfg-emb-key', 'cfg-persona-key', 'cfg-domain-sentinel-key', 'cfg-reflection-key', 'cfg-dream-key'].forEach(function(id) {
+  ['auth-login-pwd', 'auth-setup-pwd', 'auth-setup-pwd2', 'cfg-dehy-key', 'cfg-emb-key', 'cfg-persona-key', 'cfg-reflection-key', 'cfg-dream-key'].forEach(function(id) {
     var input = document.getElementById(id);
     if (input) input.value = '';
   });
@@ -4263,7 +4071,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('breath-view').style.display = target === 'breath' ? '' : 'none';
     document.getElementById('memory-config-view').style.display = target === 'memory-config' ? '' : 'none';
     document.getElementById('reflection-view').style.display = target === 'reflection' ? '' : 'none';
-    document.getElementById('chat-memory-view').style.display = target === 'chat-memory' ? '' : 'none';
     document.getElementById('dreams-view').style.display = target === 'dreams' ? '' : 'none';
     document.getElementById('persona-view').style.display = target === 'persona' ? '' : 'none';
     document.getElementById('profile-view').style.display = target === 'profile' ? '' : 'none';
@@ -4272,13 +4079,11 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('config-view').style.display = target === 'config' ? '' : 'none';
     document.getElementById('upstream-config-view').style.display = target === 'upstream-config' ? '' : 'none';
-    document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
     if (target === 'reflection') renderReflectionReview();
-    if (target === 'chat-memory' && window.initDailyChatMemoryTab) window.initDailyChatMemoryTab();
     if (target === 'dreams') loadDreams();
     if (target === 'persona') loadPersona();
     if (target === 'profile') {
@@ -4290,7 +4095,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'network') loadNetwork();
     if (target === 'config') loadConfig();
     if (target === 'upstream-config') loadConfig();
-    if (target === 'model-config') loadConfig();
     if (target === 'import') { pollImportStatus(); loadImportResults(); }
   });
 });
@@ -4301,14 +4105,13 @@ document.getElementById('search-input').addEventListener('input', (e) => {
   const q = e.target.value.trim();
   searchTimer = setTimeout(() => {
     if (q) searchBuckets(q);
-    else renderBuckets(filterBuckets(allBuckets));
+    else renderBuckets(sortBuckets(filterBuckets(allBuckets)));
   }, 300);
 });
 
 async function loadBuckets(options) {
   options = options || {};
   try {
-    if (!domainOptions.length) await loadDomainTaxonomy();
     const res = await authFetch(BASE + '/api/buckets');
     if (!res) return;
     allBuckets = await res.json();
@@ -4320,9 +4123,8 @@ async function loadBuckets(options) {
         selectedBucketIds.delete(id);
       }
     });
-    renderBuckets(filterBuckets(allBuckets));
+       renderBuckets(sortBuckets(filterBuckets(allBuckets)));
     if (getActiveTab() === 'reflection') renderReflectionReview();
-    if (getActiveTab() === 'chat-memory' && window.loadDailyChatMemoryPending) loadDailyChatMemoryPending();
     if (getActiveTab() === 'todos') loadTodos();
     if (getActiveTab() === 'dreams') loadDreams();
     if (getActiveTab() === 'profile' && !options.skipProfileRefresh) {
@@ -4373,27 +4175,6 @@ async function loadTodos() {
   }
 }
 
-async function loadDomainTaxonomy() {
-  try {
-    var res = await authFetch(BASE + '/api/domain-taxonomy');
-    if (!res) return;
-    var data = await res.json();
-    domainOptions = Array.isArray(data.domains) ? data.domains : [];
-    renderBulkDomainOptions();
-  } catch (e) {
-    console.error('Domain taxonomy failed:', e);
-  }
-}
-
-function renderBulkDomainOptions() {
-  var select = document.getElementById('bucket-bulk-domain');
-  if (!select) return;
-  var options = domainOptions.length ? domainOptions : [{ key: 'general', label: '通用' }];
-  select.innerHTML = options.map(function(item) {
-    return '<option value="' + escAttr(item.key) + '">' + esc(item.label || item.key) + '</option>';
-  }).join('');
-}
-
 function renderTodos(items) {
   var list = document.getElementById('todo-list');
   if (!list) return;
@@ -4411,6 +4192,7 @@ function renderTodoItem(todo) {
   var meta = [
     todo.date || 'recent',
     todoStatusLabel(status),
+    todo.writeback_at ? '已写回' : '',
   ].filter(Boolean).join(' · ');
   var actions = [];
   if (bucketId) {
@@ -4421,6 +4203,9 @@ function renderTodoItem(todo) {
     actions.push('<button type="button" onclick="updateTodoStatus(\'' + jsString(id) + '\', \'ignored\')">忽略</button>');
   } else {
     actions.push('<button type="button" onclick="updateTodoStatus(\'' + jsString(id) + '\', \'open\')">重新打开</button>');
+  }
+  if (status === 'done') {
+    actions.push('<button type="button" ' + (todo.writeback_at ? 'disabled ' : '') + 'onclick="writebackTodo(\'' + jsString(id) + '\')">写回桶</button>');
   }
   return '<div class="todo-item ' + escAttr(status) + '">' +
     '<div class="todo-item-header">' +
@@ -4445,6 +4230,23 @@ async function updateTodoStatus(id, status) {
   } catch (e) {
     var target = document.getElementById('todo-status');
     if (target) target.textContent = '更新失败: ' + e.message;
+  }
+}
+
+async function writebackTodo(id) {
+  try {
+    var res = await authFetch(BASE + '/api/todos/' + encodeURIComponent(id) + '/writeback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
+    });
+    if (!res) return;
+    if (!res.ok) throw new Error((await res.json().catch(function() { return {}; })).error || '写回失败');
+    await loadTodos();
+    await loadBuckets({ skipProfileRefresh: true });
+  } catch (e) {
+    var target = document.getElementById('todo-status');
+    if (target) target.textContent = '写回失败: ' + e.message;
   }
 }
 
@@ -4521,16 +4323,6 @@ function getBucketDate(bucket) {
   return String(bucket.created || '').slice(0, 10);
 }
 
-function getBucketEventDate(bucket) {
-  if (!bucket) return '';
-  if (bucket.date) return String(bucket.date).slice(0, 10);
-  if (bucket.event_date) return String(bucket.event_date).slice(0, 10);
-  var meta = bucketMetadataView(bucket);
-  if (meta.event_date) return String(meta.event_date).slice(0, 10);
-  if (bucket.created) return String(bucket.created).slice(0, 10);
-  return '';
-}
-
 function isDailyImpressionBucket(bucket) {
   var tags = (bucket.tags || []).map(function(tag) { return String(tag); });
   return bucket.type === 'feel'
@@ -4552,26 +4344,6 @@ function bucketMetadataView(bucket) {
 
 function bucketCanonicalDomain(bucket) {
   return String(bucket.canonical_domain || bucketMetadataView(bucket).canonical_domain || '').trim();
-}
-
-function domainOptionForKey(key) {
-  key = String(key || '').trim();
-  return domainOptions.find(function(item) { return String(item.key || '') === key; }) || null;
-}
-
-function bucketCanonicalDomainLabel(bucket) {
-  var view = bucketMetadataView(bucket);
-  var label = String(bucket.domain_label || view.domain_label || '').trim();
-  if (label) return label;
-  var option = domainOptionForKey(bucketCanonicalDomain(bucket));
-  return option ? String(option.label || option.key || '') : bucketCanonicalDomain(bucket);
-}
-
-function bucketCanonicalDomainFullLabel(bucket) {
-  var key = bucketCanonicalDomain(bucket);
-  var label = bucketCanonicalDomainLabel(bucket);
-  if (!key) return label;
-  return label && label !== key ? label + ' · ' + key : key;
 }
 
 function bucketKind(bucket) {
@@ -4596,32 +4368,12 @@ function bucketLegacyDomain(bucket) {
   }).filter(Boolean) : [];
 }
 
-function isProfileFactBucket(bucket) {
-  if (!bucket) return false;
-  var tags = bucketTags(bucket);
-  var source = String(bucket.source || bucketMetadataView(bucket).source || '').trim();
-  return tags.includes('profile_fact')
-    || tags.includes('画像事实')
-    || bucketKind(bucket) === 'profile_fact'
-    || source === 'profile_fact';
-}
-
 function isSelfAnchorBucket(bucket) {
   if (!bucket) return false;
   if (bucket.self_anchor) return true;
   if (bucketFlags(bucket).includes('self_anchor')) return true;
   var tags = bucketTags(bucket);
-  return tags.includes('自我')
-    || tags.includes('self_anchor')
-    || tags.includes('first_person_anchor')
-    || tags.includes('first-person-anchor');
-}
-
-function isReflectionEventBucket(bucket) {
-  if (!bucket || isDailyImpressionBucket(bucket) || isSelfAnchorBucket(bucket) || isProfileFactBucket(bucket)) return false;
-  if (bucket.type === 'feel') return false;
-  if (bucket.resolved || bucket.digested) return false;
-  return /^\d{4}-\d{2}-\d{2}$/.test(getBucketEventDate(bucket));
+  return tags.includes('自我') || tags.includes('self_anchor') || tags.includes('first_person_anchor');
 }
 
 function getDailyImpressions() {
@@ -4634,22 +4386,6 @@ function getDailyImpressions() {
   }).sort(function(a, b) {
     return String(a.reflection_date).localeCompare(String(b.reflection_date));
   });
-}
-
-function getReflectionEventsByDate() {
-  var byDate = {};
-  allBuckets.filter(isReflectionEventBucket).forEach(function(bucket) {
-    var date = getBucketEventDate(bucket);
-    if (!byDate[date]) byDate[date] = [];
-    byDate[date].push(bucket);
-  });
-  Object.keys(byDate).forEach(function(date) {
-    byDate[date].sort(function(a, b) {
-      return Number(b.importance || 0) - Number(a.importance || 0)
-        || String(a.created || '').localeCompare(String(b.created || ''));
-    });
-  });
-  return byDate;
 }
 
 function shiftReflectionMonth(delta) {
@@ -4689,7 +4425,6 @@ function renderReflectionReview() {
     if (!byDate[bucket.reflection_date]) byDate[bucket.reflection_date] = [];
     byDate[bucket.reflection_date].push(bucket);
   });
-  var eventsByDate = getReflectionEventsByDate();
 
   var year = reflectionCurrentMonth.getFullYear();
   var month = reflectionCurrentMonth.getMonth();
@@ -4704,23 +4439,16 @@ function renderReflectionReview() {
   for (var day = 1; day <= dayCount; day++) {
     var dateStr = formatLocalDate(year, month, day);
     var items = byDate[dateStr] || [];
-    var events = eventsByDate[dateStr] || [];
-    var dots = '';
-    if (items.length || events.length) {
-      dots = '<span class="reflection-day-dots">' +
-        (items.length ? '<span class="reflection-day-dot" style="background:var(--accent)"></span>' : '') +
-        (events.length ? '<span class="reflection-day-dot event"></span>' : '') +
-      '</span>';
-    }
+    var dot = items.length ? '<span class="reflection-day-dot" style="background:var(--accent)"></span>' : '';
     cells.push(
       '<button type="button" class="reflection-day ' + (dateStr === reflectionSelectedDate ? 'selected' : '') + '" onclick="selectReflectionDate(\'' + dateStr + '\')">' +
         '<span class="reflection-day-number">' + day + '</span>' +
-        dots +
+        dot +
       '</button>'
     );
   }
   calendar.innerHTML = cells.join('');
-  renderReflectionDayPanel(byDate[reflectionSelectedDate] || [], eventsByDate[reflectionSelectedDate] || []);
+  renderReflectionDayPanel(byDate[reflectionSelectedDate] || []);
 }
 
 function reflectionEntryMeta(bucket) {
@@ -4739,50 +4467,9 @@ function reflectionEntry(bucket, index) {
       '<h4>' + esc(bucket.name || bucket.id) + '</h4>' +
       '<div class="reflection-entry-meta">' + reflectionEntryMeta(bucket) + '</div>' +
       '<div class="reflection-entry-preview" id="reflection-entry-body-' + index + '" data-bucket-id="' + esc(id) + '">' + esc(bucket.content_preview || '') + '</div>' +
-      '<div class="reflection-entry-sources" id="reflection-entry-sources-' + index + '" data-bucket-id="' + esc(id) + '"></div>' +
     '</div>' +
     '<button type="button" class="reflection-entry-action" onclick="showDetail(\'' + jsString(id) + '\')" aria-label="打开详情" title="打开详情">✎</button>' +
   '</div>';
-}
-
-function isReflectionSourceBucket(bucket, reflectionDate) {
-  if (!bucket || isDailyImpressionBucket(bucket) || isSelfAnchorBucket(bucket) || isProfileFactBucket(bucket)) return false;
-  if (bucket.type === 'feel') return false;
-  var sourceDate = getBucketEventDate(bucket);
-  return Boolean(sourceDate) && (!reflectionDate || sourceDate === reflectionDate);
-}
-
-function reflectionSourceChips(detail, reflectionDate) {
-  var meta = detail && detail.metadata ? detail.metadata : {};
-  var sourceIds = Array.isArray(meta.source_bucket_ids) ? meta.source_bucket_ids : [];
-  var rawIds = Array.isArray(meta.source_raw_event_ids) ? meta.source_raw_event_ids : [];
-  var turnIds = Array.isArray(meta.source_conversation_turn_ids) ? meta.source_conversation_turn_ids : [];
-  var chips = [];
-  var filteredSources = [];
-  sourceIds.forEach(function(id) {
-    var textId = String(id || '');
-    if (!textId) return;
-    var source = allBuckets.find(function(bucket) { return String(bucket.id) === textId; });
-    if (source && !isReflectionSourceBucket(source, reflectionDate)) return;
-    var label = source ? (source.name || source.id) : textId;
-    filteredSources.push({ id: textId, label: label });
-  });
-  if (filteredSources.length) {
-    chips.push('<span class="reflection-source-note">日印象参考记忆桶</span>');
-  }
-  filteredSources.slice(0, 8).forEach(function(source) {
-    chips.push(
-      '<button type="button" class="reflection-source-chip" onclick="showDetail(\'' + jsString(source.id) + '\')">' +
-      esc(source.label) +
-      '</button>'
-    );
-  });
-  if (rawIds.length) {
-    chips.push('<span class="reflection-source-note">原文来源 ' + rawIds.slice(0, 12).map(esc).join(', ') + (rawIds.length > 12 ? '…' : '') + '</span>');
-  } else if (turnIds.length) {
-    chips.push('<span class="reflection-source-note">短期轮次 ' + turnIds.slice(0, 12).map(esc).join(', ') + (turnIds.length > 12 ? '…' : '') + '</span>');
-  }
-  return chips.join('');
 }
 
 async function hydrateReflectionEntryContents(impressions) {
@@ -4798,49 +4485,19 @@ async function hydrateReflectionEntryContents(impressions) {
       if (body && body.dataset.bucketId === id) {
         body.textContent = detail.content || bucket.content_preview || '';
       }
-      var sources = document.getElementById('reflection-entry-sources-' + i);
-      if (sources && sources.dataset.bucketId === id) {
-        sources.innerHTML = reflectionSourceChips(detail, bucket.reflection_date);
-      }
     } catch (e) {}
   }
 }
 
-function reflectionEventMeta(bucket) {
-  var parts = [];
-  if (bucket.source) parts.push(bucket.source);
-  if (bucket.kind) parts.push(bucket.kind);
-  parts.push('重要度 ' + (bucket.importance || 0));
-  return parts.map(function(part) { return '<span>' + esc(part) + '</span>'; }).join('');
-}
-
-function reflectionEventEntry(bucket) {
-  var id = String(bucket.id || '');
-  return '<div class="reflection-entry">' +
-    '<div>' +
-      '<h4>' + esc(bucket.name || bucket.id) + '</h4>' +
-      '<div class="reflection-entry-meta">' + reflectionEventMeta(bucket) + '</div>' +
-      '<div class="reflection-entry-preview">' + esc(bucket.content_preview || '') + '</div>' +
-    '</div>' +
-    '<button type="button" class="reflection-entry-action" onclick="showDetail(\'' + jsString(id) + '\')" aria-label="打开详情" title="打开详情">✎</button>' +
-  '</div>';
-}
-
-function renderReflectionDayPanel(impressions, events) {
+function renderReflectionDayPanel(impressions) {
   var panel = document.getElementById('reflection-day-panel');
-  events = events || [];
   var impressionBlock = impressions.length
     ? '<div class="reflection-entry-list">' + impressions.map(function(b, i) { return reflectionEntry(b, i); }).join('') + '</div>'
     : '<div class="reflection-empty">这一天没有日印象。</div>';
-  var eventBlock = events.length
-    ? '<div class="reflection-entry-list">' + events.map(reflectionEventEntry).join('') + '</div>'
-    : '<div class="reflection-empty">这一天还没有带日期的记忆事件。</div>';
 
   panel.innerHTML =
     '<div class="reflection-day-heading"><span>日印象</span><span>' + impressions.length + ' 条</span></div>' +
-    impressionBlock +
-    '<div class="reflection-day-heading" style="margin-top:18px;"><span>当天发生了什么</span><span>' + events.length + ' 条</span></div>' +
-    eventBlock;
+    impressionBlock;
   if (impressions.length) hydrateReflectionEntryContents(impressions);
 }
 
@@ -5213,341 +4870,6 @@ async function loadProfileFacts() {
     summary.textContent = '读取失败';
     list.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
   }
-}
-
-function setProfileProposalMessage(message, tone) {
-  var el = document.getElementById('profile-proposal-message');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('ok', 'error');
-  if (tone) el.classList.add(tone);
-}
-
-async function generateProfileFactProposals() {
-  var bucketInput = document.getElementById('profile-proposal-bucket-id');
-  var momentInput = document.getElementById('profile-proposal-moment-id');
-  var bucketId = (bucketInput && bucketInput.value || '').trim();
-  var momentId = (momentInput && momentInput.value || '').trim();
-  if (!bucketId) {
-    setProfileProposalMessage('先填证据 bucket id。', 'error');
-    return;
-  }
-  setProfileProposalMessage('生成中…', '');
-  var list = document.getElementById('profile-proposal-list');
-  if (list) list.innerHTML = '';
-  try {
-    var res = await authFetch(BASE + '/api/profile-fact-proposals', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        bucket_id: bucketId,
-        evidence_moment_id: momentId,
-        max_proposals: 3
-      })
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || '生成失败');
-    profileFactProposals = Array.isArray(data.proposals) ? data.proposals : [];
-    renderProfileFactProposals(data);
-  } catch (e) {
-    profileFactProposals = [];
-    setProfileProposalMessage('生成失败: ' + e.message, 'error');
-    if (list) list.innerHTML = '';
-  }
-}
-
-function renderProfileFactProposals(data) {
-  var list = document.getElementById('profile-proposal-list');
-  if (!list) return;
-  var proposals = profileFactProposals || [];
-  var rejected = Array.isArray(data && data.rejected) ? data.rejected : [];
-  if (!proposals.length) {
-    setProfileProposalMessage(
-      rejected.length ? '没有可用候选，已拒绝 ' + rejected.length + ' 条。' : '没有生成候选。',
-      rejected.length ? 'error' : ''
-    );
-    list.innerHTML = '';
-    return;
-  }
-  setProfileProposalMessage('生成 ' + proposals.length + ' 条候选。', 'ok');
-  list.innerHTML = proposals.map(function(item, index) {
-    var meta = [
-      item.profile_kind || 'other',
-      item.subject || 'user',
-      item.predicate || 'related_to',
-      'confidence ' + Number(item.confidence || 0).toFixed(2)
-    ].join(' · ');
-    return '<div class="profile-proposal-card">' +
-      '<strong>' + esc(item.fact || '') + '</strong>' +
-      '<div>' + esc(meta) + '</div>' +
-      '<div>object: ' + esc(item.object || '—') + '</div>' +
-      '<div>evidence: ' + esc(item.evidence_bucket_id || '') + (item.evidence_moment_id ? ' · ' + esc(item.evidence_moment_id) : '') + '</div>' +
-      '<div>reason: ' + esc(item.reason || '—') + '</div>' +
-      '<div style="margin-top:8px;"><button type="button" onclick="confirmProfileFactProposal(' + index + ')">确认写入</button></div>' +
-    '</div>';
-  }).join('');
-}
-
-async function confirmProfileFactProposal(index) {
-  var proposal = profileFactProposals[index];
-  if (!proposal) return;
-  if (!confirm('确认写入画像事实？\n\n' + proposal.fact)) return;
-  setProfileProposalMessage('写入中…', '');
-  try {
-    var res = await authFetch(BASE + '/api/profile-fact-proposals/confirm', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(proposal)
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || '写入失败');
-    var successMessage = '已写入画像事实 ' + (data.id || '');
-    profileFactProposals.splice(index, 1);
-    renderProfileFactProposals({ proposals: profileFactProposals, rejected: [] });
-    setProfileProposalMessage(successMessage, 'ok');
-    await loadProfileFacts();
-    await loadBuckets();
-  } catch (e) {
-    setProfileProposalMessage('写入失败: ' + e.message, 'error');
-  }
-}
-
-function setAnchorProposalMessage(message, tone) {
-  var el = document.getElementById('anchor-proposal-message');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('ok', 'error');
-  if (tone) el.classList.add(tone);
-}
-
-async function generateAnchorProposals() {
-  var bucketInput = document.getElementById('anchor-proposal-bucket-id');
-  var bucketId = (bucketInput && bucketInput.value || '').trim();
-  if (!bucketId) {
-    setAnchorProposalMessage('先填 bucket id。', 'error');
-    return;
-  }
-  setAnchorProposalMessage('生成中…', '');
-  var list = document.getElementById('anchor-proposal-list');
-  if (list) list.innerHTML = '';
-  try {
-    var res = await authFetch(BASE + '/api/anchor-proposals', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ bucket_id: bucketId })
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || '生成失败');
-    anchorProposals = Array.isArray(data.proposals) ? data.proposals : [];
-    renderAnchorProposals(data);
-  } catch (e) {
-    anchorProposals = [];
-    setAnchorProposalMessage('生成失败: ' + e.message, 'error');
-    if (list) list.innerHTML = '';
-  }
-}
-
-function renderAnchorProposals(data) {
-  var list = document.getElementById('anchor-proposal-list');
-  if (!list) return;
-  var proposals = anchorProposals || [];
-  var rejected = Array.isArray(data && data.rejected) ? data.rejected : [];
-  var bucket = data && data.bucket ? data.bucket : {};
-  if (!proposals.length) {
-    setAnchorProposalMessage(
-      rejected.length ? '没有可用候选：' + (rejected[0].reason || '已拒绝') : '没有生成候选。',
-      rejected.length ? 'error' : ''
-    );
-    list.innerHTML = '';
-    return;
-  }
-  setAnchorProposalMessage('生成 ' + proposals.length + ' 条 Anchor 候选。', 'ok');
-  list.innerHTML = proposals.map(function(item, index) {
-    var meta = [
-      item.anchor_kind || 'other',
-      'confidence ' + Number(item.confidence || 0).toFixed(2),
-      bucket.name || item.bucket_id || ''
-    ].filter(Boolean).join(' · ');
-    return '<div class="profile-proposal-card">' +
-      '<strong>' + esc(bucket.name || item.bucket_id || '') + '</strong>' +
-      '<div>' + esc(meta) + '</div>' +
-      '<div>bucket: ' + esc(item.bucket_id || '') + '</div>' +
-      '<div>reason: ' + esc(item.reason || '—') + '</div>' +
-      '<div>future: ' + esc(item.future_use || '—') + '</div>' +
-      '<div style="margin-top:8px;"><button type="button" onclick="confirmAnchorProposal(' + index + ')">确认标为 Anchor</button></div>' +
-    '</div>';
-  }).join('');
-}
-
-async function confirmAnchorProposal(index) {
-  var proposal = anchorProposals[index];
-  if (!proposal) return;
-  if (!confirm('确认标为 Anchor？\n\n' + proposal.bucket_id)) return;
-  setAnchorProposalMessage('写入中…', '');
-  try {
-    var res = await authFetch(BASE + '/api/anchor-proposals/confirm', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(proposal)
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || '写入失败');
-    var successMessage = data.status === 'already_anchor' ? '已经是 Anchor。' : '已标为 Anchor ' + (data.id || '');
-    anchorProposals.splice(index, 1);
-    renderAnchorProposals({ proposals: anchorProposals, rejected: [] });
-    setAnchorProposalMessage(successMessage, 'ok');
-    await loadBuckets();
-  } catch (e) {
-    setAnchorProposalMessage('写入失败: ' + e.message, 'error');
-  }
-}
-
-function renderProfileFacts() {
-  var list = document.getElementById('profile-facts-list');
-  var summary = document.getElementById('profile-summary');
-  if (!list || !summary) return;
-  var activeCount = profileFacts.filter(function(fact) { return fact.active; }).length;
-  var deprecatedCount = profileFacts.filter(function(fact) { return fact.deprecated; }).length;
-  summary.textContent = profileFacts.length + ' 条画像事实 · ' + activeCount + ' active · ' + deprecatedCount + ' deprecated';
-  if (!profileFacts.length) {
-    list.innerHTML = '<div class="loading">还没有画像事实。</div>';
-    return;
-  }
-  list.innerHTML = profileFacts.map(renderProfileFactCard).join('');
-}
-
-function profileFactById(id) {
-  id = String(id || '');
-  return profileFacts.find(function(fact) { return String(fact.id || '') === id; });
-}
-
-function profileFactStatus(fact) {
-  if (fact.deprecated || fact.state === 'deprecated') return { text: 'deprecated', cls: 'deprecated' };
-  if (fact.active || fact.state === 'active') return { text: 'active', cls: 'active' };
-  return { text: fact.state || 'inactive', cls: '' };
-}
-
-function renderProfileFactCard(fact) {
-  var id = String(fact.id || '');
-  var status = profileFactStatus(fact);
-  var conf = fact.confidence == null ? '—' : Number(fact.confidence).toFixed(2);
-  var evidence = Array.isArray(fact.evidence) ? fact.evidence : [];
-  var confirmButton = status.cls === 'active'
-    ? ''
-    : '<button type="button" onclick="runProfileFactAction(\'' + jsString(id) + '\', \'confirm\')">确认</button>';
-  var evidenceHtml = evidence.length
-    ? evidence.map(function(item) {
-        var bucketId = String(item.bucket_id || '');
-        var label = (item.name || bucketId) + (item.moment_id ? ' · ' + item.moment_id : '');
-        var openButton = bucketId
-          ? '<button type="button" onclick="showDetail(\'' + jsString(bucketId) + '\')">打开证据</button>'
-          : '';
-        return '<div>' + esc(label) + ' ' + openButton + '</div>';
-      }).join('')
-    : '<div>未记录证据。</div>';
-  return '<article class="profile-card ' + escAttr(status.cls) + '">' +
-    '<div class="profile-head">' +
-      '<div>' +
-        '<div class="profile-fact-text">' + esc(fact.fact || '') + '</div>' +
-        '<div class="profile-chip-row">' +
-          '<span class="profile-chip ' + escAttr(status.cls) + '">' + esc(status.text) + '</span>' +
-          '<span class="profile-chip">' + esc(fact.kind || 'unknown') + '</span>' +
-          '<span class="profile-chip">confidence ' + esc(conf) + '</span>' +
-          '<span class="profile-chip">' + esc(fact.source || 'profile_fact') + '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="profile-actions">' +
-        confirmButton +
-        '<button type="button" onclick="editProfileFact(\'' + jsString(id) + '\')">编辑</button>' +
-        '<button type="button" class="danger" onclick="runProfileFactAction(\'' + jsString(id) + '\', \'deprecate\')">废弃</button>' +
-        '<button type="button" class="danger" onclick="deleteProfileFact(\'' + jsString(id) + '\')">删除</button>' +
-        '<button type="button" onclick="showDetail(\'' + jsString(id) + '\')">打开</button>' +
-      '</div>' +
-    '</div>' +
-    '<div class="profile-meta-grid">' +
-      '<div><label>subject</label>' + esc(fact.subject || '—') + '</div>' +
-      '<div><label>predicate</label>' + esc(fact.predicate || '—') + '</div>' +
-      '<div><label>object</label>' + esc(fact.object || '—') + '</div>' +
-      '<div><label>updated</label>' + esc(fact.updated_at || fact.last_active || fact.created || '—') + '</div>' +
-      '<div><label>bucket</label>' + esc(id) + '</div>' +
-      '<div><label>tags</label>' + esc((fact.tags || []).join(', ') || '—') + '</div>' +
-    '</div>' +
-    '<div class="profile-evidence">' + evidenceHtml + '</div>' +
-  '</article>';
-}
-
-async function runProfileFactAction(id, action, payload) {
-  payload = Object.assign({ action: action }, payload || {});
-  try {
-    var res = await authFetch(BASE + '/api/profile-facts/' + encodeURIComponent(id), {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || '操作失败');
-    await loadProfileFacts();
-    await loadBuckets();
-  } catch (e) {
-    alert('画像事实操作失败: ' + e.message);
-  }
-}
-
-async function deleteProfileFact(id) {
-  var fact = profileFactById(id);
-  if (!fact) return;
-  if (!confirm('彻底删除这条画像事实？\n\n' + (fact.fact || id))) return;
-  try {
-    var res = await authFetch(BASE + '/api/profile-facts/' + encodeURIComponent(id), {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ confirm: 'DELETE' })
-    });
-    if (!res) return;
-    var data = await res.json().catch(function() { return {}; });
-    if (!res.ok) throw new Error(data.error || data.reason || '删除失败');
-    await loadProfileFacts();
-    await loadBuckets();
-  } catch (e) {
-    alert('画像事实删除失败: ' + e.message);
-  }
-}
-
-function editProfileFact(id) {
-  var fact = profileFactById(id);
-  if (!fact) return;
-  var nextFact = prompt('编辑画像事实', fact.fact || '');
-  if (nextFact == null) return;
-  nextFact = nextFact.trim();
-  if (!nextFact) return;
-  var nextKind = prompt('kind', fact.kind || 'preference');
-  if (nextKind == null) return;
-  var nextSubject = prompt('subject', fact.subject || 'user');
-  if (nextSubject == null) return;
-  var nextPredicate = prompt('predicate', fact.predicate || '');
-  if (nextPredicate == null) return;
-  var nextObject = prompt('object', fact.object || '');
-  if (nextObject == null) return;
-  var currentConfidence = fact.confidence == null ? '0.9' : String(fact.confidence);
-  var nextConfidence = prompt('confidence 0~1', currentConfidence);
-  if (nextConfidence == null) return;
-  var sections = fact.sections || {};
-  runProfileFactAction(id, 'edit', {
-    fact: nextFact,
-    profile_kind: nextKind,
-    subject: nextSubject,
-    predicate: nextPredicate,
-    object: nextObject,
-    confidence: Number(nextConfidence),
-    evidence_context: sections.evidence_context || '',
-    reflection: sections.reflection || '',
-    followup: sections.followup || ''
-  });
 }
 
 var FACTS_SUBJECT_LABELS = {
@@ -5985,6 +5307,7 @@ function renderFactsDetailCard(subjectKey, predicateKey, factId) {
     '<div class="facts-detail-timeline">' + (timelineRows || '<div class="loading">没有时间线记录。</div>') + moreHtml + '</div>' +
     '</div>';
 }
+
 
 // 类型（mode）是记在 predicate_registry 上的，跟"这一类事实该怎么处理新旧"绑定，
 // 不属于某个具体的人或某一条记录——同一个 predicate_key 被哪几个 subject 共用，
@@ -6563,6 +5886,8 @@ async function submitFactsEdit() {
   }
 }
 
+
+
 async function submitFactsAdd() {
   var subjectSel = document.getElementById('facts-add-subject');
   var predicateSel = document.getElementById('facts-add-predicate');
@@ -6649,6 +5974,341 @@ async function loadFactsSkeleton() {
     summary.textContent = '读取失败';
     nav.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
   }
+}
+
+function setProfileProposalMessage(message, tone) {
+  var el = document.getElementById('profile-proposal-message');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('ok', 'error');
+  if (tone) el.classList.add(tone);
+}
+
+async function generateProfileFactProposals() {
+  var bucketInput = document.getElementById('profile-proposal-bucket-id');
+  var momentInput = document.getElementById('profile-proposal-moment-id');
+  var bucketId = (bucketInput && bucketInput.value || '').trim();
+  var momentId = (momentInput && momentInput.value || '').trim();
+  if (!bucketId) {
+    setProfileProposalMessage('先填证据 bucket id。', 'error');
+    return;
+  }
+  setProfileProposalMessage('生成中…', '');
+  var list = document.getElementById('profile-proposal-list');
+  if (list) list.innerHTML = '';
+  try {
+    var res = await authFetch(BASE + '/api/profile-fact-proposals', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        bucket_id: bucketId,
+        evidence_moment_id: momentId,
+        max_proposals: 3
+      })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '生成失败');
+    profileFactProposals = Array.isArray(data.proposals) ? data.proposals : [];
+    renderProfileFactProposals(data);
+  } catch (e) {
+    profileFactProposals = [];
+    setProfileProposalMessage('生成失败: ' + e.message, 'error');
+    if (list) list.innerHTML = '';
+  }
+}
+
+function renderProfileFactProposals(data) {
+  var list = document.getElementById('profile-proposal-list');
+  if (!list) return;
+  var proposals = profileFactProposals || [];
+  var rejected = Array.isArray(data && data.rejected) ? data.rejected : [];
+  if (!proposals.length) {
+    setProfileProposalMessage(
+      rejected.length ? '没有可用候选，已拒绝 ' + rejected.length + ' 条。' : '没有生成候选。',
+      rejected.length ? 'error' : ''
+    );
+    list.innerHTML = '';
+    return;
+  }
+  setProfileProposalMessage('生成 ' + proposals.length + ' 条候选。', 'ok');
+  list.innerHTML = proposals.map(function(item, index) {
+    var meta = [
+      item.profile_kind || 'other',
+      item.subject || 'user',
+      item.predicate || 'related_to',
+      'confidence ' + Number(item.confidence || 0).toFixed(2)
+    ].join(' · ');
+    return '<div class="profile-proposal-card">' +
+      '<strong>' + esc(item.fact || '') + '</strong>' +
+      '<div>' + esc(meta) + '</div>' +
+      '<div>object: ' + esc(item.object || '—') + '</div>' +
+      '<div>evidence: ' + esc(item.evidence_bucket_id || '') + (item.evidence_moment_id ? ' · ' + esc(item.evidence_moment_id) : '') + '</div>' +
+      '<div>reason: ' + esc(item.reason || '—') + '</div>' +
+      '<div style="margin-top:8px;"><button type="button" onclick="confirmProfileFactProposal(' + index + ')">确认写入</button></div>' +
+    '</div>';
+  }).join('');
+}
+
+async function confirmProfileFactProposal(index) {
+  var proposal = profileFactProposals[index];
+  if (!proposal) return;
+  if (!confirm('确认写入画像事实？\n\n' + proposal.fact)) return;
+  setProfileProposalMessage('写入中…', '');
+  try {
+    var res = await authFetch(BASE + '/api/profile-fact-proposals/confirm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(proposal)
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '写入失败');
+    var successMessage = '已写入画像事实 ' + (data.id || '');
+    profileFactProposals.splice(index, 1);
+    renderProfileFactProposals({ proposals: profileFactProposals, rejected: [] });
+    setProfileProposalMessage(successMessage, 'ok');
+    await loadProfileFacts();
+    await loadBuckets();
+  } catch (e) {
+    setProfileProposalMessage('写入失败: ' + e.message, 'error');
+  }
+}
+
+function setAnchorProposalMessage(message, tone) {
+  var el = document.getElementById('anchor-proposal-message');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('ok', 'error');
+  if (tone) el.classList.add(tone);
+}
+
+async function generateAnchorProposals() {
+  var bucketInput = document.getElementById('anchor-proposal-bucket-id');
+  var bucketId = (bucketInput && bucketInput.value || '').trim();
+  if (!bucketId) {
+    setAnchorProposalMessage('先填 bucket id。', 'error');
+    return;
+  }
+  setAnchorProposalMessage('生成中…', '');
+  var list = document.getElementById('anchor-proposal-list');
+  if (list) list.innerHTML = '';
+  try {
+    var res = await authFetch(BASE + '/api/anchor-proposals', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bucket_id: bucketId })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '生成失败');
+    anchorProposals = Array.isArray(data.proposals) ? data.proposals : [];
+    renderAnchorProposals(data);
+  } catch (e) {
+    anchorProposals = [];
+    setAnchorProposalMessage('生成失败: ' + e.message, 'error');
+    if (list) list.innerHTML = '';
+  }
+}
+
+function renderAnchorProposals(data) {
+  var list = document.getElementById('anchor-proposal-list');
+  if (!list) return;
+  var proposals = anchorProposals || [];
+  var rejected = Array.isArray(data && data.rejected) ? data.rejected : [];
+  var bucket = data && data.bucket ? data.bucket : {};
+  if (!proposals.length) {
+    setAnchorProposalMessage(
+      rejected.length ? '没有可用候选：' + (rejected[0].reason || '已拒绝') : '没有生成候选。',
+      rejected.length ? 'error' : ''
+    );
+    list.innerHTML = '';
+    return;
+  }
+  setAnchorProposalMessage('生成 ' + proposals.length + ' 条 Anchor 候选。', 'ok');
+  list.innerHTML = proposals.map(function(item, index) {
+    var meta = [
+      item.anchor_kind || 'other',
+      'confidence ' + Number(item.confidence || 0).toFixed(2),
+      bucket.name || item.bucket_id || ''
+    ].filter(Boolean).join(' · ');
+    return '<div class="profile-proposal-card">' +
+      '<strong>' + esc(bucket.name || item.bucket_id || '') + '</strong>' +
+      '<div>' + esc(meta) + '</div>' +
+      '<div>bucket: ' + esc(item.bucket_id || '') + '</div>' +
+      '<div>reason: ' + esc(item.reason || '—') + '</div>' +
+      '<div>future: ' + esc(item.future_use || '—') + '</div>' +
+      '<div style="margin-top:8px;"><button type="button" onclick="confirmAnchorProposal(' + index + ')">确认标为 Anchor</button></div>' +
+    '</div>';
+  }).join('');
+}
+
+async function confirmAnchorProposal(index) {
+  var proposal = anchorProposals[index];
+  if (!proposal) return;
+  if (!confirm('确认标为 Anchor？\n\n' + proposal.bucket_id)) return;
+  setAnchorProposalMessage('写入中…', '');
+  try {
+    var res = await authFetch(BASE + '/api/anchor-proposals/confirm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(proposal)
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '写入失败');
+    var successMessage = data.status === 'already_anchor' ? '已经是 Anchor。' : '已标为 Anchor ' + (data.id || '');
+    anchorProposals.splice(index, 1);
+    renderAnchorProposals({ proposals: anchorProposals, rejected: [] });
+    setAnchorProposalMessage(successMessage, 'ok');
+    await loadBuckets();
+  } catch (e) {
+    setAnchorProposalMessage('写入失败: ' + e.message, 'error');
+  }
+}
+
+function renderProfileFacts() {
+  var list = document.getElementById('profile-facts-list');
+  var summary = document.getElementById('profile-summary');
+  if (!list || !summary) return;
+  var activeCount = profileFacts.filter(function(fact) { return fact.active; }).length;
+  var deprecatedCount = profileFacts.filter(function(fact) { return fact.deprecated; }).length;
+  summary.textContent = profileFacts.length + ' 条画像事实 · ' + activeCount + ' active · ' + deprecatedCount + ' deprecated';
+  if (!profileFacts.length) {
+    list.innerHTML = '<div class="loading">还没有画像事实。</div>';
+    return;
+  }
+  list.innerHTML = profileFacts.map(renderProfileFactCard).join('');
+}
+
+function profileFactById(id) {
+  id = String(id || '');
+  return profileFacts.find(function(fact) { return String(fact.id || '') === id; });
+}
+
+function profileFactStatus(fact) {
+  if (fact.deprecated || fact.state === 'deprecated') return { text: 'deprecated', cls: 'deprecated' };
+  if (fact.active || fact.state === 'active') return { text: 'active', cls: 'active' };
+  return { text: fact.state || 'inactive', cls: '' };
+}
+
+function renderProfileFactCard(fact) {
+  var id = String(fact.id || '');
+  var status = profileFactStatus(fact);
+  var conf = fact.confidence == null ? '—' : Number(fact.confidence).toFixed(2);
+  var evidence = Array.isArray(fact.evidence) ? fact.evidence : [];
+  var confirmButton = status.cls === 'active'
+    ? ''
+    : '<button type="button" onclick="runProfileFactAction(\'' + jsString(id) + '\', \'confirm\')">确认</button>';
+  var evidenceHtml = evidence.length
+    ? evidence.map(function(item) {
+        var bucketId = String(item.bucket_id || '');
+        var label = (item.name || bucketId) + (item.moment_id ? ' · ' + item.moment_id : '');
+        var openButton = bucketId
+          ? '<button type="button" onclick="showDetail(\'' + jsString(bucketId) + '\')">打开证据</button>'
+          : '';
+        return '<div>' + esc(label) + ' ' + openButton + '</div>';
+      }).join('')
+    : '<div>未记录证据。</div>';
+  return '<article class="profile-card ' + escAttr(status.cls) + '">' +
+    '<div class="profile-head">' +
+      '<div>' +
+        '<div class="profile-fact-text">' + esc(fact.fact || '') + '</div>' +
+        '<div class="profile-chip-row">' +
+          '<span class="profile-chip ' + escAttr(status.cls) + '">' + esc(status.text) + '</span>' +
+          '<span class="profile-chip">' + esc(fact.kind || 'unknown') + '</span>' +
+          '<span class="profile-chip">confidence ' + esc(conf) + '</span>' +
+          '<span class="profile-chip">' + esc(fact.source || 'profile_fact') + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="profile-actions">' +
+        confirmButton +
+        '<button type="button" onclick="editProfileFact(\'' + jsString(id) + '\')">编辑</button>' +
+        '<button type="button" class="danger" onclick="runProfileFactAction(\'' + jsString(id) + '\', \'deprecate\')">废弃</button>' +
+        '<button type="button" class="danger" onclick="deleteProfileFact(\'' + jsString(id) + '\')">删除</button>' +
+        '<button type="button" onclick="showDetail(\'' + jsString(id) + '\')">打开</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="profile-meta-grid">' +
+      '<div><label>subject</label>' + esc(fact.subject || '—') + '</div>' +
+      '<div><label>predicate</label>' + esc(fact.predicate || '—') + '</div>' +
+      '<div><label>object</label>' + esc(fact.object || '—') + '</div>' +
+      '<div><label>updated</label>' + esc(fact.updated_at || fact.last_active || fact.created || '—') + '</div>' +
+      '<div><label>bucket</label>' + esc(id) + '</div>' +
+      '<div><label>tags</label>' + esc((fact.tags || []).join(', ') || '—') + '</div>' +
+    '</div>' +
+    '<div class="profile-evidence">' + evidenceHtml + '</div>' +
+  '</article>';
+}
+
+async function runProfileFactAction(id, action, payload) {
+  payload = Object.assign({ action: action }, payload || {});
+  try {
+    var res = await authFetch(BASE + '/api/profile-facts/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || '操作失败');
+    await loadProfileFacts();
+    await loadBuckets();
+  } catch (e) {
+    alert('画像事实操作失败: ' + e.message);
+  }
+}
+
+async function deleteProfileFact(id) {
+  var fact = profileFactById(id);
+  if (!fact) return;
+  if (!confirm('彻底删除这条画像事实？\n\n' + (fact.fact || id))) return;
+  try {
+    var res = await authFetch(BASE + '/api/profile-facts/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ confirm: 'DELETE' })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || data.reason || '删除失败');
+    await loadProfileFacts();
+    await loadBuckets();
+  } catch (e) {
+    alert('画像事实删除失败: ' + e.message);
+  }
+}
+
+function editProfileFact(id) {
+  var fact = profileFactById(id);
+  if (!fact) return;
+  var nextFact = prompt('编辑画像事实', fact.fact || '');
+  if (nextFact == null) return;
+  nextFact = nextFact.trim();
+  if (!nextFact) return;
+  var nextKind = prompt('kind', fact.kind || 'preference');
+  if (nextKind == null) return;
+  var nextSubject = prompt('subject', fact.subject || 'user');
+  if (nextSubject == null) return;
+  var nextPredicate = prompt('predicate', fact.predicate || '');
+  if (nextPredicate == null) return;
+  var nextObject = prompt('object', fact.object || '');
+  if (nextObject == null) return;
+  var currentConfidence = fact.confidence == null ? '0.9' : String(fact.confidence);
+  var nextConfidence = prompt('confidence 0~1', currentConfidence);
+  if (nextConfidence == null) return;
+  var sections = fact.sections || {};
+  runProfileFactAction(id, 'edit', {
+    fact: nextFact,
+    profile_kind: nextKind,
+    subject: nextSubject,
+    predicate: nextPredicate,
+    object: nextObject,
+    confidence: Number(nextConfidence),
+    evidence_context: sections.evidence_context || '',
+    reflection: sections.reflection || '',
+    followup: sections.followup || ''
+  });
 }
 
 function setWordMapMessage(message, tone) {
@@ -6837,8 +6497,8 @@ function buildFilters() {
   const filters = document.getElementById('filters');
   const legacyViewFilters = [
     { key: 'all', label: '全部' },
-    { key: 'pinned', label: '📌 钉选' },
-    { key: 'anchor', label: '⚓ Anchor' },
+    { key: 'pinned', label: '🔒 永久保留' },
+    { key: 'anchor', label: '⚓ 受保护' },
     { key: 'feel', label: 'Feel' },
     { key: 'daily_impression', label: '日印象' },
     { key: 'unresolved', label: '⚡ 可浮现' },
@@ -6855,24 +6515,58 @@ function buildFilters() {
   function renderButton(item) {
     return '<button class="filter-btn ' + (item.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(item.key) + '">' + esc(item.label) + '</button>';
   }
-  function renderSortButton() {
-    return '<button type="button" class="filter-btn filter-sort-toggle" id="bucket-sort-toggle" onclick="toggleBucketSortMode()" title="按创建时间倒序" aria-label="按创建时间倒序"></button>';
-  }
+  var sortOptions = [
+    { key: 'score', label: '⚖️ 权重' },
+    { key: 'newest', label: '🕐 最新在前' },
+    { key: 'oldest', label: '📜 最旧在前' },
+  ];
+  var sortHtml = '<div class="filter-group" style="margin-left:auto;">' +
+    sortOptions.map(function(item) {
+      return '<button class="filter-btn ' + (item.key === bucketSortMode ? 'active' : '') + '" onclick="setBucketSortMode(\'' + item.key + '\')">' + esc(item.label) + '</button>';
+    }).join('') +
+    '</div>';
   filters.innerHTML = '<div class="filter-group">' +
     legacyViewFilters.map(renderButton).join('') +
-    renderSortButton() +
-    '</div>';
-  updateBucketSortToggle();
+    '</div>' + sortHtml;
 
   filters.onclick = function(e) {
-    if (e.target.closest('#bucket-sort-toggle')) return;
-    var btn = e.target.closest('.filter-btn');
+    var btn = e.target.closest('.filter-btn[data-filter]');
     if (!btn) return;
     filters.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     currentFilter = btn.dataset.filter;
-    renderBuckets(filterBuckets(allBuckets));
+    renderBuckets(sortBuckets(filterBuckets(allBuckets)));
   };
+}
+
+function bucketSortDate(b) {
+  // 优先用事件日期 date；没有 date 的桶才退回创建/导入时间 created
+  return String((b && (b.date || b.created)) || '');
+}
+function bucketSortSecondary(b) {
+  // 同一天内部用 created 当第二关键字，方向要跟主排序一起翻转，不能靠"稳定排序"兜底
+  return String((b && b.created) || '');
+}
+function sortBuckets(buckets) {
+  var list = (buckets || []).slice();
+  if (bucketSortMode === 'newest') {
+    list.sort(function(a, b) {
+      var primary = bucketSortDate(b).localeCompare(bucketSortDate(a));
+      return primary !== 0 ? primary : bucketSortSecondary(b).localeCompare(bucketSortSecondary(a));
+    });
+  } else if (bucketSortMode === 'oldest') {
+    list.sort(function(a, b) {
+      var primary = bucketSortDate(a).localeCompare(bucketSortDate(b));
+      return primary !== 0 ? primary : bucketSortSecondary(a).localeCompare(bucketSortSecondary(b));
+    });
+  }
+  // score 模式：后端已经按 score 降序返回，不用再排
+  return list;
+}
+function setBucketSortMode(mode) {
+  bucketSortMode = mode;
+  buildFilters();
+  renderBuckets(sortBuckets(filterBuckets(allBuckets)));
 }
 
 function filterBuckets(buckets) {
@@ -6922,48 +6616,11 @@ function filterBuckets(buckets) {
   return buckets;
 }
 
-function bucketCreatedTime(bucket) {
-  var created = String((bucket && bucket.created) || '').trim();
-  var parsed = created ? Date.parse(created) : NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function bucketWeightScore(bucket) {
-  var score = Number(bucket && bucket.score);
-  return Number.isFinite(score) ? score : 0;
-}
-
-function sortBucketsForDisplay(buckets) {
-  var sorted = (buckets || []).slice();
-  sorted.sort(function(a, b) {
-    var left = bucketSortMode === 'weight' ? bucketWeightScore(a) : bucketCreatedTime(a);
-    var right = bucketSortMode === 'weight' ? bucketWeightScore(b) : bucketCreatedTime(b);
-    if (left !== right) return bucketSortDescending ? right - left : left - right;
-    var leftCreated = bucketCreatedTime(a);
-    var rightCreated = bucketCreatedTime(b);
-    if (leftCreated !== rightCreated) return bucketSortDescending ? rightCreated - leftCreated : leftCreated - rightCreated;
-    return String(a.id || '').localeCompare(String(b.id || ''));
-  });
-  return sorted;
-}
-
-function updateBucketSortToggle() {
-  var btn = document.getElementById('bucket-sort-toggle');
-  if (!btn) return;
-  var isWeight = bucketSortMode === 'weight';
-  var direction = bucketSortDescending ? '↓' : '↑';
-  btn.innerHTML = '<span class="sort-mode-symbol">' + (isWeight ? '◆' : '⏱') + '</span><span class="sort-direction">' + direction + '</span>';
-  btn.title = isWeight ? '按权重倒序，点击切换为创建时间倒序' : '按创建时间倒序，点击切换为权重倒序';
-  btn.setAttribute('aria-label', btn.title);
-}
-
-function toggleBucketSortMode() {
-  bucketSortMode = bucketSortMode === 'time' ? 'weight' : 'time';
-  updateBucketSortToggle();
-  renderBuckets(renderedBuckets);
-}
-
 function bucketBulkDeleteBlockReason(bucket) {
+  if (bucket.protected) return 'protected';
+  if (bucket.pinned) return 'pinned';
+  if (bucket.anchor) return 'anchor';
+  if (bucket.type === 'permanent') return 'permanent';
   return '';
 }
 
@@ -7005,13 +6662,15 @@ function updateBucketBulkToolbar() {
   var selectBtn = toolbar.querySelector('[data-bulk-action="select-current"]');
   var clearBtn = toolbar.querySelector('[data-bulk-action="clear"]');
   var deleteBtn = toolbar.querySelector('[data-bulk-action="delete"]');
+  var pinBtn = toolbar.querySelector('[data-bulk-action="pin"]');
+  var anchorBtn = toolbar.querySelector('[data-bulk-action="anchor"]');
+  var importantBtn = toolbar.querySelector('[data-bulk-action="important"]');
   if (selectBtn) selectBtn.disabled = !selectable;
   if (clearBtn) clearBtn.disabled = !selected;
   if (deleteBtn) deleteBtn.disabled = !selected;
-  ['domain', 'tags-add', 'tags-remove', 'facets-add', 'facets-remove', 'archive', 'active'].forEach(function(action) {
-    var btn = toolbar.querySelector('[data-bulk-action="' + action + '"]');
-    if (btn) btn.disabled = !selected;
-  });
+  if (pinBtn) pinBtn.disabled = !selected;
+  if (anchorBtn) anchorBtn.disabled = !selected;
+  if (importantBtn) importantBtn.disabled = !selected;
 }
 
 function toggleBucketBulkMode() {
@@ -7057,7 +6716,7 @@ function selectCurrentBuckets() {
       added += 1;
     }
   });
-  setBucketBulkMessage(added ? '已选择当前筛选里的记忆桶。' : '当前筛选没有可批量删除的记忆桶。', added ? 'ok' : '');
+  setBucketBulkMessage(added ? '已选择当前筛选里的普通记忆桶。' : '当前筛选没有可批量删除的记忆桶。', added ? 'ok' : '');
   renderBuckets(renderedBuckets);
 }
 
@@ -7066,70 +6725,28 @@ function clearBucketSelection() {
   setBucketBulkMessage('');
   renderBuckets(renderedBuckets);
 }
-
-function parseBulkListInput(value) {
-  return String(value || '').split(/[,，、\n]+/).map(function(item) {
-    return item.trim();
-  }).filter(Boolean);
-}
-
-function selectedBucketIdList() {
-  return Array.from(selectedBucketIds).filter(function(id) { return bucketById(id); });
-}
-
-function bulkSelectedPreview(ids) {
-  var selectedBuckets = ids.map(bucketById).filter(Boolean);
-  var names = selectedBuckets.slice(0, 5).map(function(bucket) {
-    return '· ' + (bucket.name || bucket.id);
-  }).join('\n');
-  return names + (ids.length > 5 ? '\n...' : '');
-}
-
-async function bulkUpdateSelected(payload, label) {
-  var ids = selectedBucketIdList();
+async function applyBucketFlag(ids, action) {
+  ids = (ids || []).filter(Boolean);
   if (!ids.length) return;
-  if (!confirm(label + '，影响 ' + ids.length + ' 个记忆桶：\n' + bulkSelectedPreview(ids))) return;
+  var labels = { pin: '固定', anchor: 'Anchor', important: '重要' };
+  var label = labels[action] || action;
   try {
-    var res = await authFetch(BASE + '/api/buckets/bulk-update', {
+    var res = await authFetch(BASE + '/api/import/review', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({ bucket_ids: ids }, payload))
+      body: JSON.stringify({
+        decisions: ids.map(function(id) { return { bucket_id: id, action: action }; })
+      })
     });
     if (!res) return;
     var data = await res.json();
-    if (!res.ok) throw new Error(data.error || '批量操作失败');
+    if (!res.ok) throw new Error(data.error || (label + '标记失败'));
     selectedBucketIds.clear();
     await loadBuckets();
-    var changedIds = Array.isArray(data.changed_ids) ? data.changed_ids : [];
-    var changedPreview = changedIds.length ? '：' + changedIds.slice(0, 8).join(', ') + (changedIds.length > 8 ? '...' : '') : '';
-    setBucketBulkMessage('已处理 ' + (data.matched || ids.length) + ' 个，changed ids ' + changedIds.length + changedPreview, changedIds.length ? 'ok' : '');
+    setBucketBulkMessage('已标记「' + label + '」' + data.applied + ' 个，失败 ' + data.errors + ' 个。', data.applied ? 'ok' : 'error');
   } catch (e) {
-    setBucketBulkMessage('批量操作失败: ' + e.message, 'error');
+    setBucketBulkMessage(label + '标记失败: ' + e.message, 'error');
   }
-}
-
-async function changeSelectedBucketDomain() {
-  var select = document.getElementById('bucket-bulk-domain');
-  var domain = select ? select.value : '';
-  if (!domain) return;
-  var option = domainOptionForKey(domain);
-  await bulkUpdateSelected({ domain: domain }, '改主域为 ' + ((option && option.label) || domain));
-}
-
-async function updateSelectedBucketListField(field, mode) {
-  var input = document.getElementById(field === 'facets' ? 'bucket-bulk-facets' : 'bucket-bulk-tags');
-  var values = parseBulkListInput(input && input.value);
-  if (!values.length) {
-    setBucketBulkMessage('先输入要' + (mode === 'add' ? '添加' : '删除') + '的 ' + field + '。', 'error');
-    return;
-  }
-  var payload = {};
-  payload[field + (mode === 'add' ? '_add' : '_remove')] = values;
-  await bulkUpdateSelected(payload, (mode === 'add' ? '添加 ' : '删除 ') + field + ': ' + values.join(', '));
-}
-
-async function setSelectedBucketStatus(status) {
-  await bulkUpdateSelected({ status: status }, status === 'archived' ? '归档选中记忆桶' : '恢复选中记忆桶为 active');
 }
 
 async function deleteSelectedBuckets() {
@@ -7140,7 +6757,7 @@ async function deleteSelectedBuckets() {
     return '· ' + (bucket.name || bucket.id);
   }).join('\n');
   var extra = ids.length > 5 ? '\n...' : '';
-  if (!confirm('准备删除 ' + ids.length + ' 个记忆桶：\n' + names + extra + '\n\n会写 tombstone 并清理索引。')) return;
+  if (!confirm('准备删除 ' + ids.length + ' 个普通记忆桶：\n' + names + extra + '\n\n会写 tombstone 并清理索引。')) return;
   var token = prompt('输入 DELETE 确认删除 ' + ids.length + ' 个记忆桶');
   if (token !== 'DELETE') {
     setBucketBulkMessage('已取消删除。', '');
@@ -7165,22 +6782,19 @@ async function deleteSelectedBuckets() {
 
 function renderBuckets(buckets) {
   var list = document.getElementById('bucket-list');
-  var sortedBuckets = sortBucketsForDisplay(buckets);
-  renderedBuckets = sortedBuckets;
-  updateBucketSortToggle();
+  renderedBuckets = (buckets || []).slice();
   updateBucketBulkToolbar();
-  if (!sortedBuckets.length) {
+  if (!buckets.length) {
     list.innerHTML = '<div class="loading">没有记忆桶</div>';
     return;
   }
-  list.innerHTML = sortedBuckets.map(function(b) {
+  list.innerHTML = buckets.map(function(b) {
     var id = String(b.id || '');
     var icon = b.anchor ? '⚓' : b.pinned ? '📌' : b.type === 'feel' ? '🫧' : b.digested ? '🌿' : b.resolved ? '💤' : '💭';
     var vPos = Math.round(b.valence * 100);
     var modelV = b.model_valence != null ? ' → V' + b.model_valence.toFixed(1) : '';
-    var timeAgo = formatTimeAgo(b.created || b.last_active);
-    var domainLabel = [bucketCanonicalDomainLabel(b), bucketKind(b), bucketStatusView(b)].filter(Boolean).join(' · ');
-    var canonicalLabel = bucketCanonicalDomainFullLabel(b);
+    var timeAgo = formatTimeAgo(b.last_active || b.created);
+    var domainLabel = [bucketCanonicalDomain(b), bucketKind(b), bucketStatusView(b)].filter(Boolean).join(' · ');
     var legacyLabel = bucketLegacyDomain(b).join(', ');
     var blockReason = bucketBulkDeleteBlockReason(b);
     var checked = selectedBucketIds.has(id);
@@ -7195,11 +6809,19 @@ function renderBuckets(buckets) {
       selectHtml +
       '<span class="icon">' + icon + '</span>' +
       '<span class="name" title="' + esc(b.name) + '">' + esc(b.name) + '</span>' +
-      '<span class="domain" title="key: ' + escAttr(canonicalLabel || '—') + ' · legacy: ' + escAttr(legacyLabel || '—') + '">' + esc(domainLabel || legacyLabel || '—') + '</span>' +
+      '<span class="domain" title="legacy: ' + escAttr(legacyLabel || '—') + '">' + esc(domainLabel || legacyLabel || '—') + '</span>' +
       '<span class="emotion"><span class="v-bar"><span class="v-dot" style="left:' + vPos + '%"></span></span>' + modelV + '</span>' +
       '<span class="score">' + b.score.toFixed(2) + '</span>' +
       '<span class="time">' + esc(timeAgo) + '</span>' +
       '<span class="preview">' + esc(b.content_preview) + '</span>' +
+      '<span class="row-flag" onclick="event.stopPropagation()">' +
+        '<select onchange="if(this.value){applyBucketFlag([\'' + jsString(id) + '\'], this.value);} this.selectedIndex=0;">' +
+          '<option value="">⋯</option>' +
+          '<option value="pin">🔒 永久保留</option>' +
+          '<option value="anchor">⚓ 受保护</option>' +
+          '<option value="important">⭐ 加强权重</option>' +
+        '</select>' +
+      '</span>' +
     '</div>';
   }).join('');
 }
@@ -7209,7 +6831,7 @@ async function searchBuckets(query) {
     var res = await authFetch(BASE + '/api/search?q=' + encodeURIComponent(query));
     if (!res) return;
     var results = await res.json();
-    renderBuckets(results);
+    renderBuckets(sortBuckets(results));
   } catch (e) {
     console.error('Search failed:', e);
   }
@@ -7263,13 +6885,12 @@ async function showDetail(id) {
       '<div class="detail-meta">' +
         '<div class="field"><label>ID</label>' + esc(id) + '</div>' +
         '<div class="field"><label>类型</label>' + esc(meta.type || 'dynamic') + '</div>' +
-        '<div class="field"><label>主域</label>' + esc(bucketCanonicalDomainFullLabel(b) || '—') + '</div>' +
+        '<div class="field"><label>主域</label>' + esc(b.canonical_domain || view.canonical_domain || '—') + '</div>' +
         '<div class="field"><label>记忆类型</label>' + esc(b.kind || view.kind || '—') + '</div>' +
         '<div class="field"><label>状态视图</label>' + esc(b.status_view || view.status_view || '—') + '</div>' +
         '<div class="field"><label>标记</label>' + esc(((b.flags || view.flags || []) || []).join(', ') || '—') + '</div>' +
         '<div class="field"><label>域</label>' + esc((meta.domain || []).join(', ')) + '</div>' +
         '<div class="field"><label>标签</label>' + esc((meta.tags || []).join(', ')) + '</div>' +
-        '<div class="field"><label>Facets</label>' + esc((meta.facets || []).join(', ') || '—') + '</div>' +
         '<div class="field"><label>事件效价</label>V' + (meta.valence || 0.5).toFixed(2) + '</div>' +
         '<div class="field"><label>唤醒度</label>A' + (meta.arousal || 0.3).toFixed(2) + '</div>' +
         '<div class="field"><label>模型视角</label>' + (meta.model_valence != null ? 'V' + meta.model_valence.toFixed(2) : '—') + '</div>' +
@@ -8788,42 +8409,6 @@ function normalizeGatewayUpstream(raw) {
   };
 }
 
-function gatewayCacheRetentionChoices(strategy) {
-  strategy = String(strategy || '').trim();
-  var choices = [{ value: '', label: 'default' }];
-  if (strategy === 'openai') {
-    choices.push({ value: '24h', label: '24h' });
-  } else if (strategy === 'anthropic' || strategy === 'anthropic_explicit') {
-    choices.push({ value: '1h', label: '1h' });
-  }
-  return choices;
-}
-
-function gatewayCacheRetentionAllowed(strategy, value) {
-  value = String(value || '').trim();
-  return gatewayCacheRetentionChoices(strategy).some(function(choice) {
-    return choice.value === value;
-  });
-}
-
-function gatewayCacheRetentionOptions(strategy, selected) {
-  selected = String(selected || '').trim();
-  if (!gatewayCacheRetentionAllowed(strategy, selected)) selected = '';
-  return gatewayCacheRetentionChoices(strategy).map(function(choice) {
-    return '<option value="' + escAttr(choice.value) + '"' + (choice.value === selected ? ' selected' : '') + '>' + esc(choice.label) + '</option>';
-  }).join('');
-}
-
-function updateGatewayCacheRetentionOptions(index) {
-  var cacheEl = document.getElementById('cfg-upstream-cache-' + index);
-  var retentionEl = document.getElementById('cfg-upstream-cache-retention-' + index);
-  if (!cacheEl || !retentionEl) return;
-  var strategy = cacheEl.value || '';
-  var selected = gatewayCacheRetentionAllowed(strategy, retentionEl.value) ? retentionEl.value : '';
-  retentionEl.innerHTML = gatewayCacheRetentionOptions(strategy, selected);
-  retentionEl.disabled = !strategy;
-}
-
 function splitEnvLines(value) {
   return String(value || '')
     .split(/[\n,]+/)
@@ -8854,7 +8439,7 @@ function syncGatewayUpstreamsFromDom() {
     current.api_key_values = splitSecretLines(value('cfg-upstream-key-values-' + index));
     current.default_model = value('cfg-upstream-default-' + index).trim();
     current.prompt_cache = value('cfg-upstream-cache-' + index).trim();
-    current.prompt_cache_retention = current.prompt_cache ? value('cfg-upstream-cache-retention-' + index).trim() : '';
+    current.prompt_cache_retention = value('cfg-upstream-cache-retention-' + index).trim();
     current.anthropic_version = value('cfg-upstream-anthropic-version-' + index).trim();
     current.anthropic_beta = value('cfg-upstream-anthropic-beta-' + index).trim();
     current.models = Array.prototype.slice.call(
@@ -8904,9 +8489,8 @@ function renderGatewayUpstreams() {
         '<div class="config-row"><label>Key values</label><textarea id="cfg-upstream-key-values-' + index + '" placeholder="可选：一行一个真实 key，对应上面的 env 名"></textarea></div>' +
         '<div class="upstream-note">留空不改。只有点“应用并保存密钥到 .env”才会写入，并用于本次热更新。</div>' +
         '<div class="config-row"><label>Default</label><input type="text" id="cfg-upstream-default-' + index + '" placeholder="默认模型，可留空" value="' + escAttr(upstream.default_model) + '" /></div>' +
-        '<div class="config-row"><label>Cache</label><select id="cfg-upstream-cache-' + index + '" onchange="updateGatewayCacheRetentionOptions(' + index + ')"><option value=""' + (!upstream.prompt_cache ? ' selected' : '') + '>none</option><option value="openai"' + (upstream.prompt_cache === 'openai' ? ' selected' : '') + '>openai</option><option value="anthropic"' + (upstream.prompt_cache === 'anthropic' ? ' selected' : '') + '>anthropic</option><option value="anthropic_explicit"' + (upstream.prompt_cache === 'anthropic_explicit' ? ' selected' : '') + '>anthropic_explicit</option></select></div>' +
-        '<div class="upstream-note">中转站选择：OpenAI 兼容选 openai；Claude 官方/多数中转选 anthropic_explicit；只认顶层 cache_control 的中转选 anthropic。</div>' +
-        '<div class="config-row"><label>Cache TTL</label><select id="cfg-upstream-cache-retention-' + index + '"' + (!upstream.prompt_cache ? ' disabled' : '') + '>' + gatewayCacheRetentionOptions(upstream.prompt_cache, upstream.prompt_cache_retention) + '</select></div>' +
+        '<div class="config-row"><label>Cache</label><select id="cfg-upstream-cache-' + index + '"><option value=""' + (!upstream.prompt_cache ? ' selected' : '') + '>none</option><option value="openai"' + (upstream.prompt_cache === 'openai' ? ' selected' : '') + '>openai</option><option value="anthropic"' + (upstream.prompt_cache === 'anthropic' ? ' selected' : '') + '>anthropic</option><option value="anthropic_explicit"' + (upstream.prompt_cache === 'anthropic_explicit' ? ' selected' : '') + '>anthropic_explicit</option></select></div>' +
+        '<div class="config-row"><label>Cache TTL</label><input type="text" id="cfg-upstream-cache-retention-' + index + '" placeholder="24h / 1h，可留空" value="' + escAttr(upstream.prompt_cache_retention) + '" /></div>' +
         '<div class="config-row"><label>Anthropic ver.</label><input type="text" id="cfg-upstream-anthropic-version-' + index + '" placeholder="2023-06-01" value="' + escAttr(upstream.anthropic_version) + '" /></div>' +
         '<div class="config-row"><label>Anthropic beta</label><input type="text" id="cfg-upstream-anthropic-beta-' + index + '" placeholder="可留空" value="' + escAttr(upstream.anthropic_beta) + '" /></div>' +
         '<div style="font-size:12px;color:var(--text-dim);font-weight:600;margin:14px 0 8px;">Models</div>' +
@@ -9074,7 +8658,7 @@ async function loadConfig() {
     document.getElementById('cfg-recent-context-enabled').value =
       ((cfg.gateway && cfg.gateway.recent_context_budget) ?? 300) > 0 ? 'true' : 'false';
     document.getElementById('cfg-recalled-memory-budget').value =
-      (cfg.gateway && cfg.gateway.recalled_memory_budget) ?? 900;
+      (cfg.gateway && cfg.gateway.recalled_memory_budget) ?? 400;
     document.getElementById('cfg-related-memory-budget').value =
       (cfg.gateway && cfg.gateway.related_memory_budget) ?? 220;
     document.getElementById('cfg-memory-detail-recall-enabled').value =
@@ -9088,23 +8672,12 @@ async function loadConfig() {
     document.getElementById('cfg-persona-context-rounds').value = personaRounds;
     document.getElementById('cfg-direct-render-mode').value = (cfg.gateway && cfg.gateway.direct_render_mode) || 'auto';
     document.getElementById('cfg-retrieval-mode').value = (cfg.gateway && cfg.gateway.retrieval_mode) || 'graph';
-    document.getElementById('cfg-operit-context-rewrite-enabled').value =
-      (cfg.gateway && cfg.gateway.operit_context_rewrite_enabled) ? 'true' : 'false';
     document.getElementById('cfg-word-map-hint-enabled').value =
       (cfg.gateway && cfg.gateway.word_map_hint_enabled) ? 'true' : 'false';
     document.getElementById('cfg-query-planner-enabled').value =
       (cfg.gateway && cfg.gateway.query_planner_enabled) ? 'true' : 'false';
     document.getElementById('cfg-memory-sentinel-llm-enabled').value =
       (cfg.gateway && cfg.gateway.memory_sentinel_llm_enabled) ? 'true' : 'false';
-    document.getElementById('cfg-domain-sentinel-enabled').value =
-      (cfg.gateway && cfg.gateway.domain_sentinel_enabled) === false ? 'false' : 'true';
-    document.getElementById('cfg-domain-sentinel-model').value =
-      (cfg.gateway && cfg.gateway.domain_sentinel_model) || '';
-    document.getElementById('cfg-domain-sentinel-url').value =
-      (cfg.gateway && cfg.gateway.domain_sentinel_base_url) || '';
-    document.getElementById('cfg-domain-sentinel-key').placeholder =
-      '当前: ' + ((cfg.gateway && cfg.gateway.domain_sentinel_api_key_masked) || ((cfg.gateway && cfg.gateway.domain_sentinel_api_ready) ? '***' : '复用 Embedding/未设置'));
-    document.getElementById('cfg-domain-sentinel-key').value = '';
     document.getElementById('cfg-query-resurface-enabled').value =
       (cfg.recall && cfg.recall.query_resurface_enabled) ? 'true' : 'false';
     var diffusion = cfg.memory_diffusion || {};
@@ -9125,16 +8698,11 @@ async function loadConfig() {
       (cfg.reflection && cfg.reflection.daily_min_memory_items) ?? 5;
     document.getElementById('cfg-reflection-daily-turns').value =
       (cfg.reflection && cfg.reflection.daily_conversation_turn_limit) ?? 0;
-    document.getElementById('cfg-reflection-chat-memory-mode').value =
-      (cfg.reflection && cfg.reflection.daily_chat_memory_mode) || 'auto';
-    document.getElementById('cfg-reflection-chat-memory-turns').value =
-      (cfg.reflection && cfg.reflection.daily_chat_memory_turn_limit) ?? 0;
     document.getElementById('cfg-reflection-memory-anchor').value =
       (cfg.reflection && cfg.reflection.memory_affect_anchor_enabled) === false ? 'false' : 'true';
     document.getElementById('cfg-reflection-weather-anchor').value =
       (cfg.reflection && cfg.reflection.relationship_weather_affect_anchor_enabled) === false ? 'false' : 'true';
     document.getElementById('cfg-reflection-model').value = (cfg.reflection && cfg.reflection.model) || '';
-    document.getElementById('cfg-reflection-thinking').value = (cfg.reflection && cfg.reflection.thinking_mode) || '';
     document.getElementById('cfg-reflection-url').value = (cfg.reflection && cfg.reflection.base_url) || '';
     document.getElementById('cfg-reflection-key').placeholder =
       '当前: ' + ((cfg.reflection && cfg.reflection.api_key_masked) || ((cfg.reflection && cfg.reflection.api_ready) ? '***' : '未设置'));
@@ -9177,7 +8745,7 @@ async function loadConfig() {
 }
 
 function setConfigStatus(html) {
-  ['config-status', 'memory-config-status', 'upstream-config-status', 'model-config-status'].forEach(function(id) {
+  ['config-status', 'memory-config-status', 'upstream-config-status'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.innerHTML = html;
   });
@@ -9271,10 +8839,10 @@ async function saveConfig(persist, persistEnv) {
       daily_enabled: document.getElementById('cfg-reflection-daily').value === 'true',
       daily_min_memory_items: numberValue('cfg-reflection-daily-min-memory', 5),
       daily_conversation_turn_limit: numberValue('cfg-reflection-daily-turns', 0),
-      daily_chat_memory_mode: document.getElementById('cfg-reflection-chat-memory-mode').value || 'auto',
-      daily_chat_memory_turn_limit: numberValue('cfg-reflection-chat-memory-turns', 0),
       memory_affect_anchor_enabled: document.getElementById('cfg-reflection-memory-anchor').value === 'true',
       relationship_weather_affect_anchor_enabled: document.getElementById('cfg-reflection-weather-anchor').value === 'true',
+      model: document.getElementById('cfg-reflection-model').value,
+      base_url: document.getElementById('cfg-reflection-url').value,
     };
     candidate.portrait = {
       enabled: document.getElementById('cfg-portrait-enabled').value === 'true',
@@ -9299,18 +8867,6 @@ async function saveConfig(persist, persistEnv) {
       candidate.gateway = { upstreams: upstreamsResult.upstreams };
     }
   }
-  if (activeTarget === 'model-config') {
-    candidate.gateway = {
-      domain_sentinel_enabled: document.getElementById('cfg-domain-sentinel-enabled').value === 'true',
-      domain_sentinel_model: document.getElementById('cfg-domain-sentinel-model').value,
-      domain_sentinel_base_url: document.getElementById('cfg-domain-sentinel-url').value,
-    };
-    candidate.reflection = {
-      model: document.getElementById('cfg-reflection-model').value,
-      thinking_mode: document.getElementById('cfg-reflection-thinking').value,
-      base_url: document.getElementById('cfg-reflection-url').value,
-    };
-  }
   if (activeTarget === 'memory-config') {
     candidate.gateway = {
       cooldown_hours: floatValue('cfg-gateway-cooldown', 6),
@@ -9318,7 +8874,7 @@ async function saveConfig(persist, persistEnv) {
       recent_context_cooldown_hours: floatValue('cfg-recent-context-cooldown', 6),
       recent_context_reentry_idle_hours: floatValue('cfg-recent-context-reentry', 24),
       recent_context_budget: recentContextBudget,
-      recalled_memory_budget: numberValue('cfg-recalled-memory-budget', 900),
+      recalled_memory_budget: numberValue('cfg-recalled-memory-budget', 400),
       related_memory_budget: numberValue('cfg-related-memory-budget', 220),
       memory_detail_recall_enabled: document.getElementById('cfg-memory-detail-recall-enabled').value === 'true',
       memory_detail_recall_max_ids: numberValue('cfg-memory-detail-recall-max-ids', 3),
@@ -9326,7 +8882,6 @@ async function saveConfig(persist, persistEnv) {
       current_inner_state_interval_rounds: personaContextRounds,
       direct_render_mode: document.getElementById('cfg-direct-render-mode').value,
       retrieval_mode: document.getElementById('cfg-retrieval-mode').value,
-      operit_context_rewrite_enabled: document.getElementById('cfg-operit-context-rewrite-enabled').value === 'true',
       word_map_hint_enabled: document.getElementById('cfg-word-map-hint-enabled').value === 'true',
       query_planner_enabled: document.getElementById('cfg-query-planner-enabled').value === 'true',
       memory_sentinel_llm_enabled: document.getElementById('cfg-memory-sentinel-llm-enabled').value === 'true',
@@ -9399,13 +8954,8 @@ async function saveConfig(persist, persistEnv) {
     if (!body.persona) body.persona = {};
     body.persona.api_key = personaKeyVal;
   }
-  var domainSentinelKeyVal = document.getElementById('cfg-domain-sentinel-key').value;
-  if (activeTarget === 'model-config' && domainSentinelKeyVal) {
-    if (!body.gateway) body.gateway = {};
-    body.gateway.domain_sentinel_api_key = domainSentinelKeyVal;
-  }
   var reflectionKeyVal = document.getElementById('cfg-reflection-key').value;
-  if (activeTarget === 'model-config' && reflectionKeyVal) {
+  if (reflectionKeyVal) {
     if (!body.reflection) body.reflection = {};
     body.reflection.api_key = reflectionKeyVal;
   }
@@ -9460,12 +9010,8 @@ async function startImport(file) {
   const preserveRaw = document.getElementById('import-preserve-raw').checked;
   const fd = new FormData();
   fd.append('file', file);
-  const params = new URLSearchParams({
-    preserve_raw: preserveRaw ? '1' : '0',
-    resume: '1',
-  });
   try {
-    const res = await authFetch(BASE + '/api/import/upload?' + params.toString(), { method: 'POST', body: fd });
+    const res = await authFetch(BASE + '/api/import/upload?preserve_raw=' + (preserveRaw ? '1' : '0') + '&resume=1', { method: 'POST', body: fd });;
     if (!res) return;
     const data = await res.json();
     if (data.error) { alert('导入失败: ' + data.error); return; }
@@ -9545,9 +9091,9 @@ async function loadImportResults() {
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${esc((b.tags||[]).map(t=>'#'+t).join(' '))}</div>
         <div style="display:flex;gap:8px;">
-          <button onclick="reviewAction('${safeId}','pin')" title="固定为永久记忆">📌 固定</button>
-          <button onclick="reviewAction('${safeId}','anchor')" title="标为长期锚点">⚓ Anchor</button>
-          <button onclick="reviewAction('${safeId}','important')" title="标为重要">⭐ 重要</button>
+          <button onclick="reviewAction('${safeId}','pin')" title="固定为永久记忆">🔒 永久保留</button>
+          <button onclick="reviewAction('${safeId}','anchor')" title="标为长期锚点">⚓ 受保护</button>
+          <button onclick="reviewAction('${safeId}','important')" title="标为重要">⭐ 加强权重</button>
           <button onclick="reviewAction('${safeId}','noise')" title="标为噪声并resolve">🗑 噪声</button>
           <button onclick="if(confirm('确定删除？'))reviewAction('${safeId}','delete')" title="彻底删除" style="color:var(--negative);">✕ 删除</button>
         </div>
@@ -9577,9 +9123,9 @@ async function detectPatterns() {
         </div>
         <p style="font-size:13px;margin:6px 0;">${esc(p.pattern_content)}</p>
         <div style="display:flex;gap:8px;">
-          <button onclick="reviewAction('${firstId}','pin')">📌 固定</button>
-          <button onclick="reviewAction('${firstId}','anchor')">⚓ Anchor</button>
-          <button onclick="reviewAction('${firstId}','important')">⭐ 重要</button>
+          <button onclick="reviewAction('${firstId}','pin')">🔒 永久保留</button>
+          <button onclick="reviewAction('${firstId}','anchor')">⚓ 受保护</button>
+          <button onclick="reviewAction('${firstId}','important')">⭐ 加强权重</button>
           <button onclick="batchReview('${idsJson}','noise')">🗑 噪声</button>
         </div>
       </div>
@@ -9610,15 +9156,6 @@ async function batchReview(idsJson, action) {
     detectPatterns();
   } catch(e) {}
 }
-
-function loadDashboardModule(path) {
-  const script = document.createElement('script');
-  script.src = BASE + path;
-  script.defer = true;
-  document.body.appendChild(script);
-}
-
-loadDashboardModule('/dashboard-assets/chat-memory.js');
 </script>
 </body>
 </html>

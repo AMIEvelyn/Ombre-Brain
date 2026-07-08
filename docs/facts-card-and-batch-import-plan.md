@@ -308,3 +308,23 @@
 - **没有跑真实后端端到端**（同样卡在这个沙盒装不上 `jieba`/`mcp`/`httpx` 这个老问题），部署前建议在真实环境里跑一遍完整流程确认无误
 
 **部署**：一澜说这步她自己来部署。
+
+## 事故记录：仓库基线与VPS实际部署分叉，`entity_edges` 导致部署崩溃（2026-07-08）
+
+第4步交付后部署时炸了：`docker restart` 之后容器进入重启循环，日志报 `ModuleNotFoundError: No module named 'entity_edges'`。排查过程记录一下，避免以后重蹈覆辙：
+
+**根因**：这个连着 Claude Code 的 GitHub 仓库（`AMIEvelyn/Ombre-Brain`），**从第一个 commit 开始**用的初始文件就不是一澜实际部署的版本，而是当初从原 OB 开发者那里 fork 时她还没做完的分支（`entity_edges.py` 就是那个分支里的未完成功能）。一澜后来在项目最开始就提供过她自己真实在跑的 OB 文件作为基线，但这个 git 仓库本身没有用那份基线来初始化，两边从第0天起就是分叉的。之后55+个commit（骨架层设计、资料卡UI等）都是在这个分叉的地基上做的——工作本身是真实有效的，只是"仓库里的 server.py/dashboard.html"和"VPS上真实跑着的 server.py/dashboard.html"一直不是同一份东西，只是因为过去都是"要哪几个文件改哪几个文件"的手动transplant，从来没有整个diff过，所以没人发现。
+
+**这次怎么恢复的**：一澜从她自己之前的会话记录里翻出了真实在跑的 `server.py`/`dashboard.html`/`facts_store.py`（这三个文件，不是完整仓库），发给了这次会话。用 `patch -p1 --fuzz=3` 把这次关联桶功能的改动（相对本仓库 `b7e8fcf` 基线的diff）套在她的真实文件上——三个文件全部fuzzy-apply成功且没有意外删除她原有的代码（逐行diff核对过，只有预期内的几处替换）。部署后确认容器正常启动，不再报entity_edges的错。
+
+**`fact_lookup` 的 `query` 参数顺带修了一个真bug（不是这次改动引入的，一直就有）**：林湛反馈搜"星星手串"搜不到"蓝色星星u盘手串"，搜"护身符"（标签）能搜到。查出来是 `_facts_query_matches` 的模糊匹配（`rapidfuzz.token_set_ratio`）只按空格分词，中文没有空格所以整句被当成一个大token，字符重叠率算法在"只跳过中间一小段"时够用（比如"蓝色星星手链"漏"U盘"两个字，分数85.7），但"跳过不止一处"时（比如"星星手串"同时漏了开头"蓝色"和中间"u盘"）分数会掉到66.7，刚好卡在70这个阈值下面，哪怕要找的词其实都在。**修法**：两遍模糊匹配都没命中的话，用 `jieba.lcut` 把query和目标文本分词、空格拼接后再跑一次 `token_set_ratio`——这样"星星手串"分成"星星"+"手串"两个词，能在目标文本的词集合里精确找到，token_set_ratio给出满分。这个函数不是这次改动写的（更早的会话加的），但顺手一起修了。
+
+**验证方式升级**：这次沙盒第一次把 `jieba`/`rapidfuzz`/`httpx`/`starlette`/`mcp`/`openai`/`frontmatter` 全部装上了（关键是给 `pip install` 加了 `--no-build-isolation` 加上把 `setuptools` 降到 `<60`，绕开了之前几次会话都卡住的编译失败），第一次真正跑通了完整 `import server`、跑了 `scripts/test_predicate_modes.py` 全部通过、用真实 `FactStore` + 真实 `fact_lookup()` 函数复现了林湛报的具体case并确认修复生效。**以后新会话如果还遇到"沙盒装不上依赖"，先试一遍 `pip install --no-build-isolation` + 降级 `setuptools<60`，很可能就通了，不用再假设"这个环境就是装不上"。**
+
+**之后林湛反馈"星星手串"这个query有时候又搜不到、但过一会儿又正常了**——一澜判断是ChatGPT MCP连接器那边的安全过滤间歇性拦截，跟这次的代码修复无关（因为同一个query一会儿行一会儿不行，不是稳定的失败）。这个不是我们代码能控制的范围，先记录，不继续深挖。
+
+**仓库整理，未完成，下一个会话/窗口接着做**：
+- 已确认 `entity_edges.py` 在这个仓库的第一个commit（`52a298b0`，2026-07-05）就存在，不是中途混进来的
+- `entity_edges` 被 `server.py`、`gateway.py`、`tests/test_entity_edges.py` 三处引用
+- 仓库里 `server.py`/`dashboard.html`/`facts_store.py` 三个文件已经用一澜提供的真实版本重新对齐过（这次修的query bug也已经叠加上去），但**`gateway.py` 和仓库里其他文件还没有跟一澜的真实版本核对过**，不确定还有没有类似的分叉
+- 一澜如果愿意，之后可以把 `gateway.py` 也导出来（`docker exec ombre-brain cat /app/gateway.py`）给新会话核对，同样用patch的方式合并，不整个覆盖
