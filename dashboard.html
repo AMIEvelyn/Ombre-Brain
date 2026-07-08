@@ -2569,6 +2569,14 @@
     font-size: 13px;
     cursor: pointer;
   }
+  /* Every bit of text in the Add Bucket / View Bucket feature uses the
+     site's serif stack, not just titles -- meta lines, chips, and body
+     content included. */
+  .facts-bucket-result-row, .facts-bucket-pending-chip, .facts-bucket-links-row,
+  .facts-bucket-links-meta, .facts-bucket-links-more, .facts-bucket-detail-meta,
+  .facts-bucket-detail-content, .facts-bucket-detail-delete {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+  }
   .facts-bucket-picker-panel {
     position: absolute;
     top: 34px;
@@ -2695,7 +2703,7 @@
     margin-top: 28px;
     font-size: 16px;
     line-height: 1.8;
-    color: var(--positive);
+    color: #7CA576; /* lighter, fresher green than --positive (#4A7C59), which read muddy against the cream background */
     white-space: pre-wrap;
     flex: 1;
   }
