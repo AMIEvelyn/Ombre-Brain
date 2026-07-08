@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 import httpx
+import jieba
 from rapidfuzz import fuzz
 
 
@@ -86,7 +87,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
-from facts_store import FactStore, PREDICATE_MODES
+from facts_store import FactStore, PREDICATE_MODES, FACT_BUCKET_RELATION_TYPES, FACT_BUCKET_RELATION_SOFT_LIMITS
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
     active_facets,
@@ -8598,13 +8599,30 @@ async def profile_fact(
 FACTS_QUERY_FUZZY_THRESHOLD = 70
 
 
+def _facts_jieba_join(text: str) -> str:
+    """Space-join jieba word segments so rapidfuzz's token_set_ratio (which
+    only splits on whitespace) can do set-based word matching on CJK text --
+    same segmentation convention as import_memory.py's embedding-text prep."""
+    return " ".join(t for t in jieba.lcut(text, cut_all=False) if t.strip())
+
+
 def _facts_query_matches(query: str, item: dict) -> bool:
     """True if query is a literal substring of title/content/tags, or fuzzy-
-    matches title/tags closely enough (rapidfuzz token_set_ratio, same library
-    already used for bucket-title fuzzy matching elsewhere in this file).
-    Handles both "字面就在标题里" (substring) and "标题里的字被跳过/换序但明显
-    是同一个东西" (fuzzy) -- true synonyms with no shared characters (e.g. 皮筋
-    vs 扎头绳) need an explicit tag instead, fuzzy matching can't infer those."""
+    matches title/tags closely enough. Three passes, in order:
+    1. Literal substring ("字面就在标题里")
+    2. Raw rapidfuzz token_set_ratio -- catches "标题里的字被跳过/换序但明显
+       是同一个东西" when the skipped span is short (e.g. "蓝色星星手链" for
+       "蓝色星星U盘手链", skipping only "U盘")
+    3. jieba-segmented token_set_ratio -- (2) degrades on CJK text because
+       token_set_ratio only splits on whitespace, so a query with no spaces
+       is one giant "token" and its score is just character-overlap ratio;
+       once more than one gap is skipped (e.g. "星星手串" for "蓝色星星U盘
+       手串", skipping both "蓝色" and "U盘") that ratio drops below
+       threshold even though every query word is genuinely present. Word-
+       segmenting first turns it into a real set match ({星星,手串} vs
+       {蓝色,星星,u,盘,手串}), which token_set_ratio handles correctly.
+    True synonyms with no shared characters (e.g. 皮筋 vs 扎头绳) still need
+    an explicit tag -- no fuzzy/segmentation trick can infer those."""
     query = str(query or "").strip()
     if not query:
         return True
@@ -8615,7 +8633,13 @@ def _facts_query_matches(query: str, item: dict) -> bool:
     if any(query in h for h in haystacks):
         return True
     fuzzy_targets = [title] + tags
-    return any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h)
+    if any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h):
+        return True
+    query_segmented = _facts_jieba_join(query)
+    return any(
+        fuzz.token_set_ratio(query_segmented, _facts_jieba_join(h)) >= FACTS_QUERY_FUZZY_THRESHOLD
+        for h in fuzzy_targets if h
+    )
 
 
 # =============================================================
@@ -8664,10 +8688,25 @@ async def fact_lookup(subject_key: str = "", predicate_key: str = "", at_date: s
         attachment_note = f"\n  （附了 {len(attachments)} 个图片/文件，暂时只能提示存在，无法直接看到内容）" if attachments else ""
         tags = [str(t) for t in (item.get("tags") or [])]
         tags_note = "\n  " + " ".join(f"#{t}" for t in tags) if tags else ""
+        links_note = ""
+        try:
+            links = fact_store.get_bucket_links(item.get("id"))
+        except Exception:
+            links = []
+        if links:
+            bits = []
+            for link in links[:3]:
+                summary = await _bucket_link_summary(link["bucket_id"])
+                if summary:
+                    bits.append(f"{link['bucket_id']}《{summary['name']}》")
+                else:
+                    bits.append(f"{link['bucket_id']}（桶已不存在）")
+            more = f" 等共{len(links)}个" if len(links) > 3 else ""
+            links_note = f"\n  关联了 {len(links)} 个记忆桶：{'、'.join(bits)}{more}"
         lines.append(
             f"- [{item.get('subject_key')}] {item.get('predicate_key')} = {title}"
             f"（生效于 {item.get('valid_at') or '未知'}{invalid_note}，来源桶 {item.get('evidence_id') or '无'}）"
-            f"{content_note}{tags_note}{attachment_note}"
+            f"{content_note}{tags_note}{attachment_note}{links_note}"
         )
     return "\n".join(lines)
 
@@ -9927,6 +9966,221 @@ async def api_facts_skeleton_delete_fact(request):
     if not deleted:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse({"status": "deleted", "id": fact_id})
+
+
+# =============================================================
+# Facts-card <-> memory-bucket links (many-to-many, Step 4)
+# 资料卡与记忆桶的多对多关联（第4步）
+# =============================================================
+async def _bucket_link_summary(bucket_id: str) -> dict | None:
+    """Light summary (id/name/date/domain/content preview) of a bucket for
+    display inside a fact's "关联记忆桶" list -- domain feeds the Dashboard's
+    "relation_type / id / date / domain" meta line. None if the bucket no
+    longer exists (deleted/forgotten) -- the link row is kept as-is; the
+    frontend shows it as a dangling reference rather than silently dropping
+    it."""
+    bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        return None
+    meta = bucket.get("metadata", {}) or {}
+    return {
+        "id": bucket["id"],
+        "name": meta.get("name", bucket["id"]),
+        "date": meta.get("date"),
+        "created": meta.get("created", ""),
+        "domain": meta.get("domain", []),
+        "type": meta.get("type", "dynamic"),
+        "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+    }
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["GET"])
+async def api_facts_skeleton_list_bucket_links(request):
+    """List the memory buckets linked to one fact/card, enriched with a light
+    bucket summary for display. No hard cap on how many a fact can have, so
+    this supports the UI's "show top 3, expand for more" pattern:
+    - relation_type: optional filter to one type (evidence/origin/related)
+    - limit/offset: optional pagination (e.g. the frontend's "查看全部" for a
+      long related-buckets list); omitted = return everything
+    Always returns counts_by_relation + soft_limits so the frontend can
+    decide when to collapse ("超过20条进入折叠/分页") without a second call."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    params = request.query_params
+    relation_type = str(params.get("relation_type") or "").strip()
+    if relation_type and relation_type not in FACT_BUCKET_RELATION_TYPES:
+        return JSONResponse(
+            {"error": f"relation_type 必须是 {'/'.join(sorted(FACT_BUCKET_RELATION_TYPES))} 之一"},
+            status_code=400,
+        )
+    try:
+        limit = max(0, int(params.get("limit") or 0))
+        offset = max(0, int(params.get("offset") or 0))
+    except ValueError:
+        return JSONResponse({"error": "limit/offset must be integers"}, status_code=400)
+
+    links = fact_store.get_bucket_links(fact_id, relation_type=relation_type, limit=limit, offset=offset)
+    result = []
+    for link in links:
+        result.append({
+            "link_id": link["id"],
+            "bucket_id": link["bucket_id"],
+            "moment_id": link.get("moment_id") or "",
+            "relation_type": link.get("relation_type") or "evidence",
+            "note": link.get("note") or "",
+            "created_at": link.get("created_at") or "",
+            "bucket": await _bucket_link_summary(link["bucket_id"]),
+        })
+    counts_by_relation = fact_store.count_bucket_links_by_relation(fact_id)
+    return JSONResponse({
+        "links": result,
+        "total": sum(counts_by_relation.values()),
+        "counts_by_relation": counts_by_relation,
+        "soft_limits": FACT_BUCKET_RELATION_SOFT_LIMITS,
+    })
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["POST"])
+async def api_facts_skeleton_link_bucket(request):
+    """Link a memory bucket to a fact/card. Body: bucket_id required;
+    relation_type (evidence/origin/related, defaults to evidence), moment_id,
+    note optional. No hard cap -- the DB layer allows any number of links
+    (batch import may attach dozens under relation_type="related"). If this
+    push takes a relation_type over its recommended soft limit
+    (FACT_BUCKET_RELATION_SOFT_LIMITS: evidence 5 / origin 3 / related 20),
+    the link still succeeds but the response carries a "warning" string the
+    Dashboard can show ("建议精简为核心证据") instead of a hard block."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid fact_id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+
+    bucket_id = str(body.get("bucket_id") or "").strip()
+    if not bucket_id:
+        return JSONResponse({"error": "bucket_id 不能为空"}, status_code=400)
+    bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        return JSONResponse({"error": f"未找到记忆桶: {bucket_id}"}, status_code=404)
+
+    relation_type = str(body.get("relation_type") or "").strip()
+    if relation_type and relation_type not in FACT_BUCKET_RELATION_TYPES:
+        return JSONResponse(
+            {"error": f"relation_type 必须是 {'/'.join(sorted(FACT_BUCKET_RELATION_TYPES))} 之一"},
+            status_code=400,
+        )
+
+    try:
+        link_id, warning = fact_store.add_bucket_link(
+            fact_id,
+            bucket_id,
+            moment_id=str(body.get("moment_id") or "").strip(),
+            relation_type=relation_type or "evidence",
+            note=str(body.get("note") or "").strip(),
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    response = {
+        "status": "linked",
+        "link_id": link_id,
+        "bucket": await _bucket_link_summary(bucket_id),
+    }
+    if warning:
+        response["warning"] = warning
+    return JSONResponse(response)
+
+
+@mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets/{link_id}", methods=["DELETE"])
+async def api_facts_skeleton_unlink_bucket(request):
+    """Remove one fact<->bucket link (does not touch the bucket itself)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        fact_id = int(request.path_params["fact_id"])
+        link_id = int(request.path_params["link_id"])
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "invalid id"}, status_code=400)
+    if not fact_store.get_fact(fact_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    links = fact_store.get_bucket_links(fact_id)
+    if not any(link["id"] == link_id for link in links):
+        return JSONResponse({"error": "link not found on this fact"}, status_code=404)
+
+    removed = fact_store.remove_bucket_link(link_id)
+    if not removed:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"status": "unlinked", "link_id": link_id})
+
+
+@mcp.custom_route("/api/facts-skeleton/buckets/search", methods=["GET"])
+async def api_facts_skeleton_search_buckets(request):
+    """Search memory buckets to link onto a fact/card (the "Add Bucket"
+    picker). q can be a keyword (reuses bucket_mgr's existing multi-dim
+    search) or an exact bucket id -- an exact id match is tried first and
+    put at the front of the results so pasting a known bucket_id always
+    works even if the fuzzy searcher wouldn't otherwise surface it."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    query = str(request.query_params.get("q") or "").strip()
+    if not query:
+        return JSONResponse({"buckets": []})
+
+    results: list[dict] = []
+    seen_ids: set[str] = set()
+
+    exact = await _bucket_link_summary(query)
+    if exact:
+        results.append(exact)
+        seen_ids.add(exact["id"])
+
+    try:
+        matches = await bucket_mgr.search(query, limit=10, include_archive=True)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    for bucket in matches:
+        if bucket["id"] in seen_ids:
+            continue
+        meta = bucket.get("metadata", {}) or {}
+        results.append({
+            "id": bucket["id"],
+            "name": meta.get("name", bucket["id"]),
+            "date": meta.get("date"),
+            "created": meta.get("created", ""),
+            "domain": meta.get("domain", []),
+            "type": meta.get("type", "dynamic"),
+            "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+        })
+        seen_ids.add(bucket["id"])
+
+    return JSONResponse({"buckets": results[:10]})
 
 
 @mcp.custom_route("/api/facts-skeleton/predicates/{predicate_key}", methods=["PATCH"])
