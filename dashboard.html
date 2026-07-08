@@ -2214,9 +2214,11 @@
     align-items: stretch;
     gap: 0;
     width: 100%;
+    min-height: 720px;
     border-radius: 14px;
     box-shadow: 2px 2px 6px var(--shadow-dark-subtle);
     overflow: hidden;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
   }
   .facts-browse-col {
     display: flex;
@@ -2250,30 +2252,39 @@
     word-break: break-word;
   }
   .facts-browse-item:hover { color: var(--text); }
-  /* selected item bleeds all the way to the column's edge in the next column's
-     color, so the highlight reads as physically continuous with that column
-     instead of a little chip floating inside this one. */
+  /* selected item bleeds all the way to both the column's own outer edge and
+     the next column's edge, so the highlight fills the full column width and
+     reads as physically continuous with that column, instead of a chip with
+     visible unselected-color slivers on either side. */
   .facts-browse-col-subjects .facts-browse-item.active {
     background: #E6DCC7;
     color: var(--text);
     font-weight: 600;
-    margin-right: -10px;
+    margin: 0 -10px;
+    padding-left: 18px;
     padding-right: 18px;
   }
   .facts-browse-col-keys .facts-browse-item.active {
     background: var(--surface-solid);
     color: var(--text);
     font-weight: 600;
-    margin-right: -10px;
+    margin: 0 -10px;
+    padding-left: 18px;
     padding-right: 18px;
   }
-  /* if the selected item is also the first row, bleed its highlight up to the
-     column's true top edge too, flush with the other columns -- not just
-     the right edge -- instead of leaving a sliver of unselected color above it */
+  /* if the selected item is also the first/last row, bleed its highlight to
+     the column's true top/bottom edge too, flush with the other columns --
+     not just the side edges -- instead of leaving a sliver of unselected
+     color above/below it */
   .facts-browse-col-subjects .facts-browse-item.active:first-child,
   .facts-browse-col-keys .facts-browse-item.active:first-child {
     margin-top: -16px;
     padding-top: 26px;
+  }
+  .facts-browse-col-subjects .facts-browse-item.active:last-child,
+  .facts-browse-col-keys .facts-browse-item.active:last-child {
+    margin-bottom: -16px;
+    padding-bottom: 26px;
   }
   .facts-nav-back {
     display: inline-block;
@@ -5537,7 +5548,7 @@ function renderFactsBrowseLevel() {
       return '<div class="facts-nav-row" onclick="factsNavGoDetail(\'' + subjectKey + '\', \'' + predicateKey + '\', ' + c.id + ')">' +
         '<div><b>' + esc(title) + '</b>' +
         '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">变动过 ' + ownHistory.length +
-        ' 次，最新变动于 ' + esc(lastChanged) + '</div></div>' +
+        ' 次<br>最新变动于 ' + esc(lastChanged) + '</div></div>' +
         '<span class="facts-nav-chevron">›</span></div>';
     }).join('');
   }
