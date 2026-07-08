@@ -2212,8 +2212,11 @@
   .facts-browse-columns {
     display: flex;
     align-items: stretch;
-    gap: 8px;
+    gap: 0;
     width: 100%;
+    border-radius: 14px;
+    box-shadow: 2px 2px 6px var(--shadow-dark-subtle);
+    overflow: hidden;
   }
   .facts-browse-col {
     display: flex;
@@ -2225,26 +2228,21 @@
     flex: 0 0 26%;
     background: #DAD0BB;
     padding: 16px 10px;
-    border-radius: 14px 0 0 14px;
-    margin-right: -8px;
   }
   .facts-browse-col-keys {
     flex: 0 0 26%;
     background: #E6DCC7;
     padding: 16px 10px;
-    border-radius: 0 14px 14px 0;
   }
   .facts-browse-col-titles {
     flex: 1 1 auto;
     background: var(--surface-solid);
     padding: 16px 14px;
-    border-radius: 14px;
     gap: 10px;
-    box-shadow: 2px 2px 6px var(--shadow-dark-subtle);
   }
   .facts-browse-item {
     padding: 10px 8px;
-    border-radius: 8px;
+    border-radius: 8px 0 0 8px;
     font-size: 16px;
     line-height: 1.4;
     color: var(--text-dim);
@@ -2252,16 +2250,22 @@
     word-break: break-word;
   }
   .facts-browse-item:hover { color: var(--text); }
-  /* selected item borrows the next column's flat color, previewing where it leads */
+  /* selected item bleeds all the way to the column's edge in the next column's
+     color, so the highlight reads as physically continuous with that column
+     instead of a little chip floating inside this one. */
   .facts-browse-col-subjects .facts-browse-item.active {
     background: #E6DCC7;
     color: var(--text);
     font-weight: 600;
+    margin-right: -10px;
+    padding-right: 18px;
   }
   .facts-browse-col-keys .facts-browse-item.active {
     background: var(--surface-solid);
     color: var(--text);
     font-weight: 600;
+    margin-right: -10px;
+    padding-right: 18px;
   }
   .facts-nav-back {
     display: inline-block;
