@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 import httpx
+import jieba
 from rapidfuzz import fuzz
 
 
@@ -8671,13 +8672,30 @@ async def profile_fact(
 FACTS_QUERY_FUZZY_THRESHOLD = 70
 
 
+def _facts_jieba_join(text: str) -> str:
+    """Space-join jieba word segments so rapidfuzz's token_set_ratio (which
+    only splits on whitespace) can do set-based word matching on CJK text --
+    same segmentation convention as import_memory.py's embedding-text prep."""
+    return " ".join(t for t in jieba.lcut(text, cut_all=False) if t.strip())
+
+
 def _facts_query_matches(query: str, item: dict) -> bool:
     """True if query is a literal substring of title/content/tags, or fuzzy-
-    matches title/tags closely enough (rapidfuzz token_set_ratio, same library
-    already used for bucket-title fuzzy matching elsewhere in this file).
-    Handles both "字面就在标题里" (substring) and "标题里的字被跳过/换序但明显
-    是同一个东西" (fuzzy) -- true synonyms with no shared characters (e.g. 皮筋
-    vs 扎头绳) need an explicit tag instead, fuzzy matching can't infer those."""
+    matches title/tags closely enough. Three passes, in order:
+    1. Literal substring ("字面就在标题里")
+    2. Raw rapidfuzz token_set_ratio -- catches "标题里的字被跳过/换序但明显
+       是同一个东西" when the skipped span is short (e.g. "蓝色星星手链" for
+       "蓝色星星U盘手链", skipping only "U盘")
+    3. jieba-segmented token_set_ratio -- (2) degrades on CJK text because
+       token_set_ratio only splits on whitespace, so a query with no spaces
+       is one giant "token" and its score is just character-overlap ratio;
+       once more than one gap is skipped (e.g. "星星手串" for "蓝色星星U盘
+       手串", skipping both "蓝色" and "U盘") that ratio drops below
+       threshold even though every query word is genuinely present. Word-
+       segmenting first turns it into a real set match ({星星,手串} vs
+       {蓝色,星星,u,盘,手串}), which token_set_ratio handles correctly.
+    True synonyms with no shared characters (e.g. 皮筋 vs 扎头绳) still need
+    an explicit tag -- no fuzzy/segmentation trick can infer those."""
     query = str(query or "").strip()
     if not query:
         return True
@@ -8688,7 +8706,13 @@ def _facts_query_matches(query: str, item: dict) -> bool:
     if any(query in h for h in haystacks):
         return True
     fuzzy_targets = [title] + tags
-    return any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h)
+    if any(fuzz.token_set_ratio(query, h) >= FACTS_QUERY_FUZZY_THRESHOLD for h in fuzzy_targets if h):
+        return True
+    query_segmented = _facts_jieba_join(query)
+    return any(
+        fuzz.token_set_ratio(query_segmented, _facts_jieba_join(h)) >= FACTS_QUERY_FUZZY_THRESHOLD
+        for h in fuzzy_targets if h
+    )
 
 
 # =============================================================
