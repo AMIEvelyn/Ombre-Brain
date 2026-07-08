@@ -2676,19 +2676,26 @@
      its own "page" within the panel, not an inline accordion: back
      button up top, content pushed down to own the main area, Delete
      pinned to the bottom. */
+  .facts-bucket-detail-title {
+    font-size: 22px;
+  }
   .facts-bucket-detail-body {
     display: flex;
     flex-direction: column;
     min-height: 50vh;
+    /* Lines up with the title text, not the header's own left edge -- the
+       "‹" back button + flex gap push the title inward, so the body below
+       needs a matching inset on both sides to align under it symmetrically. */
+    padding: 0 28px;
   }
-  .facts-bucket-detail-meta { color: var(--text-dim); font-size: 12px; margin: 4px 0 0; }
+  .facts-bucket-detail-meta { color: var(--text-dim); font-size: 12px; margin: 14px 0 0; }
   .facts-bucket-detail-meta > div { margin-top: 3px; }
   .facts-bucket-detail-meta > div:first-child { margin-top: 0; }
   .facts-bucket-detail-content {
-    margin-top: 24px;
-    font-size: 14px;
-    line-height: 1.7;
-    color: var(--text);
+    margin-top: 28px;
+    font-size: 16px;
+    line-height: 1.8;
+    color: var(--positive);
     white-space: pre-wrap;
     flex: 1;
   }
@@ -5786,7 +5793,7 @@ function renderFactsBucketDetailView(link) {
   var content = bucket ? (bucket.fullContent || '加载中…') : '这个记忆桶已经被删除或遗忘了，只留下了关联记录。';
   return '<div class="facts-modal-header">' +
     '<button type="button" class="facts-modal-back" onclick="factsBucketLinksBackToList()">‹</button>' +
-    '<span>' + esc(name) + '</span>' +
+    '<span class="facts-bucket-detail-title">' + esc(name) + '</span>' +
     '</div>' +
     '<div class="facts-bucket-detail-body">' +
     '<div class="facts-bucket-detail-meta">' + meta + '</div>' +
