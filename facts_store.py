@@ -11,7 +11,14 @@ DEFAULT_PREDICATE_MODE = "multi_current"  # unclassified predicates default to t
 EVIDENCE_TYPES = {"bucket", "raw_event", "manual", "tool"}
 FACT_BUCKET_RELATION_TYPES = {"evidence", "origin", "related"}
 DEFAULT_FACT_BUCKET_RELATION_TYPE = "evidence"
-FACT_BUCKET_LINKS_MAX_PER_FACT = 5
+# No hard cap at the DB layer -- a fact can link arbitrarily many buckets
+# (batch import may need to attach dozens). These are advisory soft limits
+# surfaced to the caller as a warning, never enforced as a block: evidence
+# should stay tight (too many and you can't tell what actually backs the
+# fact), origin is almost always a single bucket, related can grow long
+# and is expected to be paginated/collapsed by the UI instead of capped.
+FACT_BUCKET_RELATION_SOFT_LIMITS = {"evidence": 5, "origin": 3, "related": 20}
+_FACT_BUCKET_RELATION_PRIORITY = {"origin": 0, "evidence": 1, "related": 2}
 
 
 def make_state_key(subject_key: str, predicate_key: str) -> str:
@@ -399,23 +406,60 @@ class FactStore:
     # source recorded by add_fact()/profile_fact(); this table is for the
     # facts-card UI's manually curated, possibly-multiple bucket links.
     # ------------------------------------------------------------------
-    def count_bucket_links(self, fact_id: int) -> int:
+    def count_bucket_links(self, fact_id: int, relation_type: str = "") -> int:
         conn = self._connect()
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ?",
-            (int(fact_id),),
-        ).fetchone()
+        if relation_type:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ? AND relation_type = ?",
+                (int(fact_id), relation_type),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ?",
+                (int(fact_id),),
+            ).fetchone()
         conn.close()
         return int(row["n"]) if row else 0
 
-    def get_bucket_links(self, fact_id: int) -> list[dict]:
+    def count_bucket_links_by_relation(self, fact_id: int) -> dict[str, int]:
         conn = self._connect()
         rows = conn.execute(
-            "SELECT * FROM fact_bucket_links WHERE fact_id = ? ORDER BY created_at ASC",
+            "SELECT relation_type, COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ? GROUP BY relation_type",
             (int(fact_id),),
         ).fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return {row["relation_type"]: int(row["n"]) for row in rows}
+
+    def get_bucket_links(
+        self,
+        fact_id: int,
+        *,
+        relation_type: str = "",
+        limit: int = 0,
+        offset: int = 0,
+    ) -> list[dict]:
+        """relation_type filters to one type; limit=0 means no limit. Results
+        are sorted origin -> evidence -> related, newest-first within each
+        type, so callers that just want "the top few" can slice the front
+        without re-sorting (matches the UI's "show 3 most important" default)."""
+        clauses = ["fact_id = ?"]
+        params: list[Any] = [int(fact_id)]
+        if relation_type:
+            clauses.append("relation_type = ?")
+            params.append(relation_type)
+        conn = self._connect()
+        rows = conn.execute(
+            f"SELECT * FROM fact_bucket_links WHERE {' AND '.join(clauses)} ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+        conn.close()
+        items = [dict(row) for row in rows]
+        items.sort(key=lambda item: _FACT_BUCKET_RELATION_PRIORITY.get(item["relation_type"], 9))
+        if limit:
+            items = items[offset : offset + limit]
+        elif offset:
+            items = items[offset:]
+        return items
 
     def add_bucket_link(
         self,
@@ -425,11 +469,18 @@ class FactStore:
         moment_id: str = "",
         relation_type: str = DEFAULT_FACT_BUCKET_RELATION_TYPE,
         note: str = "",
-    ) -> int:
+    ) -> tuple[int, str | None]:
         """Link a memory bucket to a fact/card. Idempotent -- linking the same
         (fact_id, bucket_id) pair twice returns the existing link's id instead
-        of erroring or duplicating. Raises ValueError if the fact already has
-        FACT_BUCKET_LINKS_MAX_PER_FACT links and this would add a new one."""
+        of erroring or duplicating.
+
+        No hard cap: the DB layer allows arbitrarily many links per fact (batch
+        import may need dozens under relation_type="related"). Returns
+        (link_id, soft_limit_warning) -- warning is a human-readable string
+        when this relation_type's count now exceeds its recommended soft
+        limit (FACT_BUCKET_RELATION_SOFT_LIMITS), or None otherwise. The
+        caller decides what to do with the warning (e.g. surface it in the
+        API response); the link is created either way."""
         fact_id = int(fact_id)
         bucket_id = str(bucket_id or "").strip()
         if not bucket_id:
@@ -443,14 +494,7 @@ class FactStore:
         ).fetchone()
         if existing:
             conn.close()
-            return int(existing["id"])
-
-        count_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ?", (fact_id,)
-        ).fetchone()
-        if int(count_row["n"]) >= FACT_BUCKET_LINKS_MAX_PER_FACT:
-            conn.close()
-            raise ValueError(f"这张卡最多关联 {FACT_BUCKET_LINKS_MAX_PER_FACT} 个记忆桶")
+            return int(existing["id"]), None
 
         cursor = conn.execute(
             """
@@ -460,9 +504,18 @@ class FactStore:
             (fact_id, bucket_id, str(moment_id or ""), relation_type, str(note or ""), self._now_iso()),
         )
         link_id = cursor.lastrowid
+        new_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM fact_bucket_links WHERE fact_id = ? AND relation_type = ?",
+            (fact_id, relation_type),
+        ).fetchone()["n"]
         conn.commit()
         conn.close()
-        return link_id
+
+        soft_limit = FACT_BUCKET_RELATION_SOFT_LIMITS.get(relation_type)
+        warning = None
+        if soft_limit and new_count > soft_limit:
+            warning = f"这张卡的 {relation_type} 已有 {new_count} 个，超过建议的 {soft_limit} 个软上限，建议精简或改归类到 related"
+        return link_id, warning
 
     def remove_bucket_link(self, link_id: int) -> bool:
         conn = self._connect()

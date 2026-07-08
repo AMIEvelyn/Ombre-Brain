@@ -86,7 +86,7 @@ from memory_diffusion import (
     should_suppress_context_candidate,
 )
 from memory_edges import MemoryEdgeStore
-from facts_store import FactStore, PREDICATE_MODES, FACT_BUCKET_RELATION_TYPES, FACT_BUCKET_LINKS_MAX_PER_FACT
+from facts_store import FactStore, PREDICATE_MODES, FACT_BUCKET_RELATION_TYPES, FACT_BUCKET_RELATION_SOFT_LIMITS
 from entity_edges import EntityEdgeStore, extract_entity_edges_from_bucket
 from memory_moments import MemoryMomentStore, parse_bucket_moments
 from memory_relevance import (
@@ -10085,8 +10085,13 @@ async def _bucket_link_summary(bucket_id: str) -> dict | None:
 @mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["GET"])
 async def api_facts_skeleton_list_bucket_links(request):
     """List the memory buckets linked to one fact/card, enriched with a light
-    bucket summary for display. relation_type/note/moment_id are returned as
-    stored even though the UI may not surface all of them yet."""
+    bucket summary for display. No hard cap on how many a fact can have, so
+    this supports the UI's "show top 3, expand for more" pattern:
+    - relation_type: optional filter to one type (evidence/origin/related)
+    - limit/offset: optional pagination (e.g. the frontend's "查看全部" for a
+      long related-buckets list); omitted = return everything
+    Always returns counts_by_relation + soft_limits so the frontend can
+    decide when to collapse ("超过20条进入折叠/分页") without a second call."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
@@ -10098,7 +10103,20 @@ async def api_facts_skeleton_list_bucket_links(request):
     if not fact_store.get_fact(fact_id):
         return JSONResponse({"error": "not found"}, status_code=404)
 
-    links = fact_store.get_bucket_links(fact_id)
+    params = request.query_params
+    relation_type = str(params.get("relation_type") or "").strip()
+    if relation_type and relation_type not in FACT_BUCKET_RELATION_TYPES:
+        return JSONResponse(
+            {"error": f"relation_type 必须是 {'/'.join(sorted(FACT_BUCKET_RELATION_TYPES))} 之一"},
+            status_code=400,
+        )
+    try:
+        limit = max(0, int(params.get("limit") or 0))
+        offset = max(0, int(params.get("offset") or 0))
+    except ValueError:
+        return JSONResponse({"error": "limit/offset must be integers"}, status_code=400)
+
+    links = fact_store.get_bucket_links(fact_id, relation_type=relation_type, limit=limit, offset=offset)
     result = []
     for link in links:
         result.append({
@@ -10110,16 +10128,25 @@ async def api_facts_skeleton_list_bucket_links(request):
             "created_at": link.get("created_at") or "",
             "bucket": await _bucket_link_summary(link["bucket_id"]),
         })
-    return JSONResponse({"links": result, "max": FACT_BUCKET_LINKS_MAX_PER_FACT})
+    counts_by_relation = fact_store.count_bucket_links_by_relation(fact_id)
+    return JSONResponse({
+        "links": result,
+        "total": sum(counts_by_relation.values()),
+        "counts_by_relation": counts_by_relation,
+        "soft_limits": FACT_BUCKET_RELATION_SOFT_LIMITS,
+    })
 
 
 @mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets", methods=["POST"])
 async def api_facts_skeleton_link_bucket(request):
     """Link a memory bucket to a fact/card. Body: bucket_id required;
-    relation_type (evidence/origin/related, defaults to evidence),
-    moment_id, note optional. Capped at FACT_BUCKET_LINKS_MAX_PER_FACT links
-    per fact -- same "don't dump every related bucket onto one card" rule
-    used for representative buckets on big-project cards."""
+    relation_type (evidence/origin/related, defaults to evidence), moment_id,
+    note optional. No hard cap -- the DB layer allows any number of links
+    (batch import may attach dozens under relation_type="related"). If this
+    push takes a relation_type over its recommended soft limit
+    (FACT_BUCKET_RELATION_SOFT_LIMITS: evidence 5 / origin 3 / related 20),
+    the link still succeeds but the response carries a "warning" string the
+    Dashboard can show ("建议精简为核心证据") instead of a hard block."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
@@ -10152,7 +10179,7 @@ async def api_facts_skeleton_link_bucket(request):
         )
 
     try:
-        link_id = fact_store.add_bucket_link(
+        link_id, warning = fact_store.add_bucket_link(
             fact_id,
             bucket_id,
             moment_id=str(body.get("moment_id") or "").strip(),
@@ -10164,11 +10191,14 @@ async def api_facts_skeleton_link_bucket(request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-    return JSONResponse({
+    response = {
         "status": "linked",
         "link_id": link_id,
         "bucket": await _bucket_link_summary(bucket_id),
-    })
+    }
+    if warning:
+        response["warning"] = warning
+    return JSONResponse(response)
 
 
 @mcp.custom_route("/api/facts-skeleton/facts/{fact_id}/buckets/{link_id}", methods=["DELETE"])
