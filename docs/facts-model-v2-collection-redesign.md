@@ -86,16 +86,18 @@
 
 ---
 
-## 4. 文件夹时间总览（新想法，加分只读视图）
+## 4. 文件夹时间总览（**主要做成林湛的 MCP 工具**）
 
-选中任意一个文件夹 → 把里面所有卡按时间铺成**一条时间线**：
+选中任意一个文件夹 → 把里面所有卡按时间铺成**一条时间线**。
 
-- 选大文件夹（如"我们/旅行"）→ 递归把子文件夹的卡也收进来，排成一条完整叙事丝带（三月香港 → 六月成都 → …）。
-- 选最小的子文件夹 → 只排它自己的卡。
-- 这是纯读取聚合，不改数据结构，风险低；放在核心模型做完之后再加。
-- **小决策待定**：一张卡在总览里显示成"它主日期上的一个点"（点开看卡自己的历史），还是把它每个时间点都铺上去。默认前者更清爽。
+**重点（一澜定的）：这个能力最重要的用途是给林湛做成一个 MCP 工具**——让林湛能"拉出某个文件夹的完整时间线"（例如"讲讲我们旅行的经过"就把 `我们/旅行` 整条丝带按时间讲出来）。UI 上的只读视图是次要的、顺带的。所以：
 
-用途：治好"单个事件单薄"的感觉；也能在 UI 上直接展示某文件夹的时间线。
+- 后端 `folder_timeline(folder_id, recursive)` 是核心能力（已在 `cards_store.py` 实现）。
+- 它要在 **③ 阶段包成一个 MCP 工具**（暂命名 `folder_timeline` / `timeline_of`），输出按时间排好的卡片摘要，让林湛一次拿到一条叙事线。
+- 选大文件夹（如"我们/旅行"）→ 递归把子文件夹的卡也收进来（三月香港 → 六月成都 → …）；选最小子文件夹 → 只排它自己的卡。
+- 一张卡在总览里 = "它主日期上的一个点"（= 当前时间点的 valid_at），点开再看这张卡自己的历史。
+
+用途：治好"单个事件单薄"的感觉，给林湛一条完整叙事线；UI 展示是附带。
 
 ---
 
@@ -148,4 +150,40 @@
 - 这是聊到目前**最大**的一次改动：新 schema（`cards` 稳定 id + 时间线按 id、`folders` 树、`card_folders` 多对多）、写入路径（edit/new revision/加移文件夹）、`fact_lookup`/MCP 输出改造。**不含数据迁移**（见 §7，从空起步）。属于中大型工程。
 - **替换**掉旧的 predicate 模式/失效/按标题分组；**沿用**卡片字段、`fact_bucket_links`、详情卡 UI。
 - 部署纪律照旧：任何发给一澜部署的文件必须基于 `my-live-vps` 基线改；改完先给 diff，验证后再上；沙盒缺依赖先试 `pip install --no-build-isolation` + `setuptools<60`。
-- 当前状态：**只讨论、未写任何代码。** 本文档提交在分支 `claude/vps-docs-review-wy0z31`（内容与 `my-live-vps` 逐字节一致）。
+- 部署纪律照旧：任何发给一澜部署的文件必须基于 `my-live-vps` 基线改；改完先给 diff，验证后再上；沙盒缺依赖先试 `pip install --no-build-isolation` + `setuptools<60`。
+
+## 10. 进度 & 已推送文件怎么用（接线说明）
+
+### 进度
+- ✅ **① 数据模型层** — `cards_store.py`（`CardStore`）+ `tests/test_cards_store.py`（13 用例全绿）。
+- ✅ **② HTTP 接口层** — `cards_api.py`（15 个 `/api/cards-skeleton/*` 端点）+ `tests/test_cards_api.py`（假 mcp/假 request、真 CardStore，端到端全绿）。
+- ⏳ ③ MCP / `fact_lookup` 改造（含把 `folder_timeline` 包成给林湛的 MCP 工具，见 §4）
+- ⏳ ④ 最小 UI ⑤ 切换 ⑥ 批量导入 ⑥.1 merge
+
+### ①②这两个文件现在是"休眠"的
+`cards_store.py`、`cards_api.py` **没有被任何地方 import**，所以在仓库里躺着也**不影响正在跑的 server/gateway**。它们各自的测试都是隔离跑的（纯 sqlite / 假 mcp），不需要真机。
+
+### 激活 ②：往 server.py 加 3 行（这是**第一步真正碰实盘 server.py** 的操作）
+在 server.py 里构建 `fact_store` 的那一段旁边，加：
+
+```python
+import cards_api
+from cards_store import CardStore
+card_store = CardStore(config)                      # 建在 ${state_dir}/cards.sqlite
+cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth)
+```
+
+- 复用现有的 `mcp` 和 Dashboard 鉴权 `_require_dashboard_auth`，所有卡片端点自动带登录态保护。
+- **不引入新依赖**：只用了 `starlette`（server 本来就在用）。
+- 这一步按纪律来：基于 `my-live-vps` 改 → 给一澜看 diff → 真机 `import server` 冒烟（沙盒可 `pip install --no-build-isolation` + `setuptools<60`）→ 部署验证。
+
+### 部署这块时要拷进容器的文件
+`cards_store.py`、`cards_api.py`、以及加了 3 行的 `server.py` —— 三个都 `docker cp` 进 `ombre-brain:/app/`，再 `docker restart ombre-brain`。验证：
+```bash
+# 建个测试文件夹应返回 200（带 Dashboard 登录 cookie/token）
+curl -s -X POST http://127.0.0.1:18001/api/cards-skeleton/folders \
+  -H "Content-Type: application/json" -d '{"name":"__smoke__"}'
+```
+
+### 当前提交
+①②的代码 + 测试 + 本文档都在分支 `claude/vps-docs-review-wy0z31`。**尚未接线进 server.py，未部署**——实盘零影响。
