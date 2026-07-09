@@ -185,4 +185,18 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18001/breath-hook
 起来后 Dashboard 登录态下可测：`POST /api/cards-skeleton/folders {"name":"__smoke__"}` 应返回 200。
 
 ### 当前提交
-①②③代码 + 测试 + server.py 接线 + 本文档都在分支 `claude/vps-docs-review-wy0z31`。**已接线，未部署**——你的容器直到 docker cp 之前不受影响。
+①②③代码 + 测试 + server.py 接线 + 本文档都在分支 `claude/vps-docs-review-wy0z31`。**②③已由一澜部署上线**（docker cp 4 文件 + restart，无报错，hook 401 正常，林湛两个工具可用但库为空）。
+
+## 11. 待办 & ④ UI 决策
+
+### 待办：Tool Guide 要补新工具（收尾时一起做）
+`card_lookup` / `folder_timeline`（以及以后 UI 相关的写入工具）要写进 `docs/Tool Guide.md` 贴给林湛的平台。
+- **好消息**：这两个工具的中文 docstring 就是 MCP 自带的 tool description，会通过协议**自动下发**给能读工具描述的客户端（连接器类），这部分不用手贴。
+- 手写 Tool Guide 是给"不自动显示描述 / 需要更细触发指引"的平台兜底。等骨架层这轮收尾，和旧文档里记的 `fact_lookup` 待办一起补。
+
+### ④ 最小 UI 决策（一澜定的，2026-07-09）
+一澜现在框架很清晰，UI 要"最简"。
+- **复用现有视觉、换掉底层数据源**：现有 facts 骨架 tab 是绑在旧模型（predicate/mode/invalidate、按标题分组、Miller columns）上的，数据走 `/api/facts-skeleton/*`。v2 要走 `/api/cards-skeleton/*`、导航改成**文件夹树**。所以详情卡/弹窗/时间线这些**外观可以照抄**（她喜欢的那套样式），但**数据接线是新的**——不是纯"小改"，是"旧壳新芯"。建议做成一个**独立的 v2 区块/tab**，不动旧 facts tab，降风险。
+- **主界面/文件夹浏览**：做最简——左侧文件夹树（subject 顶层 → 子文件夹），选中文件夹右侧列出里面的卡；点卡弹详情浮层（沿用现有详情卡样式）。
+- **事实卡 / 创建卡**：沿用现有观感；**改动**：①"···"三点菜单**删掉 Invalidate**（v2 没有失效机制）；② **Edit 和 New Revision 都要加"添加到某个文件夹"**（和创建卡一致）；③ 卡自带"我在哪些文件夹"的管理入口（QQ 音乐式，加/取消关联）；④ 创建卡时给"加入哪个文件夹"选择，没选给提示不强制。
+- 迁移：一澜**已截图**她那 2 张重要卡，切换后手动重加，无需自动迁移。
