@@ -170,6 +170,8 @@ import_engine = ImportEngine(config, bucket_mgr, dehydrator, embedding_engine)  
 persona_engine = PersonaStateEngine(config)           # Persona state engine / 人格状态引擎
 memory_edge_store = MemoryEdgeStore(config)            # Explicit memory relationship edges / 显式记忆关系边
 fact_store = FactStore(config)                          # Facts/timeline skeleton layer, decay-exempt / 骨架层：稳定事实与时间线，不参与衰减
+from cards_store import CardStore                        # Facts-model v2: collection/playlist cards + folders
+card_store = CardStore(config)                           # v2 store (state/cards.sqlite); wired via cards_api/cards_mcp before the entry point
 memory_node_store = MemoryNodeStore(config)            # Computable memory node index / 可计算记忆节点
 memory_moment_store = MemoryMomentStore(config)        # Structured bucket body/comment moment index / 记忆片段索引
 memory_write_gate = MemoryWriteGate(config)            # Automatic grow gate / 自动写入门卫
@@ -12910,6 +12912,16 @@ async def api_import_review(request):
             errors += 1
 
     return JSONResponse({"applied": applied, "errors": errors})
+
+
+# --- Facts-model v2 wiring: collection/playlist cards + folders ---
+# HTTP API (/api/cards-skeleton/*) + Lin Zhan's MCP tools (card_lookup,
+# folder_timeline), both read/CRUD over card_store. Kept in separate modules so
+# this file barely changes. See docs/facts-model-v2-collection-redesign.md.
+import cards_api
+import cards_mcp
+cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth)
+cards_mcp.register_card_tools(mcp, card_store)
 
 
 # --- Entry point / 启动入口 ---

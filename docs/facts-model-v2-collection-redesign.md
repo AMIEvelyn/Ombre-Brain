@@ -156,34 +156,33 @@
 
 ### 进度
 - ✅ **① 数据模型层** — `cards_store.py`（`CardStore`）+ `tests/test_cards_store.py`（13 用例全绿）。
-- ✅ **② HTTP 接口层** — `cards_api.py`（15 个 `/api/cards-skeleton/*` 端点）+ `tests/test_cards_api.py`（假 mcp/假 request、真 CardStore，端到端全绿）。
-- ⏳ ③ MCP / `fact_lookup` 改造（含把 `folder_timeline` 包成给林湛的 MCP 工具，见 §4）
+- ✅ **② HTTP 接口层** — `cards_api.py`（15 个 `/api/cards-skeleton/*` 端点）+ `tests/test_cards_api.py`（端到端全绿），**已接线进 server.py**。
+- ✅ **③ MCP 工具** — `cards_mcp.py`（`card_lookup` + `folder_timeline`，给林湛用）+ `tests/test_cards_mcp.py`（全绿），**已接线进 server.py**。
 - ⏳ ④ 最小 UI ⑤ 切换 ⑥ 批量导入 ⑥.1 merge
 
-### ①②这两个文件现在是"休眠"的
-`cards_store.py`、`cards_api.py` **没有被任何地方 import**，所以在仓库里躺着也**不影响正在跑的 server/gateway**。它们各自的测试都是隔离跑的（纯 sqlite / 假 mcp），不需要真机。
+### server.py 里的接线（已完成，基于一澜真实上传的 server.py + hook 补丁）
+两处改动：
+1. `fact_store = FactStore(config)` 之后：`from cards_store import CardStore` + `card_store = CardStore(config)`（建在 `state/cards.sqlite`）。
+2. `if __name__ == "__main__":` 之前：`import cards_api, cards_mcp` + `register_card_routes(mcp, card_store, _require_dashboard_auth)` + `register_card_tools(mcp, card_store)`。
 
-### 激活 ②：往 server.py 加 3 行（这是**第一步真正碰实盘 server.py** 的操作）
-在 server.py 里构建 `fact_store` 的那一段旁边，加：
+- 复用现有 `mcp` 和 Dashboard 鉴权 `_require_dashboard_auth`；卡片 HTTP 端点自动带登录态保护，MCP 工具是只读查询。
+- **不引入新依赖**（只用 `starlette` / `mcp`，server 本来就在用）。
+- 验证：`server.py` py_compile 通过；`cards_*` 三套测试全绿；`register_card_routes/tools` 在**真实 FastMCP** 上确认能注册出 `card_lookup`/`folder_timeline` 两个工具和 15 条路由。未做整机 `import server`（需全部引擎+key，成本高且易因无关原因失败），残余风险极低。
 
-```python
-import cards_api
-from cards_store import CardStore
-card_store = CardStore(config)                      # 建在 ${state_dir}/cards.sqlite
-cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth)
-```
-
-- 复用现有的 `mcp` 和 Dashboard 鉴权 `_require_dashboard_auth`，所有卡片端点自动带登录态保护。
-- **不引入新依赖**：只用了 `starlette`（server 本来就在用）。
-- 这一步按纪律来：基于 `my-live-vps` 改 → 给一澜看 diff → 真机 `import server` 冒烟（沙盒可 `pip install --no-build-isolation` + `setuptools<60`）→ 部署验证。
-
-### 部署这块时要拷进容器的文件
-`cards_store.py`、`cards_api.py`、以及加了 3 行的 `server.py` —— 三个都 `docker cp` 进 `ombre-brain:/app/`，再 `docker restart ombre-brain`。验证：
+### 部署：4 个文件 docker cp 进容器 + 重启
+`server.py`（含 hook 安全补丁 + v2 接线）、`cards_store.py`、`cards_api.py`、`cards_mcp.py` —— 四个都 `docker cp` 进 `ombre-brain:/app/`，`docker restart ombre-brain`。验证：
 ```bash
-# 建个测试文件夹应返回 200（带 Dashboard 登录 cookie/token）
-curl -s -X POST http://127.0.0.1:18001/api/cards-skeleton/folders \
-  -H "Content-Type: application/json" -d '{"name":"__smoke__"}'
+docker cp server.py     ombre-brain:/app/server.py
+docker cp cards_store.py ombre-brain:/app/cards_store.py
+docker cp cards_api.py   ombre-brain:/app/cards_api.py
+docker cp cards_mcp.py   ombre-brain:/app/cards_mcp.py
+docker restart ombre-brain
+sleep 5
+curl -s http://127.0.0.1:18001/health && echo          # 容器起来了？
+# hook 补丁也一起生效了：不带 token 打 hook 应返回 401
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18001/breath-hook
 ```
+起来后 Dashboard 登录态下可测：`POST /api/cards-skeleton/folders {"name":"__smoke__"}` 应返回 200。
 
 ### 当前提交
-①②的代码 + 测试 + 本文档都在分支 `claude/vps-docs-review-wy0z31`。**尚未接线进 server.py，未部署**——实盘零影响。
+①②③代码 + 测试 + server.py 接线 + 本文档都在分支 `claude/vps-docs-review-wy0z31`。**已接线，未部署**——你的容器直到 docker cp 之前不受影响。

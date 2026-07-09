@@ -1,0 +1,102 @@
+"""Tests for cards_mcp.register_card_tools (the MCP tools Lin Zhan calls).
+
+Captures the registered tool functions via a fake mcp and drives them against a
+real CardStore. Run: `python3 tests/test_cards_mcp.py`.
+"""
+
+import asyncio
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from cards_store import CardStore  # noqa: E402
+import cards_mcp  # noqa: E402
+
+
+class FakeMCP:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def deco(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return deco
+
+
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def main():
+    tmp = tempfile.mkdtemp()
+    store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
+    mcp = FakeMCP()
+    cards_mcp.register_card_tools(mcp, store)
+    assert set(mcp.tools) == {"card_lookup", "folder_timeline"}
+    card_lookup = mcp.tools["card_lookup"]
+    folder_timeline = mcp.tools["folder_timeline"]
+
+    # --- store helpers used by the tools ---
+    assert store.search_cards("x") == []
+    yilan = store.create_folder("一澜")
+    food = store.create_folder("喜欢的食物", parent_id=yilan)
+    fav = store.create_folder("林湛收藏", parent_id=yilan, is_favorite=True)
+    assert store.folder_path(food) == "一澜 / 喜欢的食物"
+    print("PASS store helpers (path)")
+
+    suanla = store.create_card(title="酸辣粉", content="爱吃", valid_at="2026-01-01",
+                               folder_ids=[food, fav])
+    store.add_revision(suanla, content="不爱吃了", valid_at="2026-05-01")
+    store.create_card(title="冰粉", content="夏天最爱", valid_at="2026-02-01", folder_ids=[food])
+
+    # search: current content is searchable ("不爱吃了" is now current)
+    assert {c["current"]["title"] for c in store.search_cards("不爱吃")} == {"酸辣粉"}
+    assert {c["current"]["title"] for c in store.search_cards("", folder_id=food)} == {"酸辣粉", "冰粉"}
+    print("PASS search_cards")
+
+    # --- card_lookup output: leads with CURRENT state, hints history, shows star ---
+    out = _run(card_lookup(query="酸辣粉"))
+    assert "【酸辣粉】" in out
+    assert "现在：不爱吃了" in out            # current = latest revision, not "爱吃"
+    assert "有 2 条历史" in out               # history folded behind a hint
+    assert "⭐" in out and "林湛收藏" in out   # favorite membership surfaced
+    print("PASS card_lookup current-state + history hint + star")
+
+    # empty query lists all; folder scoping works
+    out_food = _run(card_lookup(folder="喜欢的食物"))
+    assert "酸辣粉" in out_food and "冰粉" in out_food
+    # miss
+    assert "没搜到" in _run(card_lookup(query="不存在的东西"))
+    print("PASS card_lookup scope + miss")
+
+    # --- folder_timeline: narrative ribbon sorted by date ---
+    travel = store.create_folder("旅行", parent_id=yilan)
+    hk = store.create_folder("香港", parent_id=travel)
+    a = store.create_card(title="香港", content="出发", valid_at="2026-03-01", folder_ids=[hk])
+    store.add_revision(a, content="回家", valid_at="2026-03-05")
+    store.create_card(title="成都", content="火锅", valid_at="2026-06-10", folder_ids=[travel])
+    tl = _run(folder_timeline(folder="旅行"))
+    assert "时间线" in tl
+    i_hk, i_cd = tl.index("香港"), tl.index("成都")
+    assert i_hk < i_cd                        # sorted ascending by date
+    assert "2026-03-05" in tl and "回家" in tl  # card sits at its CURRENT date
+    assert "（2 条历史）" in tl
+    # non-recursive excludes the subfolder card
+    tl_flat = _run(folder_timeline(folder="旅行", recursive=False))
+    assert "成都" in tl_flat and "香港" not in tl_flat
+    print("PASS folder_timeline ribbon + recursive")
+
+    # --- ambiguous / missing folder resolution ---
+    store.create_folder("喜欢的食物", parent_id=store.create_folder("林湛"))  # a second "喜欢的食物"
+    assert "多个文件夹匹配" in _run(folder_timeline(folder="喜欢的食物"))
+    assert "没找到" in _run(folder_timeline(folder="根本没有这个"))
+    print("PASS folder resolution (ambiguous + missing)")
+
+    print("\nAll cards_mcp tool tests passed.")
+
+
+if __name__ == "__main__":
+    main()

@@ -461,3 +461,53 @@ class CardStore:
             })
         entries.sort(key=lambda e: str(e.get("date") or ""))
         return entries
+
+    # ==================================================================
+    # lookup helpers (back the MCP tools in cards_mcp.py)
+    # ==================================================================
+    def all_cards(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute("SELECT id FROM cards ORDER BY created_at").fetchall()
+        conn.close()
+        return [c for c in (self.get_card(r["id"]) for r in rows) if c]
+
+    def search_cards(self, query: str, *, folder_id: str = "", recursive: bool = True) -> list[dict]:
+        """Find cards whose current revision matches query (case-insensitive
+        substring over title/content/tags). Optionally scope to a folder subtree.
+        Empty query returns everything in scope. Fuzzy matching can be layered on
+        later; substring is deterministic and dependency-free for now."""
+        cards = self.list_cards_in_folder(folder_id, recursive=recursive) if folder_id else self.all_cards()
+        q = str(query or "").strip().lower()
+        if not q:
+            return cards
+        out = []
+        for card in cards:
+            cur = card.get("current") or {}
+            hay = " ".join([
+                str(cur.get("title", "")),
+                str(cur.get("content", "")),
+                " ".join(str(t) for t in (cur.get("tags") or [])),
+            ]).lower()
+            if q in hay:
+                out.append(card)
+        return out
+
+    def find_folders_by_name(self, name: str) -> list[dict]:
+        """Folders whose name contains `name` (case-insensitive). Names are not
+        unique across subjects, so callers should disambiguate via folder_path."""
+        n = str(name or "").strip().lower()
+        if not n:
+            return []
+        return [f for f in self.list_folders() if n in str(f.get("name", "")).lower()]
+
+    def folder_path(self, folder_id: str) -> str:
+        """Readable path from the top subject down, e.g. '我们 / 旅行 / 香港'."""
+        by_id = {f["id"]: f for f in self.list_folders()}
+        parts: list[str] = []
+        fid = str(folder_id)
+        seen: set[str] = set()
+        while fid and fid in by_id and fid not in seen:
+            seen.add(fid)
+            parts.append(str(by_id[fid].get("name", "")))
+            fid = str(by_id[fid].get("parent_id") or "")
+        return " / ".join(reversed(parts))
