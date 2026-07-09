@@ -3149,12 +3149,34 @@ async def health_check(request):
 
 
 # =============================================================
+# Hook 端点鉴权：/breath-hook 和 /dream-hook 会把记忆浮现内容原样吐出，
+# 公网部署时不能裸奔。默认关闭（no token + allow_public=false → 一律 401）；
+# 配了 hooks.token / OMBRE_HOOK_TOKEN 后，用 ?token= / Bearer / X-Ombre-Hook-Token
+# 携带正确 token 才放行。MCP 的 breath 工具是另一条路，不受影响。
+# =============================================================
+def _hook_auth_ok(request) -> bool:
+    hooks_cfg = config.get("hooks") or {}
+    token = (os.environ.get("OMBRE_HOOK_TOKEN") or hooks_cfg.get("token") or "").strip()
+    if token:
+        provided = (
+            request.query_params.get("token")
+            or _bearer_token(request.headers)
+            or request.headers.get("x-ombre-hook-token")
+            or ""
+        )
+        return bool(provided) and hmac.compare_digest(str(provided), token)
+    return bool(hooks_cfg.get("allow_public", False))
+
+
+# =============================================================
 # /breath-hook endpoint: Dedicated hook for SessionStart
 # 会话启动专用挂载点
 # =============================================================
 @mcp.custom_route("/breath-hook", methods=["GET"])
 async def breath_hook(request):
     from starlette.responses import PlainTextResponse
+    if not _hook_auth_ok(request):
+        return PlainTextResponse("unauthorized", status_code=401)
     try:
         requested_mode = str(request.query_params.get("mode") or "").strip().lower()
         if requested_mode in {"", "handoff"}:
@@ -3241,6 +3263,8 @@ async def breath_hook(request):
 @mcp.custom_route("/dream-hook", methods=["GET"])
 async def dream_hook(request):
     from starlette.responses import PlainTextResponse
+    if not _hook_auth_ok(request):
+        return PlainTextResponse("unauthorized", status_code=401)
     try:
         all_buckets = await bucket_mgr.list_all(include_archive=False)
         candidates = [

@@ -17,6 +17,7 @@
 
 import os
 import sys
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -26,17 +27,22 @@ def main():
         sys.exit(0)
 
     base_url = os.environ.get("OMBRE_HOOK_URL", "http://localhost:8000").rstrip("/")
+    # Hook endpoints are token-gated on public deployments; pass it through when set.
+    token = os.environ.get("OMBRE_HOOK_TOKEN", "").strip()
 
     # --- Step 1: Breath — surface unresolved memories ---
-    _call_endpoint(base_url, "/breath-hook")
+    _call_endpoint(base_url, "/breath-hook", token)
 
     # --- Step 2: Dream — digest recent memories ---
-    _call_endpoint(base_url, "/dream-hook")
+    _call_endpoint(base_url, "/dream-hook", token)
 
 
-def _call_endpoint(base_url, path):
+def _call_endpoint(base_url, path, token=""):
+    url = f"{base_url}{path}"
+    if token:
+        url = f"{url}?token={urllib.parse.quote(token)}"
     req = urllib.request.Request(
-        f"{base_url}{path}",
+        url,
         headers={"Accept": "text/plain"},
         method="GET",
     )

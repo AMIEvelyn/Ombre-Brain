@@ -333,6 +333,10 @@ OMBRE_RERANKER_ENABLED=true
 
 OMBRE_GATEWAY_TOKEN=
 
+# 公网部署时给 /breath-hook 和 /dream-hook 设一个 token；本地 SessionStart 钩子会自动带上它。
+# 不设且 hooks.allow_public=false 时，这两个端点默认对外返回 401（不影响 MCP 的 breath 工具）。
+OMBRE_HOOK_TOKEN=
+
 OMBRE_GATEWAY_PROVIDER_A_API_KEY=
 OMBRE_GATEWAY_PROVIDER_A_API_KEY_2=
 OMBRE_GATEWAY_PROVIDER_B_API_KEY=

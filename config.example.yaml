@@ -14,6 +14,21 @@ transport: "stdio"
 # --- Log level / 日志级别 ---
 log_level: "INFO"
 
+# --- Hook endpoint auth / 钩子端点鉴权 ---
+# /breath-hook and /dream-hook surface memory content verbatim, so on a
+# public deployment they must not be world-readable. Default posture is
+# closed: with no token and allow_public=false, both endpoints return 401.
+# Set a token (or OMBRE_HOOK_TOKEN, which wins) to re-enable them; the local
+# SessionStart hook passes it through automatically. The MCP `breath` tool is
+# a separate path and is never affected by this.
+# /breath-hook 和 /dream-hook 会原样吐出记忆浮现内容，公网部署不能裸奔。
+# 默认关闭：不配 token 且 allow_public=false 时，两个端点一律返回 401。
+# 配了 token（或优先级更高的 OMBRE_HOOK_TOKEN）才放行；本地 SessionStart 钩子
+# 会自动带上它。MCP 的 breath 工具是另一条路，永远不受影响。
+hooks:
+  token: ""            # shared secret; or set OMBRE_HOOK_TOKEN in .env (recommended)
+  allow_public: false  # true = serve hooks without a token (not recommended on public hosts)
+
 # --- Bucket storage path / 记忆桶存储路径 ---
 # Point this to your Obsidian vault subdirectory, or any local folder
 # 指向你的 Obsidian 仓库子目录，或任意本地文件夹
