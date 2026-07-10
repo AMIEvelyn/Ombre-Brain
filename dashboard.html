@@ -2991,6 +2991,7 @@
   <div class="tab" data-tab="persona">Persona</div>
   <div class="tab" data-tab="profile">画像</div>
   <div class="tab" data-tab="facts">骨架</div>
+  <div class="tab" data-tab="cards-v2">资料卡</div>
   <div class="tab" data-tab="word-map">词图</div>
   <div class="tab" data-tab="network">记忆网络</div>
   <div class="tab" data-tab="config">配置</div>
@@ -3375,6 +3376,89 @@
         <div class="loading">加载中…</div>
       </div>
     </details>
+  </div>
+</div>
+
+<div class="content" id="cards-v2-view" style="display:none">
+  <div class="profile-shell">
+    <div class="profile-toolbar">
+      <div>
+        <h2>资料卡</h2>
+        <p>收藏/歌单式：一张卡进多个文件夹，最新时间点为准、旧的是历史。给林湛的 card_lookup / folder_timeline 查的就是这里。</p>
+      </div>
+      <div class="word-map-actions">
+        <button type="button" onclick="loadCardsV2()">刷新</button>
+        <button type="button" onclick="openCardsV2CreateModal()">+ 新建卡</button>
+      </div>
+    </div>
+    <div id="cards-v2-nav" class="profile-list"><div class="loading">加载资料卡…</div></div>
+  </div>
+</div>
+
+<div id="cards-v2-detail-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2Detail()">
+  <div id="cards-v2-detail-body"></div>
+</div>
+
+<div id="cards-v2-create-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2CreateModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeCardsV2CreateModal()">‹</button>
+      <span>新建卡</span>
+    </div>
+    <div class="profile-proposal-form">
+      <select id="cards-v2-add-folder"><option value="">加入哪个文件夹…</option></select>
+      <span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="cards-v2-add-title" placeholder="标题（必填，列表页显示）" />
+      <span></span><span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <textarea id="cards-v2-add-content" placeholder="内容（可选）"></textarea>
+    </div>
+    <div class="facts-tags-row" id="cards-v2-add-tags"></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="cards-v2-add-tag-input" placeholder="加个标签，回车确认" onkeydown="onCardsV2TagKeydown(event)" />
+      <span></span><span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="date" id="cards-v2-add-valid-at" placeholder="日期（留空=今天）" />
+      <span></span><span></span>
+    </div>
+    <div class="profile-proposal-form">
+      <span></span><span></span>
+      <button type="button" onclick="submitCardsV2Add()">Add</button>
+    </div>
+    <div class="profile-proposal-message" id="cards-v2-add-message"></div>
+  </div>
+</div>
+
+<div id="cards-v2-edit-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2EditModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2EditModal()">‹</button><span>编辑（不留新时间点）</span></div>
+    <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-title" placeholder="标题" /><span></span><span></span></div>
+    <div class="profile-proposal-form"><textarea id="cards-v2-edit-content" placeholder="内容"></textarea></div>
+    <div class="facts-tags-row" id="cards-v2-edit-tags"></div>
+    <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onCardsV2EditTagKeydown(event)" /><span></span><span></span></div>
+    <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Edit()">Save</button></div>
+    <div class="profile-proposal-message" id="cards-v2-edit-message"></div>
+  </div>
+</div>
+
+<div id="cards-v2-rev-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2RevisionModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2RevisionModal()">‹</button><span>New Revision（新增时间点）</span></div>
+    <div class="profile-proposal-form"><textarea id="cards-v2-rev-content" placeholder="这个新时间点的内容"></textarea></div>
+    <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-valid-at" /><span></span><span></span></div>
+    <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Revision()">Save</button></div>
+    <div class="profile-proposal-message" id="cards-v2-rev-message"></div>
+  </div>
+</div>
+
+<div id="cards-v2-folders-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2FoldersModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2FoldersModal()">‹</button><span>这张卡在哪些文件夹</span></div>
+    <div id="cards-v2-folders-body"></div>
   </div>
 </div>
 
@@ -4075,6 +4159,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('persona-view').style.display = target === 'persona' ? '' : 'none';
     document.getElementById('profile-view').style.display = target === 'profile' ? '' : 'none';
     document.getElementById('facts-view').style.display = target === 'facts' ? '' : 'none';
+    document.getElementById('cards-v2-view').style.display = target === 'cards-v2' ? '' : 'none';
     document.getElementById('word-map-view').style.display = target === 'word-map' ? '' : 'none';
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('config-view').style.display = target === 'config' ? '' : 'none';
@@ -4091,6 +4176,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       loadProfileFacts();
     }
     if (target === 'facts') loadFactsSkeleton();
+    if (target === 'cards-v2') loadCardsV2();
     if (target === 'word-map') loadWordMap();
     if (target === 'network') loadNetwork();
     if (target === 'config') loadConfig();
@@ -9156,6 +9242,186 @@ async function batchReview(idsJson, action) {
     detectPatterns();
   } catch(e) {}
 }
+
+// ===================== Facts-model v2: 资料卡 (collection/playlist) =====================
+var cardsV2 = { folders: [], selSubject: '', selFolder: '', cards: [], detail: null, addTags: [], editTags: [], editId: '', revId: '' };
+function cardsV2Tops(){ return cardsV2.folders.filter(function(f){ return !f.parent_id; }); }
+function cardsV2Kids(pid){ return cardsV2.folders.filter(function(f){ return f.parent_id === pid; }); }
+function cardsV2Path(id){
+  var by = {}; cardsV2.folders.forEach(function(f){ by[f.id] = f; });
+  var parts = [], fid = id, seen = {};
+  while (fid && by[fid] && !seen[fid]) { seen[fid] = 1; parts.unshift(by[fid].name); fid = by[fid].parent_id; }
+  return parts.join(' · ');
+}
+async function loadCardsV2(){
+  try { var r = await fetch('/api/cards-skeleton/folders'); var d = await r.json(); cardsV2.folders = d.folders || []; }
+  catch(e){ cardsV2.folders = []; }
+  cardsV2EnsureSel();
+  await cardsV2LoadCards();
+}
+function cardsV2EnsureSel(){
+  var tops = cardsV2Tops();
+  if (!tops.some(function(f){ return f.id === cardsV2.selSubject; })) { cardsV2.selSubject = tops[0] ? tops[0].id : ''; cardsV2.selFolder = ''; }
+  var kids = cardsV2Kids(cardsV2.selSubject);
+  if (!kids.some(function(f){ return f.id === cardsV2.selFolder; })) cardsV2.selFolder = kids[0] ? kids[0].id : '';
+}
+async function cardsV2LoadCards(){
+  cardsV2.cards = [];
+  if (cardsV2.selFolder) {
+    try { var r = await fetch('/api/cards-skeleton/folders/' + cardsV2.selFolder + '/cards'); var d = await r.json(); cardsV2.cards = d.cards || []; } catch(e){}
+  }
+  renderCardsV2Nav();
+}
+function cardsV2SelSubject(id){ cardsV2.selSubject = id; cardsV2.selFolder = ''; cardsV2EnsureSel(); cardsV2LoadCards(); }
+function cardsV2SelFolder(id){ cardsV2.selFolder = id; cardsV2LoadCards(); }
+function renderCardsV2Nav(){
+  var c = document.getElementById('cards-v2-nav'); if (!c) return;
+  var subs = cardsV2Tops();
+  if (!subs.length) { c.innerHTML = '<div class="loading">还没有文件夹。新建卡时可以建。</div>'; return; }
+  var col1 = subs.map(function(s){ return '<div class="facts-browse-item' + (s.id === cardsV2.selSubject ? ' active' : '') + '" onclick="cardsV2SelSubject(\'' + s.id + '\')">' + esc(s.name) + '</div>'; }).join('');
+  var kids = cardsV2Kids(cardsV2.selSubject);
+  var col2 = kids.length ? kids.map(function(f){ return '<div class="facts-browse-item' + (f.id === cardsV2.selFolder ? ' active' : '') + '" onclick="cardsV2SelFolder(\'' + f.id + '\')">' + esc(f.name) + '</div>'; }).join('') : '<div class="loading">这个主体下还没有文件夹。</div>';
+  var col3 = cardsV2.cards.length ? cardsV2.cards.map(function(card){
+    var cur = card.current || {}; var n = (card.history || []).length;
+    return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + card.id + '\')"><div><b>' + esc(cur.title || '(无标题)') + '</b>'
+      + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cur.valid_at || '未知') + '</div></div>'
+      + '<span class="facts-nav-chevron">›</span></div>';
+  }).join('') : '<div class="loading">这个文件夹里还没有卡。</div>';
+  c.innerHTML = '<div class="facts-browse-columns"><div class="facts-browse-col facts-browse-col-subjects">' + col1 + '</div><div class="facts-browse-col facts-browse-col-keys">' + col2 + '</div><div class="facts-browse-col facts-browse-col-titles">' + col3 + '</div></div>';
+}
+async function openCardsV2Detail(id){
+  var card = null;
+  try { var r = await fetch('/api/cards-skeleton/cards/' + id); var d = await r.json(); card = d.card; } catch(e){}
+  if (!card) return;
+  cardsV2.detail = card;
+  renderCardsV2Detail();
+  document.getElementById('cards-v2-detail-overlay').style.display = '';
+}
+function closeCardsV2Detail(){ document.getElementById('cards-v2-detail-overlay').style.display = 'none'; cardsV2.detail = null; }
+function toggleCardsV2Menu(){ var m = document.getElementById('cards-v2-detail-menu'); if (m) m.style.display = m.style.display === 'none' ? '' : 'none'; }
+function renderCardsV2Detail(){
+  var card = cardsV2.detail; if (!card) return;
+  var cur = card.current || {}; var folders = card.folders || [];
+  var path = folders.length ? cardsV2Path(folders[0].id) : '';
+  var photos = (cur.attachments || []).filter(function(a){ return a.type === 'image'; });
+  var files = (cur.attachments || []).filter(function(a){ return a.type !== 'image'; });
+  var tags = cur.tags || []; var history = card.history || [];
+  var h = '<div class="facts-detail-card">';
+  h += '<div class="facts-detail-header"><div class="facts-detail-header-left">'
+    + '<button class="facts-detail-close-btn" onclick="closeCardsV2Detail()">✕</button>'
+    + '<span class="facts-detail-breadcrumb">' + esc(path) + '</span></div>'
+    + '<button class="facts-detail-menu-btn" onclick="toggleCardsV2Menu()">···</button>'
+    + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
+    + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
+    + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
+    + '<div onclick="openCardsV2FoldersModal()">🗂 文件夹</div>'
+    + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
+    + '</div></div>';
+  h += '<div class="facts-detail-title">' + esc(cur.title || '(无标题)') + '</div>';
+  h += '<div class="facts-detail-breadcrumb" style="margin:-6px 0 12px;">id：' + esc(card.id) + '</div>';
+  if (photos.length) h += '<img src="' + esc(photos[0].url) + '" style="max-width:100%;border-radius:14px;margin-bottom:12px;display:block;">';
+  if ((cur.content || '').trim()) h += '<div class="facts-detail-content">' + esc(cur.content) + '</div>';
+  if (tags.length) h += '<div class="facts-detail-tags">' + tags.map(function(t){ return '<span class="facts-detail-tag">#' + esc(t) + '</span>'; }).join(' ') + '</div>';
+  if (files.length) h += '<div style="margin-top:10px;">' + files.map(function(f){ return '<a href="' + esc(f.url) + '" target="_blank" style="font-size:13px;">📄 ' + esc(f.label || f.url) + '</a>'; }).join('<br>') + '</div>';
+  if (history.length) {
+    h += '<div class="facts-detail-timeline">';
+    history.forEach(function(hh){ h += '<div style="font-size:13px;color:var(--text-dim);margin-top:6px;">● ' + esc(hh.valid_at || '未知') + '</div>'; });
+    h += '</div>';
+  }
+  h += '</div>';
+  document.getElementById('cards-v2-detail-body').innerHTML = h;
+}
+async function deleteCardsV2(){
+  var card = cardsV2.detail; if (!card) return;
+  if (!confirm('删除这张卡（连同它的时间线和文件夹归属）？不可恢复。')) return;
+  try { await fetch('/api/cards-skeleton/cards/' + card.id, { method:'DELETE' }); } catch(e){}
+  closeCardsV2Detail(); loadCardsV2();
+}
+function cardsV2FolderOptions(sel){
+  return '<option value="">加入哪个文件夹…</option>' + cardsV2.folders.map(function(f){
+    return '<option value="' + f.id + '"' + (f.id === sel ? ' selected' : '') + '>' + esc(cardsV2Path(f.id)) + '</option>';
+  }).join('');
+}
+function openCardsV2CreateModal(){
+  cardsV2.addTags = [];
+  document.getElementById('cards-v2-add-folder').innerHTML = cardsV2FolderOptions(cardsV2.selFolder);
+  document.getElementById('cards-v2-add-title').value = '';
+  document.getElementById('cards-v2-add-content').value = '';
+  document.getElementById('cards-v2-add-valid-at').value = '';
+  document.getElementById('cards-v2-add-message').textContent = '';
+  renderCardsV2Tags('add');
+  document.getElementById('cards-v2-create-overlay').style.display = '';
+}
+function closeCardsV2CreateModal(){ document.getElementById('cards-v2-create-overlay').style.display = 'none'; }
+function renderCardsV2Tags(which){
+  var arr = which === 'add' ? cardsV2.addTags : cardsV2.editTags;
+  var el = document.getElementById('cards-v2-' + which + '-tags');
+  if (el) el.innerHTML = arr.map(function(t, i){ return '<span class="facts-detail-tag" style="margin-right:8px;">#' + esc(t) + ' <span style="cursor:pointer;" onclick="cardsV2RemoveTag(\'' + which + '\',' + i + ')">×</span></span>'; }).join('');
+}
+function cardsV2RemoveTag(which, i){ (which === 'add' ? cardsV2.addTags : cardsV2.editTags).splice(i, 1); renderCardsV2Tags(which); }
+function onCardsV2TagKeydown(e){ if (e.key === 'Enter') { e.preventDefault(); var v = e.target.value.trim(); if (v) { cardsV2.addTags.push(v); e.target.value = ''; renderCardsV2Tags('add'); } } }
+function onCardsV2EditTagKeydown(e){ if (e.key === 'Enter') { e.preventDefault(); var v = e.target.value.trim(); if (v) { cardsV2.editTags.push(v); e.target.value = ''; renderCardsV2Tags('edit'); } } }
+async function submitCardsV2Add(){
+  var title = document.getElementById('cards-v2-add-title').value.trim();
+  var msg = document.getElementById('cards-v2-add-message');
+  if (!title) { msg.textContent = '标题必填。'; return; }
+  var body = { title: title, content: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice() };
+  var validAt = document.getElementById('cards-v2-add-valid-at').value; if (validAt) body.valid_at = validAt;
+  var folder = document.getElementById('cards-v2-add-folder').value;
+  if (folder) body.folder_ids = [folder]; else msg.textContent = '（没选文件夹，先建成未归档卡；可稍后在卡里加入文件夹）';
+  try {
+    var r = await fetch('/api/cards-skeleton/cards', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) { var e = await r.json(); msg.textContent = '失败：' + (e.error || r.status); return; }
+  } catch(e){ msg.textContent = '失败：' + e; return; }
+  closeCardsV2CreateModal(); loadCardsV2();
+}
+function openCardsV2EditModal(){
+  var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
+  cardsV2.editId = card.id; cardsV2.editTags = (cur.tags || []).slice();
+  document.getElementById('cards-v2-edit-title').value = cur.title || '';
+  document.getElementById('cards-v2-edit-content').value = cur.content || '';
+  document.getElementById('cards-v2-edit-message').textContent = '';
+  renderCardsV2Tags('edit'); toggleCardsV2Menu();
+  document.getElementById('cards-v2-edit-overlay').style.display = '';
+}
+function closeCardsV2EditModal(){ document.getElementById('cards-v2-edit-overlay').style.display = 'none'; }
+async function submitCardsV2Edit(){
+  var body = { title: document.getElementById('cards-v2-edit-title').value, content: document.getElementById('cards-v2-edit-content').value, tags: cardsV2.editTags.slice() };
+  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  closeCardsV2EditModal(); await openCardsV2Detail(cardsV2.editId); loadCardsV2();
+}
+function openCardsV2RevisionModal(){
+  var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
+  cardsV2.revId = card.id;
+  document.getElementById('cards-v2-rev-content').value = cur.content || '';
+  document.getElementById('cards-v2-rev-valid-at').value = '';
+  document.getElementById('cards-v2-rev-message').textContent = '';
+  toggleCardsV2Menu();
+  document.getElementById('cards-v2-rev-overlay').style.display = '';
+}
+function closeCardsV2RevisionModal(){ document.getElementById('cards-v2-rev-overlay').style.display = 'none'; }
+async function submitCardsV2Revision(){
+  var body = { content: document.getElementById('cards-v2-rev-content').value };
+  var v = document.getElementById('cards-v2-rev-valid-at').value; if (v) body.valid_at = v;
+  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.revId + '/revisions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  closeCardsV2RevisionModal(); await openCardsV2Detail(cardsV2.revId); loadCardsV2();
+}
+async function openCardsV2FoldersModal(){
+  if (!cardsV2.detail) return;
+  toggleCardsV2Menu(); renderCardsV2FoldersModal();
+  document.getElementById('cards-v2-folders-overlay').style.display = '';
+}
+function renderCardsV2FoldersModal(){
+  var card = cardsV2.detail; if (!card) return;
+  var inFolders = card.folders || [];
+  var chips = inFolders.length ? inFolders.map(function(f){ return '<span class="facts-detail-tag" style="margin:0 8px 8px 0;display:inline-block;">' + esc(cardsV2Path(f.id)) + (f.is_favorite ? ' ⭐' : '') + ' <span style="cursor:pointer;" onclick="cardsV2RemoveFolder(\'' + f.id + '\')">×</span></span>'; }).join('') : '<div class="loading">还没有加入任何文件夹（未归档）。</div>';
+  var opts = '<option value="">加入一个文件夹…</option>' + cardsV2.folders.filter(function(f){ return !inFolders.some(function(x){ return x.id === f.id; }); }).map(function(f){ return '<option value="' + f.id + '">' + esc(cardsV2Path(f.id)) + '</option>'; }).join('');
+  document.getElementById('cards-v2-folders-body').innerHTML = '<div style="margin-bottom:12px;">' + chips + '</div><select onchange="cardsV2AddFolder(this.value)">' + opts + '</select>';
+}
+async function cardsV2AddFolder(fid){ if (!fid || !cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ folder_id: fid }) }); } catch(e){} await cardsV2ReloadDetail(); }
+async function cardsV2RemoveFolder(fid){ if (!cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders/' + fid, { method:'DELETE' }); } catch(e){} await cardsV2ReloadDetail(); }
+async function cardsV2ReloadDetail(){ var id = cardsV2.detail.id; try { var r = await fetch('/api/cards-skeleton/cards/' + id); var d = await r.json(); cardsV2.detail = d.card; } catch(e){} renderCardsV2FoldersModal(); renderCardsV2Detail(); loadCardsV2(); }
+function closeCardsV2FoldersModal(){ document.getElementById('cards-v2-folders-overlay').style.display = 'none'; }
 </script>
 </body>
 </html>
