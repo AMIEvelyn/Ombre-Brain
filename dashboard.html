@@ -2264,20 +2264,23 @@
     gap: 2px;
     min-width: 130px;
     flex: 1 1 0;
-    padding: 16px 10px;
+    padding: 8px 10px;
   }
   .cards-v2-item {
-    padding: 10px 8px;
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 12px 8px;
     border-radius: 8px 0 0 8px;
     font-size: 16px;
-    line-height: 1.4;
+    line-height: 1.5;
     color: var(--text-dim);
     cursor: pointer;
     word-break: break-word;
   }
   .cards-v2-item:hover { color: var(--text); }
-  /* selected 馆 bleeds to both side edges (into the next column's color, set
-     inline) so it reads as physically continuous with the next column */
+  /* selected 馆: text vertically centered (flex), highlight bleeds sideways
+     into the next column's colour (set inline) so it reads as continuous */
   .cards-v2-item.active {
     color: var(--text);
     font-weight: 600;
@@ -2285,8 +2288,6 @@
     padding-left: 18px;
     padding-right: 18px;
   }
-  .cards-v2-item.active:first-child { margin-top: -16px; padding-top: 26px; }
-  .cards-v2-item.active:last-child { margin-bottom: -16px; padding-bottom: 26px; }
   .facts-nav-back {
     display: inline-block;
     color: var(--text-dim);
@@ -3033,7 +3034,7 @@
   <div class="tab" data-tab="persona">Persona</div>
   <div class="tab" data-tab="profile">画像</div>
   <div class="tab" data-tab="facts">骨架</div>
-  <div class="tab" data-tab="cards-v2">资料卡</div>
+  <div class="tab" data-tab="cards-v2">时光馆</div>
   <div class="tab" data-tab="word-map">词图</div>
   <div class="tab" data-tab="network">记忆网络</div>
   <div class="tab" data-tab="config">配置</div>
@@ -3425,7 +3426,7 @@
   <div class="profile-shell">
     <div class="profile-toolbar">
       <div>
-        <h2>资料卡</h2>
+        <h2>时光馆</h2>
         <p>收藏/歌单式：一张卡进多个馆，最新时间点为准、旧的是历史。给林湛的 card_lookup / folder_timeline 查的就是这里。</p>
       </div>
       <div class="word-map-actions">
