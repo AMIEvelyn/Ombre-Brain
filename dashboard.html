@@ -2245,6 +2245,48 @@
     margin-bottom: -16px;
     padding-bottom: 26px;
   }
+  /* v2 资料卡: dynamic-depth Miller columns (one column per drilled level) */
+  .cards-v2-columns {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    width: 100%;
+    min-height: 720px;
+    border-radius: 14px;
+    box-shadow: 2px 2px 6px var(--shadow-dark-subtle);
+    overflow: hidden;
+    overflow-x: auto;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+  }
+  .cards-v2-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 130px;
+    flex: 1 1 0;
+    padding: 16px 10px;
+  }
+  .cards-v2-item {
+    padding: 10px 8px;
+    border-radius: 8px 0 0 8px;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--text-dim);
+    cursor: pointer;
+    word-break: break-word;
+  }
+  .cards-v2-item:hover { color: var(--text); }
+  /* selected 馆 bleeds to both side edges (into the next column's color, set
+     inline) so it reads as physically continuous with the next column */
+  .cards-v2-item.active {
+    color: var(--text);
+    font-weight: 600;
+    margin: 0 -10px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .cards-v2-item.active:first-child { margin-top: -16px; padding-top: 26px; }
+  .cards-v2-item.active:last-child { margin-bottom: -16px; padding-bottom: 26px; }
   .facts-nav-back {
     display: inline-block;
     color: var(--text-dim);
@@ -3384,10 +3426,11 @@
     <div class="profile-toolbar">
       <div>
         <h2>资料卡</h2>
-        <p>收藏/歌单式：一张卡进多个文件夹，最新时间点为准、旧的是历史。给林湛的 card_lookup / folder_timeline 查的就是这里。</p>
+        <p>收藏/歌单式：一张卡进多个馆，最新时间点为准、旧的是历史。给林湛的 card_lookup / folder_timeline 查的就是这里。</p>
       </div>
       <div class="word-map-actions">
         <button type="button" onclick="loadCardsV2()">刷新</button>
+        <button type="button" onclick="cardsV2CreateFolder()">+ 建馆</button>
         <button type="button" onclick="openCardsV2CreateModal()">+ 新建卡</button>
       </div>
     </div>
@@ -3406,7 +3449,7 @@
       <span>新建卡</span>
     </div>
     <div class="profile-proposal-form">
-      <select id="cards-v2-add-folder"><option value="">加入哪个文件夹…</option></select>
+      <select id="cards-v2-add-folder"><option value="">收进哪个馆…</option></select>
       <span></span>
     </div>
     <div class="profile-proposal-form">
@@ -3457,7 +3500,7 @@
 
 <div id="cards-v2-folders-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2FoldersModal()">
   <div class="facts-modal-panel">
-    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2FoldersModal()">‹</button><span>这张卡在哪些文件夹</span></div>
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2FoldersModal()">‹</button><span>这张卡收在哪些馆</span></div>
     <div id="cards-v2-folders-body"></div>
   </div>
 </div>
@@ -9244,50 +9287,83 @@ async function batchReview(idsJson, action) {
 }
 
 // ===================== Facts-model v2: 资料卡 (collection/playlist) =====================
-var cardsV2 = { folders: [], selSubject: '', selFolder: '', cards: [], detail: null, addTags: [], editTags: [], editId: '', revId: '' };
+var cardsV2 = { folders: [], path: [], cardsByFolder: {}, detail: null, addTags: [], editTags: [], editId: '', revId: '' };
 function cardsV2Tops(){ return cardsV2.folders.filter(function(f){ return !f.parent_id; }); }
 function cardsV2Kids(pid){ return cardsV2.folders.filter(function(f){ return f.parent_id === pid; }); }
-function cardsV2Path(id){
+function cardsV2Find(id){ return cardsV2.folders.find(function(f){ return f.id === id; }); }
+function cardsV2Path(id){  // readable "我们 · 物品 · 小馆" path for a folder id
   var by = {}; cardsV2.folders.forEach(function(f){ by[f.id] = f; });
   var parts = [], fid = id, seen = {};
   while (fid && by[fid] && !seen[fid]) { seen[fid] = 1; parts.unshift(by[fid].name); fid = by[fid].parent_id; }
   return parts.join(' · ');
 }
+// per-column colour: interpolate darkest(顶层馆) -> lightest(卡面) across the
+// current depth, so a newly-nested 小馆 automatically lands on a mid tone.
+function cardsV2Lerp(a, b, t){ return Math.round(a + (b - a) * t); }
+function cardsV2ColColor(k, N){
+  var s = [0xDA, 0xD0, 0xBB], e = [0xF7, 0xF2, 0xE8];
+  var t = N <= 1 ? 1 : Math.min(1, k / (N - 1));
+  return 'rgb(' + cardsV2Lerp(s[0], e[0], t) + ',' + cardsV2Lerp(s[1], e[1], t) + ',' + cardsV2Lerp(s[2], e[2], t) + ')';
+}
+async function cardsV2EnsureCards(folderId){
+  if (!folderId || cardsV2.cardsByFolder[folderId] !== undefined) return;
+  try { var r = await fetch('/api/cards-skeleton/folders/' + folderId + '/cards'); var d = await r.json(); cardsV2.cardsByFolder[folderId] = d.cards || []; }
+  catch(e){ cardsV2.cardsByFolder[folderId] = []; }
+}
 async function loadCardsV2(){
   try { var r = await fetch('/api/cards-skeleton/folders'); var d = await r.json(); cardsV2.folders = d.folders || []; }
   catch(e){ cardsV2.folders = []; }
-  cardsV2EnsureSel();
-  await cardsV2LoadCards();
-}
-function cardsV2EnsureSel(){
-  var tops = cardsV2Tops();
-  if (!tops.some(function(f){ return f.id === cardsV2.selSubject; })) { cardsV2.selSubject = tops[0] ? tops[0].id : ''; cardsV2.selFolder = ''; }
-  var kids = cardsV2Kids(cardsV2.selSubject);
-  if (!kids.some(function(f){ return f.id === cardsV2.selFolder; })) cardsV2.selFolder = kids[0] ? kids[0].id : '';
-}
-async function cardsV2LoadCards(){
-  cardsV2.cards = [];
-  if (cardsV2.selFolder) {
-    try { var r = await fetch('/api/cards-skeleton/folders/' + cardsV2.selFolder + '/cards'); var d = await r.json(); cardsV2.cards = d.cards || []; } catch(e){}
+  cardsV2.cardsByFolder = {};
+  // keep a still-valid path; otherwise default to first top + its first child
+  cardsV2.path = cardsV2.path.filter(function(id){ return cardsV2Find(id); });
+  if (!cardsV2.path.length) {
+    var tops = cardsV2Tops();
+    if (tops.length) { cardsV2.path = [tops[0].id]; var kids = cardsV2Kids(tops[0].id); if (kids.length) cardsV2.path.push(kids[0].id); }
   }
+  for (var i = 0; i < cardsV2.path.length; i++) { await cardsV2EnsureCards(cardsV2.path[i]); }
   renderCardsV2Nav();
 }
-function cardsV2SelSubject(id){ cardsV2.selSubject = id; cardsV2.selFolder = ''; cardsV2EnsureSel(); cardsV2LoadCards(); }
-function cardsV2SelFolder(id){ cardsV2.selFolder = id; cardsV2LoadCards(); }
+async function cardsV2Drill(k, folderId){  // select folderId in column k -> a new column opens for its contents
+  cardsV2.path = cardsV2.path.slice(0, k).concat([folderId]);
+  await cardsV2EnsureCards(folderId);
+  renderCardsV2Nav();
+}
+async function cardsV2CreateFolder(){
+  var name = prompt('新馆的名字：'); if (!name || !name.trim()) return;
+  var parent = cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '';
+  var body = { name: name.trim() }; if (parent) body.parent_id = parent;
+  try { await fetch('/api/cards-skeleton/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  await loadCardsV2();
+}
 function renderCardsV2Nav(){
   var c = document.getElementById('cards-v2-nav'); if (!c) return;
-  var subs = cardsV2Tops();
-  if (!subs.length) { c.innerHTML = '<div class="loading">还没有文件夹。新建卡时可以建。</div>'; return; }
-  var col1 = subs.map(function(s){ return '<div class="facts-browse-item' + (s.id === cardsV2.selSubject ? ' active' : '') + '" onclick="cardsV2SelSubject(\'' + s.id + '\')">' + esc(s.name) + '</div>'; }).join('');
-  var kids = cardsV2Kids(cardsV2.selSubject);
-  var col2 = kids.length ? kids.map(function(f){ return '<div class="facts-browse-item' + (f.id === cardsV2.selFolder ? ' active' : '') + '" onclick="cardsV2SelFolder(\'' + f.id + '\')">' + esc(f.name) + '</div>'; }).join('') : '<div class="loading">这个主体下还没有文件夹。</div>';
-  var col3 = cardsV2.cards.length ? cardsV2.cards.map(function(card){
-    var cur = card.current || {}; var n = (card.history || []).length;
-    return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + card.id + '\')"><div><b>' + esc(cur.title || '(无标题)') + '</b>'
-      + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cur.valid_at || '未知') + '</div></div>'
-      + '<span class="facts-nav-chevron">›</span></div>';
-  }).join('') : '<div class="loading">这个文件夹里还没有卡。</div>';
-  c.innerHTML = '<div class="facts-browse-columns"><div class="facts-browse-col facts-browse-col-subjects">' + col1 + '</div><div class="facts-browse-col facts-browse-col-keys">' + col2 + '</div><div class="facts-browse-col facts-browse-col-titles">' + col3 + '</div></div>';
+  if (!cardsV2Tops().length) { c.innerHTML = '<div class="loading">还没有馆。点右上角「+ 建馆」建第一个。</div>'; return; }
+  var N = cardsV2.path.length + 1;  // one column per drilled level, plus the deepest folder's contents
+  var cols = '';
+  for (var k = 0; k < N; k++) {
+    var parent = k === 0 ? null : cardsV2.path[k - 1];
+    var subs = k === 0 ? cardsV2Tops() : cardsV2Kids(parent);
+    var cards = (k === 0 || !parent) ? [] : (cardsV2.cardsByFolder[parent] || []);
+    var sel = cardsV2.path[k];
+    var nextColor = cardsV2ColColor(k + 1, N);
+    var inner = subs.map(function(f){
+      var active = f.id === sel;
+      var st = active ? ' style="background:' + nextColor + ';"' : '';
+      return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="cardsV2Drill(' + k + ',\'' + f.id + '\')">' + esc(f.name) + '</div>';
+    }).join('');
+    if (cards.length) {
+      if (subs.length) inner += '<div style="border-top:1px solid rgba(90,70,40,0.14);margin:10px 4px;"></div>';
+      inner += cards.map(function(card){
+        var cur = card.current || {}; var n = (card.history || []).length;
+        return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + card.id + '\')"><div><b>' + esc(cur.title || '(无标题)') + '</b>'
+          + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cur.valid_at || '未知') + '</div></div>'
+          + '<span class="facts-nav-chevron">›</span></div>';
+      }).join('');
+    }
+    if (!subs.length && !cards.length) inner = '<div class="loading" style="font-size:13px;">空的馆。</div>';
+    cols += '<div class="cards-v2-col" style="background:' + cardsV2ColColor(k, N) + ';">' + inner + '</div>';
+  }
+  c.innerHTML = '<div class="cards-v2-columns">' + cols + '</div>';
 }
 async function openCardsV2Detail(id){
   var card = null;
@@ -9314,7 +9390,7 @@ function renderCardsV2Detail(){
     + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
     + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
     + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
-    + '<div onclick="openCardsV2FoldersModal()">🗂 文件夹</div>'
+    + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
     + '</div></div>';
   h += '<div class="facts-detail-title">' + esc(cur.title || '(无标题)') + '</div>';
@@ -9344,7 +9420,7 @@ function cardsV2FolderOptions(sel){
 }
 function openCardsV2CreateModal(){
   cardsV2.addTags = [];
-  document.getElementById('cards-v2-add-folder').innerHTML = cardsV2FolderOptions(cardsV2.selFolder);
+  document.getElementById('cards-v2-add-folder').innerHTML = cardsV2FolderOptions(cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '');
   document.getElementById('cards-v2-add-title').value = '';
   document.getElementById('cards-v2-add-content').value = '';
   document.getElementById('cards-v2-add-valid-at').value = '';
@@ -9368,7 +9444,7 @@ async function submitCardsV2Add(){
   var body = { title: title, content: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice() };
   var validAt = document.getElementById('cards-v2-add-valid-at').value; if (validAt) body.valid_at = validAt;
   var folder = document.getElementById('cards-v2-add-folder').value;
-  if (folder) body.folder_ids = [folder]; else msg.textContent = '（没选文件夹，先建成未归档卡；可稍后在卡里加入文件夹）';
+  if (folder) body.folder_ids = [folder]; else msg.textContent = '（没选馆，先建成未归档卡；可稍后在卡里收进馆）';
   try {
     var r = await fetch('/api/cards-skeleton/cards', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if (!r.ok) { var e = await r.json(); msg.textContent = '失败：' + (e.error || r.status); return; }
@@ -9414,8 +9490,8 @@ async function openCardsV2FoldersModal(){
 function renderCardsV2FoldersModal(){
   var card = cardsV2.detail; if (!card) return;
   var inFolders = card.folders || [];
-  var chips = inFolders.length ? inFolders.map(function(f){ return '<span class="facts-detail-tag" style="margin:0 8px 8px 0;display:inline-block;">' + esc(cardsV2Path(f.id)) + (f.is_favorite ? ' ⭐' : '') + ' <span style="cursor:pointer;" onclick="cardsV2RemoveFolder(\'' + f.id + '\')">×</span></span>'; }).join('') : '<div class="loading">还没有加入任何文件夹（未归档）。</div>';
-  var opts = '<option value="">加入一个文件夹…</option>' + cardsV2.folders.filter(function(f){ return !inFolders.some(function(x){ return x.id === f.id; }); }).map(function(f){ return '<option value="' + f.id + '">' + esc(cardsV2Path(f.id)) + '</option>'; }).join('');
+  var chips = inFolders.length ? inFolders.map(function(f){ return '<span class="facts-detail-tag" style="margin:0 8px 8px 0;display:inline-block;">' + esc(cardsV2Path(f.id)) + (f.is_favorite ? ' ⭐' : '') + ' <span style="cursor:pointer;" onclick="cardsV2RemoveFolder(\'' + f.id + '\')">×</span></span>'; }).join('') : '<div class="loading">还没有收进任何馆（未归档）。</div>';
+  var opts = '<option value="">收进一个馆…</option>' + cardsV2.folders.filter(function(f){ return !inFolders.some(function(x){ return x.id === f.id; }); }).map(function(f){ return '<option value="' + f.id + '">' + esc(cardsV2Path(f.id)) + '</option>'; }).join('');
   document.getElementById('cards-v2-folders-body').innerHTML = '<div style="margin-bottom:12px;">' + chips + '</div><select onchange="cardsV2AddFolder(this.value)">' + opts + '</select>';
 }
 async function cardsV2AddFolder(fid){ if (!fid || !cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ folder_id: fid }) }); } catch(e){} await cardsV2ReloadDetail(); }
