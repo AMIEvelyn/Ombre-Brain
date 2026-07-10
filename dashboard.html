@@ -2288,6 +2288,24 @@
     padding-left: 18px;
     padding-right: 18px;
   }
+  .cards-v2-del {
+    opacity: 0;
+    margin-left: 6px;
+    font-size: 13px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: opacity .15s;
+  }
+  .cards-v2-item:hover .cards-v2-del { opacity: 0.5; }
+  .cards-v2-del:hover { opacity: 1 !important; color: #c0392b; }
+  .cards-v2-additem {
+    padding: 9px 8px;
+    font-size: 14px;
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.65;
+  }
+  .cards-v2-additem:hover { opacity: 1; color: var(--text); }
   .facts-nav-back {
     display: inline-block;
     color: var(--text-dim);
@@ -3431,7 +3449,6 @@
       </div>
       <div class="word-map-actions">
         <button type="button" onclick="loadCardsV2()">刷新</button>
-        <button type="button" onclick="cardsV2CreateFolder()">+ 建馆</button>
         <button type="button" onclick="openCardsV2CreateModal()">+ 新建卡</button>
       </div>
     </div>
@@ -9329,16 +9346,24 @@ async function cardsV2Drill(k, folderId){  // select folderId in column k -> a n
   await cardsV2EnsureCards(folderId);
   renderCardsV2Nav();
 }
-async function cardsV2CreateFolder(){
-  var name = prompt('新馆的名字：'); if (!name || !name.trim()) return;
-  var parent = cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '';
+async function cardsV2CreateFolderAt(k){  // build a 馆 at column k's level: k===0 -> top level, else under path[k-1]
+  var name = prompt(k === 0 ? '新顶层馆的名字（如 一澜 / 林湛 / 我们 / 地点）：' : '新子馆的名字：');
+  if (!name || !name.trim()) return;
+  var parent = k === 0 ? '' : cardsV2.path[k - 1];
   var body = { name: name.trim() }; if (parent) body.parent_id = parent;
   try { await fetch('/api/cards-skeleton/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
   await loadCardsV2();
 }
+async function cardsV2DeleteFolderById(id){
+  var f = cardsV2Find(id); if (!f) return;
+  if (!confirm('删除馆「' + f.name + '」？\n里面的子馆会自动上提一层，卡不会被删（只是解除归属）。')) return;
+  try { await fetch('/api/cards-skeleton/folders/' + id, { method:'DELETE' }); } catch(e){}
+  cardsV2.path = cardsV2.path.filter(function(pid){ return pid !== id; });
+  await loadCardsV2();
+}
 function renderCardsV2Nav(){
   var c = document.getElementById('cards-v2-nav'); if (!c) return;
-  if (!cardsV2Tops().length) { c.innerHTML = '<div class="loading">还没有馆。点右上角「+ 建馆」建第一个。</div>'; return; }
+  if (!cardsV2Tops().length) { c.innerHTML = '<div class="loading">还没有馆。<span class="cards-v2-additem" style="display:inline-block;opacity:1;color:var(--accent);" onclick="cardsV2CreateFolderAt(0)">＋ 建第一个馆</span></div>'; return; }
   var N = cardsV2.path.length + 1;  // one column per drilled level, plus the deepest folder's contents
   var cols = '';
   for (var k = 0; k < N; k++) {
@@ -9350,7 +9375,9 @@ function renderCardsV2Nav(){
     var inner = subs.map(function(f){
       var active = f.id === sel;
       var st = active ? ' style="background:' + nextColor + ';"' : '';
-      return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="cardsV2Drill(' + k + ',\'' + f.id + '\')">' + esc(f.name) + '</div>';
+      return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="cardsV2Drill(' + k + ',\'' + f.id + '\')">'
+        + '<span style="flex:1;">' + esc(f.name) + '</span>'
+        + '<span class="cards-v2-del" title="删除这个馆" onclick="event.stopPropagation();cardsV2DeleteFolderById(\'' + f.id + '\')">✕</span></div>';
     }).join('');
     if (cards.length) {
       if (subs.length) inner += '<div style="border-top:1px solid rgba(90,70,40,0.14);margin:10px 4px;"></div>';
@@ -9361,7 +9388,7 @@ function renderCardsV2Nav(){
           + '<span class="facts-nav-chevron">›</span></div>';
       }).join('');
     }
-    if (!subs.length && !cards.length) inner = '<div class="loading" style="font-size:13px;">空的馆。</div>';
+    inner += '<div class="cards-v2-additem" onclick="cardsV2CreateFolderAt(' + k + ')">＋ ' + (k === 0 ? '建顶层馆' : '在这里建子馆') + '</div>';
     cols += '<div class="cards-v2-col" style="background:' + cardsV2ColColor(k, N) + ';">' + inner + '</div>';
   }
   c.innerHTML = '<div class="cards-v2-columns">' + cols + '</div>';
