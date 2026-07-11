@@ -2180,6 +2180,16 @@
     box-sizing: border-box;
     width: 100%;
   }
+  /* Soften the browser's default hard-edged focus outline on the rounded
+     search/text inputs so it reads as a themed glow, not a black rectangle. */
+  .profile-proposal-form input:focus,
+  .profile-proposal-form select:focus,
+  .profile-proposal-form textarea:focus,
+  .facts-bucket-picker-panel input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(90, 70, 40, 0.12);
+  }
   .profile-proposal-form button,
   .profile-proposal-card button {
     min-height: 34px;
@@ -3630,13 +3640,22 @@
     <div class="facts-modal-header">
       <button type="button" class="facts-modal-back" onclick="closeCardsV2BucketsModal()">‹</button>
       <span>关联的记忆桶</span>
-      <button type="button" class="cards-v2-header-add-btn" onclick="cardsV2ToggleAddBucketSearch()" title="关联新的记忆桶">＋</button>
-    </div>
-    <div id="cards-v2-add-bucket-search-panel" style="display:none;margin-bottom:14px;">
-      <input type="text" id="cards-v2-view-bucket-search" placeholder="搜标题或粘贴 bucket_id" oninput="cardsV2OnViewBucketSearch()" />
-      <div id="cards-v2-view-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
+      <button type="button" class="cards-v2-header-add-btn" onclick="openCardsV2AddBucketOverlay()" title="关联新的记忆桶">＋</button>
     </div>
     <div id="cards-v2-buckets-body"></div>
+  </div>
+</div>
+
+<div id="cards-v2-add-bucket-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2AddBucketOverlay()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header">
+      <button type="button" class="facts-modal-back" onclick="closeCardsV2AddBucketOverlay()">‹</button>
+      <span>关联新的记忆桶</span>
+    </div>
+    <div class="profile-proposal-form">
+      <input type="text" id="cards-v2-view-bucket-search" placeholder="搜标题或粘贴 bucket_id" oninput="cardsV2OnViewBucketSearch()" style="grid-column:1/-1;width:100%;" />
+    </div>
+    <div id="cards-v2-view-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
   </div>
 </div>
 
@@ -9609,7 +9628,12 @@ function cardsV2ToggleBucketPicker(t){
   var show = p.style.display === 'none'; p.style.display = show ? '' : 'none';
   if (show){ var i = document.getElementById('cards-v2-' + t + '-bucket-search'); if (i){ i.value=''; i.focus(); } document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; }
 }
-function cardsV2OnBucketSearch(t){ clearTimeout(cardsV2BucketTimer); cardsV2BucketTimer = setTimeout(function(){ cardsV2RunBucketSearch(t); }, 300); }
+function cardsV2OnBucketSearch(t){
+  clearTimeout(cardsV2BucketTimer);
+  var v = (document.getElementById('cards-v2-' + t + '-bucket-search').value || '').trim();
+  if (v.length < 2) { document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">再多打一个字就开始搜…</div>'; return; }
+  cardsV2BucketTimer = setTimeout(function(){ cardsV2RunBucketSearch(t); }, 500);
+}
 async function cardsV2RunBucketSearch(t){
   var input = document.getElementById('cards-v2-' + t + '-bucket-search'); var res = document.getElementById('cards-v2-' + t + '-bucket-results');
   if (!input || !res) return; var q = (input.value||'').trim();
@@ -9773,22 +9797,34 @@ function closeCardsV2FoldersModal(){ document.getElementById('cards-v2-folders-o
 async function openCardsV2BucketsModal(){
   if (!cardsV2.detail) return; toggleCardsV2Menu();
   document.getElementById('cards-v2-buckets-body').innerHTML = '<div class="loading">加载中…</div>';
-  var sp = document.getElementById('cards-v2-add-bucket-search-panel'); if (sp) sp.style.display = 'none';
-  var si = document.getElementById('cards-v2-view-bucket-search'); if (si) si.value = '';
+  document.getElementById('cards-v2-add-bucket-overlay').style.display = 'none';
   document.getElementById('cards-v2-buckets-overlay').style.display = '';
   await cardsV2LoadBuckets();
 }
-function closeCardsV2BucketsModal(){ document.getElementById('cards-v2-buckets-overlay').style.display = 'none'; }
-function cardsV2ToggleAddBucketSearch(){
-  var sp = document.getElementById('cards-v2-add-bucket-search-panel'); if (!sp) return;
-  var willShow = sp.style.display === 'none';
-  sp.style.display = willShow ? '' : 'none';
-  if (willShow) {
-    var si = document.getElementById('cards-v2-view-bucket-search'); if (si) { si.value = ''; si.focus(); }
-    document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>';
-  }
+function closeCardsV2BucketsModal(){
+  document.getElementById('cards-v2-buckets-overlay').style.display = 'none';
+  document.getElementById('cards-v2-add-bucket-overlay').style.display = 'none';
 }
-function cardsV2OnViewBucketSearch(){ clearTimeout(cardsV2BucketTimer); cardsV2BucketTimer = setTimeout(cardsV2RunViewBucketSearch, 300); }
+// Its own popup (stacks on top of the View-Bucket overlay, which stays open
+// underneath), per Yi Lan's request -- was previously an inline panel toggled
+// within the same "关联的记忆桶" screen.
+function openCardsV2AddBucketOverlay(){
+  var si = document.getElementById('cards-v2-view-bucket-search'); if (si) { si.value = ''; si.focus(); }
+  document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>';
+  document.getElementById('cards-v2-add-bucket-overlay').style.display = '';
+}
+function closeCardsV2AddBucketOverlay(){ document.getElementById('cards-v2-add-bucket-overlay').style.display = 'none'; }
+// 500ms debounce + a 2-character floor before firing: bucket search has no
+// server-side cache (bucket_mgr.search() re-reads every bucket file from disk
+// on every call), so on a large vault (Yi Lan's has 7000+) firing it on every
+// keystroke can back the whole server up. This doesn't fix that root cause
+// (tracked separately), just cuts how often this UI triggers it.
+function cardsV2OnViewBucketSearch(){
+  clearTimeout(cardsV2BucketTimer);
+  var v = (document.getElementById('cards-v2-view-bucket-search').value || '').trim();
+  if (v.length < 2) { document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">再多打一个字就开始搜…</div>'; return; }
+  cardsV2BucketTimer = setTimeout(cardsV2RunViewBucketSearch, 500);
+}
 async function cardsV2RunViewBucketSearch(){
   var input = document.getElementById('cards-v2-view-bucket-search'); var res = document.getElementById('cards-v2-view-bucket-results');
   if (!input || !res || !cardsV2.detail) return; var q = (input.value||'').trim();
