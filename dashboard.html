@@ -2103,8 +2103,13 @@
     gap: 10px;
     align-items: center;
   }
+  .profile-proposal-form {
+    margin-bottom: 12px;
+  }
   .profile-proposal-form input,
-  .profile-proposal-form select {
+  .profile-proposal-form select,
+  .profile-proposal-form textarea,
+  .cards-v2-select {
     min-height: 34px;
     padding: 8px 12px;
     border: 1px solid var(--border);
@@ -2114,6 +2119,32 @@
     font-family: inherit;
     font-size: 12px;
   }
+  .profile-proposal-form textarea {
+    min-height: 70px;
+    resize: vertical;
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+  .cards-v2-select {
+    width: 100%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cards-v2-select::after { content: '▾'; color: var(--text-dim); margin-left: 8px; }
+  .cards-v2-select-wrap {
+    position: relative;
+    grid-column: 1 / -1;
+  }
+  .cards-v2-select-option {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .cards-v2-select-option:hover { background: var(--border); }
   .profile-proposal-form button,
   .profile-proposal-card button {
     min-height: 34px;
@@ -3466,8 +3497,7 @@
       <button type="button" class="facts-modal-back" onclick="closeCardsV2CreateModal()">‹</button>
       <span>新建卡</span>
     </div>
-    <div class="profile-proposal-form">
-      <select id="cards-v2-add-folder"><option value="">收进哪个馆…</option></select>
+    <div class="profile-proposal-form" id="cards-v2-add-folder-mount">
       <span></span>
     </div>
     <div class="profile-proposal-form">
@@ -3541,6 +3571,7 @@
 <div id="cards-v2-rev-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2RevisionModal()">
   <div class="facts-modal-panel">
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2RevisionModal()">‹</button><span>New Revision（新增时间点）</span></div>
+    <div class="profile-proposal-form"><input type="text" id="cards-v2-rev-title" placeholder="标题" /></div>
     <div class="profile-proposal-form"><textarea id="cards-v2-rev-content" placeholder="这个新时间点的内容"></textarea></div>
     <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-valid-at" /><span></span><span></span></div>
     <div class="facts-attachment-toolbar">
@@ -9364,6 +9395,9 @@ function cardsV2Path(id){  // readable "我们 · 物品 · 小馆" path for a f
   while (fid && by[fid] && !seen[fid]) { seen[fid] = 1; parts.unshift(by[fid].name); fid = by[fid].parent_id; }
   return parts.join(' · ');
 }
+// New Revision without a picked date stores a full ISO timestamp (backend's
+// "now"), but the timeline should only ever show the day, not the time.
+function cardsV2Date(s){ s = String(s || '').trim(); return s ? s.slice(0, 10) : '未知'; }
 // per-column colour: interpolate darkest(顶层馆) -> lightest(卡面) across the
 // current depth, so a newly-nested 小馆 automatically lands on a mid tone.
 function cardsV2Lerp(a, b, t){ return Math.round(a + (b - a) * t); }
@@ -9433,7 +9467,7 @@ function renderCardsV2Nav(){
       inner += cards.map(function(card){
         var cur = card.current || {}; var n = (card.history || []).length;
         return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + card.id + '\')"><div><b>' + esc(cur.title || '(无标题)') + '</b>'
-          + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cur.valid_at || '未知') + '</div></div>'
+          + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cardsV2Date(cur.valid_at)) + '</div></div>'
           + '<span class="facts-nav-chevron">›</span></div>';
       }).join('');
     }
@@ -9506,7 +9540,7 @@ function renderCardsV2Detail(){
   if (files.length) h += '<div class="facts-detail-files">' + files.map(function(f){ return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label||'文件') + '</a>'; }).join('') + '</div>';
   var tl = history.map(function(hh){
     var open = !!cardsV2TimelineExpanded[hh.id];
-    return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(hh.valid_at || '未知')
+    return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(cardsV2Date(hh.valid_at))
       + '<div class="facts-timeline-entry-detail" style="display:' + (open?'':'none') + ';"><div><b>Name</b> ' + esc(hh.title || '') + '</div><div><b>Content</b> ' + esc(hh.content || '（无）') + '</div></div></div>';
   }).join('');
   h += '<div class="facts-detail-timeline">' + (tl || '<div class="loading">没有时间线记录。</div>') + '</div>';
@@ -9567,14 +9601,44 @@ async function deleteCardsV2(){
   try { await fetch('/api/cards-skeleton/cards/' + card.id, { method:'DELETE' }); } catch(e){}
   closeCardsV2Detail(); loadCardsV2();
 }
-function cardsV2FolderOptions(sel){
-  return '<option value="">收进哪个馆…</option>' + cardsV2.folders.map(function(f){
-    return '<option value="' + f.id + '"' + (f.id === sel ? ' selected' : '') + '>' + esc(cardsV2Path(f.id)) + '</option>';
-  }).join('');
+// Custom "select a 馆" dropdown -- native <select> option lists can't be
+// rounded-corner styled cross-browser, so this reuses the bucket-search
+// picker's floating-panel look instead. selectId doubles as the hidden
+// input's id, so existing code that reads document.getElementById(selectId).value
+// keeps working unchanged.
+function cardsV2FolderDropdownHTML(selectId, selected, placeholder, excludeIds){
+  var label = selected ? cardsV2Path(selected) : placeholder;
+  return '<div class="cards-v2-select-wrap">'
+    + '<div class="cards-v2-select" data-placeholder="' + esc(placeholder) + '" onclick="cardsV2ToggleFolderDropdown(\'' + selectId + '\')">' + esc(label) + '</div>'
+    + '<input type="hidden" id="' + selectId + '" value="' + esc(selected || '') + '" data-exclude=\'' + JSON.stringify(excludeIds || []) + '\'>'
+    + '<div class="facts-bucket-picker-panel" id="' + selectId + '-panel" style="display:none"></div>'
+    + '</div>';
 }
+function cardsV2ToggleFolderDropdown(selectId){
+  var panel = document.getElementById(selectId + '-panel'); if (!panel) return;
+  var willShow = panel.style.display === 'none';
+  document.querySelectorAll('.facts-bucket-picker-panel').forEach(function(p){ p.style.display = 'none'; });
+  if (!willShow) return;
+  var input = document.getElementById(selectId);
+  var exclude = []; try { exclude = JSON.parse(input.dataset.exclude || '[]'); } catch(e){}
+  var rows = cardsV2.folders.filter(function(f){ return exclude.indexOf(f.id) === -1; })
+    .map(function(f){ return '<div class="cards-v2-select-option" onclick="cardsV2PickFolderOption(\'' + selectId + '\',\'' + f.id + '\')">' + esc(cardsV2Path(f.id)) + '</div>'; }).join('');
+  panel.innerHTML = rows || '<div class="loading" style="font-size:12px;">没有可选的馆。</div>';
+  panel.style.display = '';
+}
+function cardsV2PickFolderOption(selectId, folderId){
+  var input = document.getElementById(selectId); if (input) input.value = folderId;
+  var btn = input ? input.previousElementSibling : null;
+  if (btn) btn.textContent = folderId ? cardsV2Path(folderId) : btn.dataset.placeholder;
+  var panel = document.getElementById(selectId + '-panel'); if (panel) panel.style.display = 'none';
+  if (selectId === 'cards-v2-folders-pick') cardsV2AddFolder(folderId); // folders-modal picks apply immediately
+}
+document.addEventListener('click', function(e){
+  if (!e.target.closest('.cards-v2-select-wrap')) document.querySelectorAll('.facts-bucket-picker-panel').forEach(function(p){ p.style.display = 'none'; });
+});
 function openCardsV2CreateModal(){
   cardsV2.addTags = []; cardsV2Attach.add = []; cardsV2PendBuckets.add = [];
-  document.getElementById('cards-v2-add-folder').innerHTML = cardsV2FolderOptions(cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '');
+  document.getElementById('cards-v2-add-folder-mount').innerHTML = cardsV2FolderDropdownHTML('cards-v2-add-folder', cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '', '收进哪个馆…', []);
   document.getElementById('cards-v2-add-title').value = '';
   document.getElementById('cards-v2-add-content').value = '';
   document.getElementById('cards-v2-add-valid-at').value = '';
@@ -9588,7 +9652,7 @@ function closeCardsV2CreateModal(){ document.getElementById('cards-v2-create-ove
 function renderCardsV2Tags(which){
   var arr = which === 'add' ? cardsV2.addTags : cardsV2.editTags;
   var el = document.getElementById('cards-v2-' + which + '-tags');
-  if (el) el.innerHTML = arr.map(function(t, i){ return '<span class="facts-detail-tag" style="margin-right:8px;">#' + esc(t) + ' <span style="cursor:pointer;" onclick="cardsV2RemoveTag(\'' + which + '\',' + i + ')">×</span></span>'; }).join('');
+  if (el) el.innerHTML = arr.map(function(t, i){ return '<span class="facts-tag-pill">#' + esc(t) + '<span class="facts-tag-remove" onclick="cardsV2RemoveTag(\'' + which + '\',' + i + ')">×</span></span>'; }).join('');
 }
 function cardsV2RemoveTag(which, i){ (which === 'add' ? cardsV2.addTags : cardsV2.editTags).splice(i, 1); renderCardsV2Tags(which); }
 function onCardsV2TagKeydown(e){ if (e.key === 'Enter') { e.preventDefault(); var v = e.target.value.trim(); if (v) { cardsV2.addTags.push(v); e.target.value = ''; renderCardsV2Tags('add'); } } }
@@ -9631,6 +9695,7 @@ async function submitCardsV2Edit(){
 function openCardsV2RevisionModal(){
   var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
   cardsV2.revId = card.id; cardsV2Attach.rev = (cur.attachments || []).slice();
+  document.getElementById('cards-v2-rev-title').value = cur.title || '';
   document.getElementById('cards-v2-rev-content').value = cur.content || '';
   document.getElementById('cards-v2-rev-valid-at').value = '';
   document.getElementById('cards-v2-rev-message').textContent = '';
@@ -9641,7 +9706,7 @@ function openCardsV2RevisionModal(){
 }
 function closeCardsV2RevisionModal(){ document.getElementById('cards-v2-rev-overlay').style.display = 'none'; }
 async function submitCardsV2Revision(){
-  var body = { content: document.getElementById('cards-v2-rev-content').value, attachments: cardsV2Attach.rev.slice() };
+  var body = { title: document.getElementById('cards-v2-rev-title').value, content: document.getElementById('cards-v2-rev-content').value, attachments: cardsV2Attach.rev.slice() };
   var v = document.getElementById('cards-v2-rev-valid-at').value; if (v) body.valid_at = v;
   try { await fetch('/api/cards-skeleton/cards/' + cardsV2.revId + '/revisions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
   closeCardsV2RevisionModal(); await openCardsV2Detail(cardsV2.revId); loadCardsV2();
@@ -9655,8 +9720,8 @@ function renderCardsV2FoldersModal(){
   var card = cardsV2.detail; if (!card) return;
   var inFolders = card.folders || [];
   var chips = inFolders.length ? inFolders.map(function(f){ return '<span class="facts-detail-tag" style="margin:0 8px 8px 0;display:inline-block;">' + esc(cardsV2Path(f.id)) + (f.is_favorite ? ' ⭐' : '') + ' <span style="cursor:pointer;" onclick="cardsV2RemoveFolder(\'' + f.id + '\')">×</span></span>'; }).join('') : '<div class="loading">还没有收进任何馆（未归档）。</div>';
-  var opts = '<option value="">收进一个馆…</option>' + cardsV2.folders.filter(function(f){ return !inFolders.some(function(x){ return x.id === f.id; }); }).map(function(f){ return '<option value="' + f.id + '">' + esc(cardsV2Path(f.id)) + '</option>'; }).join('');
-  document.getElementById('cards-v2-folders-body').innerHTML = '<div style="margin-bottom:12px;">' + chips + '</div><select onchange="cardsV2AddFolder(this.value)">' + opts + '</select>';
+  var excludeIds = inFolders.map(function(f){ return f.id; });
+  document.getElementById('cards-v2-folders-body').innerHTML = '<div style="margin-bottom:12px;">' + chips + '</div>' + cardsV2FolderDropdownHTML('cards-v2-folders-pick', '', '收进一个馆…', excludeIds);
 }
 async function cardsV2AddFolder(fid){ if (!fid || !cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ folder_id: fid }) }); } catch(e){} await cardsV2ReloadDetail(); }
 async function cardsV2RemoveFolder(fid){ if (!cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders/' + fid, { method:'DELETE' }); } catch(e){} await cardsV2ReloadDetail(); }
