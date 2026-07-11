@@ -12920,7 +12920,7 @@ async def api_import_review(request):
 # this file barely changes. See docs/facts-model-v2-collection-redesign.md.
 import cards_api
 import cards_mcp
-cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth)
+cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_summary=_bucket_link_summary)
 cards_mcp.register_card_tools(mcp, card_store)
 
 

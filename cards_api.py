@@ -24,7 +24,7 @@ from typing import Any
 from starlette.responses import JSONResponse
 
 
-def register_card_routes(mcp, store, require_auth) -> None:
+def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
     """Register the /api/cards-skeleton/* routes.
 
     mcp          -- the FastMCP instance (provides .custom_route)
@@ -249,6 +249,51 @@ def register_card_routes(mcp, store, require_auth) -> None:
             return JSONResponse({"error": "link not found"}, status_code=404)
         return JSONResponse({"status": "unlinked", "card_id": card_id, "folder_id": folder_id})
 
+    # ---- card <-> memory bucket links -------------------------------
+    async def card_buckets(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        if not store.get_card(card_id):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        links = store.get_bucket_links(card_id)
+        if bucket_summary is not None:
+            for link in links:
+                try:
+                    link["bucket"] = await bucket_summary(link["bucket_id"])
+                except Exception:
+                    link["bucket"] = None
+        return JSONResponse({"buckets": links})
+
+    async def add_card_bucket(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        if not store.get_card(card_id):
+            return JSONResponse({"error": "card not found"}, status_code=404)
+        body = await _body(request)
+        bucket_id = str(body.get("bucket_id") or "").strip()
+        if not bucket_id:
+            return JSONResponse({"error": "bucket_id required"}, status_code=400)
+        try:
+            added = store.add_bucket_link(card_id, bucket_id, relation_type=str(body.get("relation_type") or "evidence"), note=str(body.get("note") or ""))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"status": "linked" if added else "already_linked", "bucket_id": bucket_id})
+
+    async def remove_card_bucket(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        bucket_id = str(request.path_params["bucket_id"])
+        removed = store.remove_bucket_link(card_id, bucket_id)
+        if not removed:
+            return JSONResponse({"error": "link not found"}, status_code=404)
+        return JSONResponse({"status": "unlinked", "card_id": card_id, "bucket_id": bucket_id})
+
     # ---- register everything ----------------------------------------
     routes = [
         ("/api/cards-skeleton/cards", ["POST"], create_card),
@@ -266,6 +311,9 @@ def register_card_routes(mcp, store, require_auth) -> None:
         ("/api/cards-skeleton/folders/{folder_id}", ["DELETE"], delete_folder),
         ("/api/cards-skeleton/folders/{folder_id}/cards", ["GET"], folder_cards),
         ("/api/cards-skeleton/folders/{folder_id}/timeline", ["GET"], folder_timeline),
+        ("/api/cards-skeleton/cards/{card_id}/buckets", ["GET"], card_buckets),
+        ("/api/cards-skeleton/cards/{card_id}/buckets", ["POST"], add_card_bucket),
+        ("/api/cards-skeleton/cards/{card_id}/buckets/{bucket_id}", ["DELETE"], remove_card_bucket),
     ]
     for path, methods, handler in routes:
         mcp.custom_route(path, methods=methods)(handler)

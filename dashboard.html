@@ -3486,6 +3486,22 @@
       <input type="date" id="cards-v2-add-valid-at" placeholder="日期（留空=今天）" />
       <span></span><span></span>
     </div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="cardsV2ToggleAttachMenu('add')">+ 添加图片/文件/关联桶</button>
+      <div id="cards-v2-add-attach-menu" class="facts-attachment-menu" style="display:none">
+        <div onclick="cardsV2TriggerPicker('add','photo')">🖼 Add Photo</div>
+        <div onclick="cardsV2TriggerPicker('add','file')">📄 Attach Files</div>
+        <div onclick="cardsV2ToggleAttachMenu('add');cardsV2ToggleBucketPicker('add')">🫙 Add Bucket</div>
+      </div>
+      <div id="cards-v2-add-bucket-picker" class="facts-bucket-picker-panel" style="display:none">
+        <input type="text" id="cards-v2-add-bucket-search" placeholder="搜关键词或粘贴 bucket_id" oninput="cardsV2OnBucketSearch('add')" />
+        <div id="cards-v2-add-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="cards-v2-add-attach-thumbs"></div>
+    <div class="facts-bucket-pending-row" id="cards-v2-add-bucket-links"></div>
+    <input type="file" id="cards-v2-add-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="cardsV2OnFileChosen('add', this)" />
+    <input type="file" id="cards-v2-add-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="cardsV2OnFileChosen('add', this)" />
     <div class="profile-proposal-form">
       <span></span><span></span>
       <button type="button" onclick="submitCardsV2Add()">Add</button>
@@ -3501,6 +3517,22 @@
     <div class="profile-proposal-form"><textarea id="cards-v2-edit-content" placeholder="内容"></textarea></div>
     <div class="facts-tags-row" id="cards-v2-edit-tags"></div>
     <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onCardsV2EditTagKeydown(event)" /><span></span><span></span></div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="cardsV2ToggleAttachMenu('edit')">+ 添加图片/文件/关联桶</button>
+      <div id="cards-v2-edit-attach-menu" class="facts-attachment-menu" style="display:none">
+        <div onclick="cardsV2TriggerPicker('edit','photo')">🖼 Add Photo</div>
+        <div onclick="cardsV2TriggerPicker('edit','file')">📄 Attach Files</div>
+        <div onclick="cardsV2ToggleAttachMenu('edit');cardsV2ToggleBucketPicker('edit')">🫙 Add Bucket</div>
+      </div>
+      <div id="cards-v2-edit-bucket-picker" class="facts-bucket-picker-panel" style="display:none">
+        <input type="text" id="cards-v2-edit-bucket-search" placeholder="搜关键词或粘贴 bucket_id" oninput="cardsV2OnBucketSearch('edit')" />
+        <div id="cards-v2-edit-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="cards-v2-edit-attach-thumbs"></div>
+    <div class="facts-bucket-pending-row" id="cards-v2-edit-bucket-links"></div>
+    <input type="file" id="cards-v2-edit-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="cardsV2OnFileChosen('edit', this)" />
+    <input type="file" id="cards-v2-edit-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="cardsV2OnFileChosen('edit', this)" />
     <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Edit()">Save</button></div>
     <div class="profile-proposal-message" id="cards-v2-edit-message"></div>
   </div>
@@ -3511,6 +3543,16 @@
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2RevisionModal()">‹</button><span>New Revision（新增时间点）</span></div>
     <div class="profile-proposal-form"><textarea id="cards-v2-rev-content" placeholder="这个新时间点的内容"></textarea></div>
     <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-valid-at" /><span></span><span></span></div>
+    <div class="facts-attachment-toolbar">
+      <button type="button" class="facts-attachment-add-btn" onclick="cardsV2ToggleAttachMenu('rev')">+ 添加图片/文件</button>
+      <div id="cards-v2-rev-attach-menu" class="facts-attachment-menu" style="display:none">
+        <div onclick="cardsV2TriggerPicker('rev','photo')">🖼 Add Photo</div>
+        <div onclick="cardsV2TriggerPicker('rev','file')">📄 Attach Files</div>
+      </div>
+    </div>
+    <div class="facts-attachment-thumbs" id="cards-v2-rev-attach-thumbs"></div>
+    <input type="file" id="cards-v2-rev-photo-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none" onchange="cardsV2OnFileChosen('rev', this)" />
+    <input type="file" id="cards-v2-rev-file-input" accept=".pdf,.doc,.docx,.txt,.md" multiple style="display:none" onchange="cardsV2OnFileChosen('rev', this)" />
     <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Revision()">Save</button></div>
     <div class="profile-proposal-message" id="cards-v2-rev-message"></div>
   </div>
@@ -3520,6 +3562,13 @@
   <div class="facts-modal-panel">
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2FoldersModal()">‹</button><span>这张卡收在哪些馆</span></div>
     <div id="cards-v2-folders-body"></div>
+  </div>
+</div>
+
+<div id="cards-v2-buckets-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2BucketsModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2BucketsModal()">‹</button><span>关联的记忆桶</span></div>
+    <div id="cards-v2-buckets-body"></div>
   </div>
 </div>
 
@@ -9398,18 +9447,45 @@ async function openCardsV2Detail(id){
   try { var r = await fetch('/api/cards-skeleton/cards/' + id); var d = await r.json(); card = d.card; } catch(e){}
   if (!card) return;
   cardsV2.detail = card;
+  cardsV2PhotoIdx = 0; cardsV2ContentExpanded = false; cardsV2TimelineExpanded = {};
   renderCardsV2Detail();
   document.getElementById('cards-v2-detail-overlay').style.display = '';
 }
 function closeCardsV2Detail(){ document.getElementById('cards-v2-detail-overlay').style.display = 'none'; cardsV2.detail = null; }
 function toggleCardsV2Menu(){ var m = document.getElementById('cards-v2-detail-menu'); if (m) m.style.display = m.style.display === 'none' ? '' : 'none'; }
+
+// ---- v2 detail state + attachment/bucket state ----
+var cardsV2PhotoIdx = 0, cardsV2ContentExpanded = false, cardsV2Touch = null, cardsV2TimelineExpanded = {};
+var cardsV2Attach = { add: [], edit: [], rev: [] };
+var cardsV2PendBuckets = { add: [], edit: [] };
+var cardsV2BucketResults = {}, cardsV2BucketTimer = null;
+
+function cardsV2RenderPhotos(photos){
+  if (!photos.length) return '';
+  var idx = cardsV2PhotoIdx; if (idx >= photos.length) idx = 0;
+  var dots = photos.length > 1 ? '<div class="facts-detail-photo-dots">' + photos.map(function(_, i){ return '<span class="facts-detail-photo-dot' + (i===idx?' active':'') + '" onclick="event.stopPropagation();cardsV2SetPhoto(' + i + ')"></span>'; }).join('') + '</div>' : '';
+  return '<div class="facts-detail-photos" ontouchstart="cardsV2PhotoTouchStart(event)" ontouchend="cardsV2PhotoTouchEnd(event,' + photos.length + ')"><img src="' + esc(photos[idx].url) + '" alt="' + esc(photos[idx].label||'') + '">' + dots + '</div>';
+}
+function cardsV2SetPhoto(i){ cardsV2PhotoIdx = i; renderCardsV2Detail(); }
+function cardsV2PhotoTouchStart(e){ var t = e.touches[0]; if (t) cardsV2Touch = { x: t.clientX, y: t.clientY }; }
+function cardsV2PhotoTouchEnd(e, count){ var s = cardsV2Touch; cardsV2Touch = null; if (!s || count < 2) return; var t = e.changedTouches[0]; if (!t) return; var dx = t.clientX - s.x, dy = t.clientY - s.y; if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return; cardsV2PhotoIdx = dx < 0 ? Math.min(cardsV2PhotoIdx+1, count-1) : Math.max(cardsV2PhotoIdx-1, 0); renderCardsV2Detail(); }
+function cardsV2RenderContent(content){
+  content = String(content || ''); if (!content) return '';
+  var over = content.length > FACTS_CONTENT_COLLAPSE_CHARS;
+  var shown = (cardsV2ContentExpanded || !over) ? content : content.slice(0, FACTS_CONTENT_COLLAPSE_CHARS) + '…';
+  var toggle = over ? '<span class="facts-detail-content-toggle" onclick="cardsV2ToggleContent()">' + (cardsV2ContentExpanded ? '收起' : '展开') + '</span>' : '';
+  return '<div class="facts-detail-content">' + esc(shown) + toggle + '</div>';
+}
+function cardsV2ToggleContent(){ cardsV2ContentExpanded = !cardsV2ContentExpanded; renderCardsV2Detail(); }
+function cardsV2ToggleTimelineEntry(id){ cardsV2TimelineExpanded[id] = !cardsV2TimelineExpanded[id]; renderCardsV2Detail(); }
 function renderCardsV2Detail(){
   var card = cardsV2.detail; if (!card) return;
   var cur = card.current || {}; var folders = card.folders || [];
   var path = folders.length ? cardsV2Path(folders[0].id) : '';
-  var photos = (cur.attachments || []).filter(function(a){ return a.type === 'image'; });
-  var files = (cur.attachments || []).filter(function(a){ return a.type !== 'image'; });
-  var tags = cur.tags || []; var history = card.history || [];
+  var atts = cur.attachments || [];
+  var photos = atts.filter(function(a){ return a.type === 'image'; }).slice(0, 5);
+  var files = atts.filter(function(a){ return a.type !== 'image'; });
+  var tags = cur.tags || []; var history = card.history || []; var buckets = card.buckets || [];
   var h = '<div class="facts-detail-card">';
   h += '<div class="facts-detail-header"><div class="facts-detail-header-left">'
     + '<button class="facts-detail-close-btn" onclick="closeCardsV2Detail()">✕</button>'
@@ -9418,23 +9494,73 @@ function renderCardsV2Detail(){
     + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
     + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
     + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
+    + '<div onclick="openCardsV2BucketsModal()">🫙 View Bucket' + (buckets.length ? '（' + buckets.length + '）' : '') + '</div>'
     + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
     + '</div></div>';
   h += '<div class="facts-detail-title">' + esc(cur.title || '(无标题)') + '</div>';
   h += '<div class="facts-detail-breadcrumb" style="margin:-6px 0 12px;">id：' + esc(card.id) + '</div>';
-  if (photos.length) h += '<img src="' + esc(photos[0].url) + '" style="max-width:100%;border-radius:14px;margin-bottom:12px;display:block;">';
-  if ((cur.content || '').trim()) h += '<div class="facts-detail-content">' + esc(cur.content) + '</div>';
-  if (tags.length) h += '<div class="facts-detail-tags">' + tags.map(function(t){ return '<span class="facts-detail-tag">#' + esc(t) + '</span>'; }).join(' ') + '</div>';
-  if (files.length) h += '<div style="margin-top:10px;">' + files.map(function(f){ return '<a href="' + esc(f.url) + '" target="_blank" style="font-size:13px;">📄 ' + esc(f.label || f.url) + '</a>'; }).join('<br>') + '</div>';
-  if (history.length) {
-    h += '<div class="facts-detail-timeline">';
-    history.forEach(function(hh){ h += '<div style="font-size:13px;color:var(--text-dim);margin-top:6px;">● ' + esc(hh.valid_at || '未知') + '</div>'; });
-    h += '</div>';
-  }
+  h += cardsV2RenderPhotos(photos);
+  h += cardsV2RenderContent(cur.content);
+  if (tags.length) h += '<div class="facts-detail-tags">' + tags.map(function(t){ return '<span class="facts-detail-tag">#' + esc(t) + '</span>'; }).join('') + '</div>';
+  if (files.length) h += '<div class="facts-detail-files">' + files.map(function(f){ return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label||'文件') + '</a>'; }).join('') + '</div>';
+  var tl = history.map(function(hh){
+    var open = !!cardsV2TimelineExpanded[hh.id];
+    return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(hh.valid_at || '未知')
+      + '<div class="facts-timeline-entry-detail" style="display:' + (open?'':'none') + ';"><div><b>Name</b> ' + esc(hh.title || '') + '</div><div><b>Content</b> ' + esc(hh.content || '（无）') + '</div></div></div>';
+  }).join('');
+  h += '<div class="facts-detail-timeline">' + (tl || '<div class="loading">没有时间线记录。</div>') + '</div>';
   h += '</div>';
   document.getElementById('cards-v2-detail-body').innerHTML = h;
 }
+// ---- attachments (create/edit/new-revision) ----
+function cardsV2ToggleAttachMenu(t){ var m = document.getElementById('cards-v2-' + t + '-attach-menu'); if (m) m.style.display = m.style.display === 'none' ? '' : 'none'; }
+function cardsV2TriggerPicker(t, kind){ cardsV2ToggleAttachMenu(t); var i = document.getElementById('cards-v2-' + t + '-' + kind + '-input'); if (i) i.click(); }
+async function cardsV2OnFileChosen(t, input){ var files = Array.prototype.slice.call(input.files || []); input.value = ''; for (var i=0;i<files.length;i++){ await cardsV2Upload(t, files[i]); } }
+async function cardsV2Upload(t, file){
+  var arr = cardsV2Attach[t] || (cardsV2Attach[t] = []);
+  if (arr.length >= 5) { alert('最多 5 个图片/文件。'); return; }
+  var fd = new FormData(); fd.append('file', file);
+  try { var r = await fetch('/api/facts-skeleton/attachments/upload', { method:'POST', body: fd }); var d = await r.json().catch(function(){return {};}); if (!r.ok) throw new Error(d.error||'上传失败'); arr.push(d); cardsV2RenderThumbs(t); }
+  catch(e){ alert('上传失败: ' + e.message); }
+}
+function cardsV2RenderThumbs(t){
+  var c = document.getElementById('cards-v2-' + t + '-attach-thumbs'); if (!c) return;
+  c.innerHTML = (cardsV2Attach[t]||[]).map(function(a, i){
+    if (a.type === 'image') return '<div class="facts-attachment-thumb"><img src="' + esc(a.url) + '"><span class="facts-attachment-remove" onclick="cardsV2RemoveAttach(\'' + t + '\',' + i + ')">×</span></div>';
+    return '<div class="facts-attachment-thumb facts-attachment-thumb-file" title="' + esc(a.label||'') + '"><span class="facts-attachment-file-icon">📄</span><span class="facts-attachment-file-name">' + esc(a.label||'文件') + '</span><span class="facts-attachment-remove" onclick="cardsV2RemoveAttach(\'' + t + '\',' + i + ')">×</span></div>';
+  }).join('');
+}
+function cardsV2RemoveAttach(t, i){ (cardsV2Attach[t]||[]).splice(i,1); cardsV2RenderThumbs(t); }
+// ---- bucket picker (create/edit) ----
+function cardsV2ToggleBucketPicker(t){
+  var p = document.getElementById('cards-v2-' + t + '-bucket-picker'); if (!p) return;
+  var show = p.style.display === 'none'; p.style.display = show ? '' : 'none';
+  if (show){ var i = document.getElementById('cards-v2-' + t + '-bucket-search'); if (i){ i.value=''; i.focus(); } document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; }
+}
+function cardsV2OnBucketSearch(t){ clearTimeout(cardsV2BucketTimer); cardsV2BucketTimer = setTimeout(function(){ cardsV2RunBucketSearch(t); }, 300); }
+async function cardsV2RunBucketSearch(t){
+  var input = document.getElementById('cards-v2-' + t + '-bucket-search'); var res = document.getElementById('cards-v2-' + t + '-bucket-results');
+  if (!input || !res) return; var q = (input.value||'').trim();
+  if (!q){ res.innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; return; }
+  res.innerHTML = '<div class="loading" style="font-size:12px;">搜索中…</div>';
+  try {
+    var r = await fetch('/api/facts-skeleton/buckets/search?q=' + encodeURIComponent(q)); var d = await r.json().catch(function(){return {};});
+    if (!r.ok) throw new Error(d.error||'搜索失败'); var bs = Array.isArray(d.buckets)?d.buckets:[];
+    if (!bs.length){ res.innerHTML = '<div class="loading" style="font-size:12px;">没搜到匹配的记忆桶。</div>'; return; }
+    cardsV2BucketResults[t] = bs;
+    var pend = (cardsV2PendBuckets[t]||[]).map(function(p){ return p.bucket_id; });
+    res.innerHTML = bs.map(function(b, i){
+      var already = pend.indexOf(b.id) !== -1;
+      var domain = Array.isArray(b.domain)&&b.domain.length ? b.domain.join('·') : '未分类';
+      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(b.name||b.id) + '</div><div class="facts-bucket-result-meta"><div>' + esc(b.id) + '</div><div>' + esc(b.date||b.created||'未知日期') + '</div><div>' + esc(domain) + '</div></div></div><span class="facts-bucket-result-add' + (already?' added':'') + '" onclick="' + (already?'':'cardsV2AddPendBucket(\'' + t + '\',' + i + ')') + '">' + (already?'✓':'+') + '</span></div>';
+    }).join('');
+  } catch(e){ res.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>'; }
+}
+function cardsV2AddPendBucket(t, i){ var b = (cardsV2BucketResults[t]||[])[i]; if (!b) return; var arr = cardsV2PendBuckets[t]||(cardsV2PendBuckets[t]=[]); if (arr.some(function(p){return p.bucket_id===b.id;})) return; arr.push({ bucket_id: b.id, name: b.name||b.id }); cardsV2RenderPendBuckets(t); cardsV2RunBucketSearch(t); }
+function cardsV2RemovePendBucket(t, i){ (cardsV2PendBuckets[t]||[]).splice(i,1); cardsV2RenderPendBuckets(t); }
+function cardsV2RenderPendBuckets(t){ var c = document.getElementById('cards-v2-' + t + '-bucket-links'); if (!c) return; c.innerHTML = (cardsV2PendBuckets[t]||[]).map(function(p, i){ return '<span class="facts-bucket-pending-chip" title="' + esc(p.bucket_id) + '"><span>🫙 ' + esc(p.name) + '</span><span class="facts-tag-remove" onclick="cardsV2RemovePendBucket(\'' + t + '\',' + i + ')">×</span></span>'; }).join(''); }
+async function cardsV2FlushBuckets(t, cardId){ var arr = cardsV2PendBuckets[t]||[]; for (var i=0;i<arr.length;i++){ try { await fetch('/api/cards-skeleton/cards/' + cardId + '/buckets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bucket_id: arr[i].bucket_id }) }); } catch(e){} } cardsV2PendBuckets[t] = []; }
 async function deleteCardsV2(){
   var card = cardsV2.detail; if (!card) return;
   if (!confirm('删除这张卡（连同它的时间线和文件夹归属）？不可恢复。')) return;
@@ -9442,18 +9568,20 @@ async function deleteCardsV2(){
   closeCardsV2Detail(); loadCardsV2();
 }
 function cardsV2FolderOptions(sel){
-  return '<option value="">加入哪个文件夹…</option>' + cardsV2.folders.map(function(f){
+  return '<option value="">收进哪个馆…</option>' + cardsV2.folders.map(function(f){
     return '<option value="' + f.id + '"' + (f.id === sel ? ' selected' : '') + '>' + esc(cardsV2Path(f.id)) + '</option>';
   }).join('');
 }
 function openCardsV2CreateModal(){
-  cardsV2.addTags = [];
+  cardsV2.addTags = []; cardsV2Attach.add = []; cardsV2PendBuckets.add = [];
   document.getElementById('cards-v2-add-folder').innerHTML = cardsV2FolderOptions(cardsV2.path.length ? cardsV2.path[cardsV2.path.length - 1] : '');
   document.getElementById('cards-v2-add-title').value = '';
   document.getElementById('cards-v2-add-content').value = '';
   document.getElementById('cards-v2-add-valid-at').value = '';
   document.getElementById('cards-v2-add-message').textContent = '';
-  renderCardsV2Tags('add');
+  renderCardsV2Tags('add'); cardsV2RenderThumbs('add'); cardsV2RenderPendBuckets('add');
+  var am = document.getElementById('cards-v2-add-attach-menu'); if (am) am.style.display = 'none';
+  var bp = document.getElementById('cards-v2-add-bucket-picker'); if (bp) bp.style.display = 'none';
   document.getElementById('cards-v2-create-overlay').style.display = '';
 }
 function closeCardsV2CreateModal(){ document.getElementById('cards-v2-create-overlay').style.display = 'none'; }
@@ -9469,43 +9597,51 @@ async function submitCardsV2Add(){
   var title = document.getElementById('cards-v2-add-title').value.trim();
   var msg = document.getElementById('cards-v2-add-message');
   if (!title) { msg.textContent = '标题必填。'; return; }
-  var body = { title: title, content: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice() };
+  var body = { title: title, content: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice(), attachments: cardsV2Attach.add.slice() };
   var validAt = document.getElementById('cards-v2-add-valid-at').value; if (validAt) body.valid_at = validAt;
   var folder = document.getElementById('cards-v2-add-folder').value;
-  if (folder) body.folder_ids = [folder]; else msg.textContent = '（没选馆，先建成未归档卡；可稍后在卡里收进馆）';
+  if (folder) body.folder_ids = [folder];
   try {
     var r = await fetch('/api/cards-skeleton/cards', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    if (!r.ok) { var e = await r.json(); msg.textContent = '失败：' + (e.error || r.status); return; }
+    var d = await r.json().catch(function(){return {};});
+    if (!r.ok) { msg.textContent = '失败：' + (d.error || r.status); return; }
+    if (d.card && d.card.id) await cardsV2FlushBuckets('add', d.card.id);
   } catch(e){ msg.textContent = '失败：' + e; return; }
   closeCardsV2CreateModal(); loadCardsV2();
 }
 function openCardsV2EditModal(){
   var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
   cardsV2.editId = card.id; cardsV2.editTags = (cur.tags || []).slice();
+  cardsV2Attach.edit = (cur.attachments || []).slice(); cardsV2PendBuckets.edit = [];
   document.getElementById('cards-v2-edit-title').value = cur.title || '';
   document.getElementById('cards-v2-edit-content').value = cur.content || '';
   document.getElementById('cards-v2-edit-message').textContent = '';
-  renderCardsV2Tags('edit'); toggleCardsV2Menu();
+  renderCardsV2Tags('edit'); cardsV2RenderThumbs('edit'); cardsV2RenderPendBuckets('edit');
+  var am = document.getElementById('cards-v2-edit-attach-menu'); if (am) am.style.display = 'none';
+  var bp = document.getElementById('cards-v2-edit-bucket-picker'); if (bp) bp.style.display = 'none';
+  toggleCardsV2Menu();
   document.getElementById('cards-v2-edit-overlay').style.display = '';
 }
 function closeCardsV2EditModal(){ document.getElementById('cards-v2-edit-overlay').style.display = 'none'; }
 async function submitCardsV2Edit(){
-  var body = { title: document.getElementById('cards-v2-edit-title').value, content: document.getElementById('cards-v2-edit-content').value, tags: cardsV2.editTags.slice() };
-  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  var body = { title: document.getElementById('cards-v2-edit-title').value, content: document.getElementById('cards-v2-edit-content').value, tags: cardsV2.editTags.slice(), attachments: cardsV2Attach.edit.slice() };
+  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); await cardsV2FlushBuckets('edit', cardsV2.editId); } catch(e){}
   closeCardsV2EditModal(); await openCardsV2Detail(cardsV2.editId); loadCardsV2();
 }
 function openCardsV2RevisionModal(){
   var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
-  cardsV2.revId = card.id;
+  cardsV2.revId = card.id; cardsV2Attach.rev = (cur.attachments || []).slice();
   document.getElementById('cards-v2-rev-content').value = cur.content || '';
   document.getElementById('cards-v2-rev-valid-at').value = '';
   document.getElementById('cards-v2-rev-message').textContent = '';
+  cardsV2RenderThumbs('rev');
+  var am = document.getElementById('cards-v2-rev-attach-menu'); if (am) am.style.display = 'none';
   toggleCardsV2Menu();
   document.getElementById('cards-v2-rev-overlay').style.display = '';
 }
 function closeCardsV2RevisionModal(){ document.getElementById('cards-v2-rev-overlay').style.display = 'none'; }
 async function submitCardsV2Revision(){
-  var body = { content: document.getElementById('cards-v2-rev-content').value };
+  var body = { content: document.getElementById('cards-v2-rev-content').value, attachments: cardsV2Attach.rev.slice() };
   var v = document.getElementById('cards-v2-rev-valid-at').value; if (v) body.valid_at = v;
   try { await fetch('/api/cards-skeleton/cards/' + cardsV2.revId + '/revisions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
   closeCardsV2RevisionModal(); await openCardsV2Detail(cardsV2.revId); loadCardsV2();
@@ -9526,6 +9662,47 @@ async function cardsV2AddFolder(fid){ if (!fid || !cardsV2.detail) return; try {
 async function cardsV2RemoveFolder(fid){ if (!cardsV2.detail) return; try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/folders/' + fid, { method:'DELETE' }); } catch(e){} await cardsV2ReloadDetail(); }
 async function cardsV2ReloadDetail(){ var id = cardsV2.detail.id; try { var r = await fetch('/api/cards-skeleton/cards/' + id); var d = await r.json(); cardsV2.detail = d.card; } catch(e){} renderCardsV2FoldersModal(); renderCardsV2Detail(); loadCardsV2(); }
 function closeCardsV2FoldersModal(){ document.getElementById('cards-v2-folders-overlay').style.display = 'none'; }
+// ---- View Bucket (关联的记忆桶) ----
+async function openCardsV2BucketsModal(){
+  if (!cardsV2.detail) return; toggleCardsV2Menu();
+  document.getElementById('cards-v2-buckets-body').innerHTML = '<div class="loading">加载中…</div>';
+  document.getElementById('cards-v2-buckets-overlay').style.display = '';
+  await cardsV2LoadBuckets();
+}
+function closeCardsV2BucketsModal(){ document.getElementById('cards-v2-buckets-overlay').style.display = 'none'; }
+async function cardsV2LoadBuckets(){
+  var card = cardsV2.detail; if (!card) return;
+  var links = [];
+  try { var r = await fetch('/api/cards-skeleton/cards/' + card.id + '/buckets'); var d = await r.json(); links = d.buckets || []; } catch(e){}
+  cardsV2.detail.buckets = links;
+  var body = document.getElementById('cards-v2-buckets-body');
+  if (!links.length){ body.innerHTML = '<div class="loading">这张卡还没关联记忆桶。可以在 Edit / 新建卡里「+ 添加…」→「🫙 Add Bucket」加。</div>'; return; }
+  body.innerHTML = links.map(function(l){
+    var b = l.bucket;
+    var name = b ? (b.name || l.bucket_id) : (l.bucket_id + '（桶已不存在）');
+    var domain = b && Array.isArray(b.domain) && b.domain.length ? b.domain.join('·') : '';
+    var meta = [l.relation_type||'evidence', l.bucket_id, (b&&(b.date||b.created))||'', domain].filter(Boolean).join(' / ');
+    return '<div class="facts-bucket-links-row" id="cards-v2-bkt-' + esc(l.bucket_id) + '" style="padding:10px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="cursor:pointer;" onclick="cardsV2ExpandBucket(\'' + esc(l.bucket_id) + '\')"><b>' + esc(name) + '</b><div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + esc(meta) + '</div></div>'
+      + '<div class="cards-v2-bkt-full" style="display:none;font-size:13px;margin-top:8px;color:var(--text-dim);white-space:pre-wrap;"></div>'
+      + '<div style="margin-top:6px;"><span style="cursor:pointer;color:#c0392b;font-size:12px;" onclick="cardsV2UnlinkBucket(\'' + esc(l.bucket_id) + '\')">🗑 取消关联</span></div>'
+      + '</div>';
+  }).join('');
+}
+async function cardsV2ExpandBucket(bid){
+  var row = document.getElementById('cards-v2-bkt-' + bid); if (!row) return;
+  var full = row.querySelector('.cards-v2-bkt-full'); if (!full) return;
+  if (full.style.display !== 'none'){ full.style.display = 'none'; return; }
+  full.style.display = ''; if (full.dataset.loaded) return;
+  full.textContent = '加载中…';
+  try { var r = await fetch('/api/bucket/' + bid); var d = await r.json(); var bk = d.bucket || d; full.textContent = (bk.content || bk.body || '（读不到内容）'); full.dataset.loaded = '1'; }
+  catch(e){ full.textContent = '读取失败'; }
+}
+async function cardsV2UnlinkBucket(bid){
+  if (!cardsV2.detail) return; if (!confirm('取消关联这个记忆桶？（不会删桶本身）')) return;
+  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/buckets/' + bid, { method:'DELETE' }); } catch(e){}
+  await cardsV2LoadBuckets(); renderCardsV2Detail();
+}
 </script>
 </body>
 </html>

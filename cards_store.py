@@ -94,6 +94,17 @@ class CardStore:
             );
             CREATE INDEX IF NOT EXISTS idx_card_folders_card ON card_folders(card_id);
             CREATE INDEX IF NOT EXISTS idx_card_folders_folder ON card_folders(folder_id);
+
+            CREATE TABLE IF NOT EXISTS card_buckets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_id TEXT NOT NULL,
+                bucket_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL DEFAULT 'evidence',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(card_id, bucket_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_card_buckets_card ON card_buckets(card_id);
             """
         )
         conn.commit()
@@ -267,6 +278,7 @@ class CardStore:
             "current": history[0] if history else None,
             "history": history,
             "folders": self.get_card_folders(card_id),
+            "buckets": self.get_bucket_links(card_id),
         }
 
     def delete_card(self, card_id: str) -> bool:
@@ -278,6 +290,7 @@ class CardStore:
         existed = cursor.rowcount > 0
         conn.execute("DELETE FROM card_revisions WHERE card_id = ?", (str(card_id),))
         conn.execute("DELETE FROM card_folders WHERE card_id = ?", (str(card_id),))
+        conn.execute("DELETE FROM card_buckets WHERE card_id = ?", (str(card_id),))
         conn.commit()
         conn.close()
         return existed
@@ -461,6 +474,45 @@ class CardStore:
             })
         entries.sort(key=lambda e: str(e.get("date") or ""))
         return entries
+
+    # ==================================================================
+    # card <-> memory-bucket links (evidence / origin / related)
+    # ==================================================================
+    def add_bucket_link(self, card_id: str, bucket_id: str, *, relation_type: str = "evidence", note: str = "") -> bool:
+        """Link a memory bucket to a card as evidence/origin/related. Idempotent:
+        returns False if that bucket was already linked, True if newly linked."""
+        bucket_id = str(bucket_id or "").strip()
+        if not bucket_id:
+            raise ValueError("bucket_id is required")
+        conn = self._connect()
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO card_buckets (card_id, bucket_id, relation_type, note, created_at) VALUES (?, ?, ?, ?, ?)",
+            (str(card_id), bucket_id, str(relation_type or "evidence"), str(note or ""), self._now_iso()),
+        )
+        conn.commit()
+        added = cursor.rowcount > 0
+        conn.close()
+        return added
+
+    def remove_bucket_link(self, card_id: str, bucket_id: str) -> bool:
+        conn = self._connect()
+        cursor = conn.execute(
+            "DELETE FROM card_buckets WHERE card_id = ? AND bucket_id = ?",
+            (str(card_id), str(bucket_id)),
+        )
+        conn.commit()
+        removed = cursor.rowcount > 0
+        conn.close()
+        return removed
+
+    def get_bucket_links(self, card_id: str) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM card_buckets WHERE card_id = ? ORDER BY created_at",
+            (str(card_id),),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     # ==================================================================
     # lookup helpers (back the MCP tools in cards_mcp.py)
