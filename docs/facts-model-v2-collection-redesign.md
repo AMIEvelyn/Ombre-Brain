@@ -163,9 +163,11 @@
 
 ### 进度
 - ✅ **① 数据模型层** — `cards_store.py`（`CardStore`）+ `tests/test_cards_store.py`（13 用例全绿）。
-- ✅ **② HTTP 接口层** — `cards_api.py`（15 个 `/api/cards-skeleton/*` 端点）+ `tests/test_cards_api.py`（端到端全绿），**已接线进 server.py**。
-- ✅ **③ MCP 工具** — `cards_mcp.py`（`card_lookup` + `folder_timeline`，给林湛用）+ `tests/test_cards_mcp.py`（全绿），**已接线进 server.py**。
-- ⏳ ④ 最小 UI ⑤ 切换 ⑥ 批量导入 ⑥.1 merge
+- ✅ **② HTTP 接口层** — `cards_api.py`（18 个 `/api/cards-skeleton/*` 端点，含 card↔桶关联）+ `tests/test_cards_api.py`（端到端全绿），**已接线进 server.py，已部署上线**。
+- ✅ **③ MCP 工具** — `cards_mcp.py`（`card_lookup` + `folder_timeline`，给林湛用）+ `tests/test_cards_mcp.py`（全绿），**已接线进 server.py，已部署上线**。
+- ✅ **④ 最小 UI（"时光馆"）— 2026-07-11 完成，一澜确认没问题**：动态多栏馆浏览（建顶层馆/子馆/删馆）、事实卡详情（图片轮播/内容展开/时间线可点开/文件附件）、创建/编辑/New Revision（含标题）、馆归属管理（QQ音乐式）、View Bucket 独立弹窗（搜索关联/取消关联）、搜索节流防打垮服务器（见 §12）。**旧的"骨架"tab（v1 predicate 模式那版）已整个删除**——HTML、74+3 个 v1-only 函数、19 个 v1-only 变量全部清掉，`node --check` + 后端三套测试 + 截图核对过没有残留引用、没有连带破坏 cards-v2。时光馆是现在唯一的资料卡入口。
+  - **还差两小块，不着急，见 §11 待办**：收藏星标 UI（卡面 ⭐ 展示 + `ai_favorite` 桥接）、`folder_timeline` 的 Dashboard 视图入口（MCP 工具给林湛用的部分已就绪，只差一澜自己在 Dashboard 上看的入口）。
+- ⏳ ⑤ 切换（一澜已截图 2 张重要卡，待手动重加）⑥ 批量导入 ⑥.1 merge —— **批量导入之前要先做 §12 的搜索地基修复，不是直接跳导入**
 
 ### server.py 里的接线（已完成，基于一澜真实上传的 server.py + hook 补丁）
 两处改动：
