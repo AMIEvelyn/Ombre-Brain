@@ -10188,7 +10188,9 @@ async def api_facts_skeleton_search_buckets(request):
         seen_ids.add(exact["id"])
 
     try:
-        matches = await bucket_mgr.search(query, limit=10, include_archive=True)
+        matches = await bucket_mgr.search_with_semantic(
+            query, embedding_engine, limit=10, include_archive=True
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     for bucket in matches:
@@ -11066,7 +11068,7 @@ async def api_search(request):
     if not query:
         return JSONResponse({"error": "missing q parameter"}, status_code=400)
     try:
-        matches = await bucket_mgr.search(query, limit=10)
+        matches = await bucket_mgr.search_with_semantic(query, embedding_engine, limit=10)
         result = []
         for b in matches:
             meta = b.get("metadata", {})

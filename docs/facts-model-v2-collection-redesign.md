@@ -167,7 +167,8 @@
 - ✅ **③ MCP 工具** — `cards_mcp.py`（`card_lookup` + `folder_timeline`，给林湛用）+ `tests/test_cards_mcp.py`（全绿），**已接线进 server.py，已部署上线**。
 - ✅ **④ 最小 UI（"时光馆"）— 2026-07-11 完成，一澜确认没问题**：动态多栏馆浏览（建顶层馆/子馆/删馆）、事实卡详情（图片轮播/内容展开/时间线可点开/文件附件）、创建/编辑/New Revision（含标题）、馆归属管理（QQ音乐式）、View Bucket 独立弹窗（搜索关联/取消关联）、搜索节流防打垮服务器（见 §12）。**旧的"骨架"tab（v1 predicate 模式那版）已整个删除**——HTML、74+3 个 v1-only 函数、19 个 v1-only 变量全部清掉，`node --check` + 后端三套测试 + 截图核对过没有残留引用、没有连带破坏 cards-v2。时光馆是现在唯一的资料卡入口。
   - **还差两小块，不着急，见 §11 待办**：收藏星标 UI（卡面 ⭐ 展示 + `ai_favorite` 桥接）、`folder_timeline` 的 Dashboard 视图入口（MCP 工具给林湛用的部分已就绪，只差一澜自己在 Dashboard 上看的入口）。
-- ⏳ ⑤ 切换（一澜已截图 2 张重要卡，待手动重加）⑥ 批量导入 ⑥.1 merge —— **批量导入之前要先做 §12 的搜索地基修复，不是直接跳导入**
+- ✅ **§12 搜索地基修复已实现（2026-07-12，代码在此分支，未部署）**：`list_all()` 内存缓存 + touch() 原地更新缓存 + Add Bucket/主搜索框接上 embedding 双通道，全量测试无新增失败。详见 §12 末尾"修复已实现"小节。
+- ⏳ ⑤ 切换（一澜已截图 2 张重要卡，待手动重加）⑥ 批量导入 ⑥.1 merge —— 地基已修好，可以开始排期批量导入
 
 ### server.py 里的接线（已完成，基于一澜真实上传的 server.py + hook 补丁）
 两处改动：
@@ -242,6 +243,23 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18001/breath-hook
 ### 排期结论（跟一澜讨论后定的，2026-07-11）
 **这一项要排在⑥历史批量导入之前做，不是之后**——不是"顺便都升级一下"的泛化想法，是因为⑥批量导入的核心机制就是"复用现成的联想/关键词检索去找候选桶"（见 §8），如果这条搜索路径在她的数据规模下本身就脆弱，批量导入作为一个会**成批、程序化调用搜索**的流程，大概率会比这次交互式误触发**更严重地**触发同样的过载，而且导入是自动化流程，出问题时没有人在旁边随手停下来。所以这是"⑥的地基"的一部分，跟当初"先理清收藏/歌单模型再做批量导入"是同一个逻辑：**不在已知脆弱的地基上盖下一层楼**。
 
+### ✅ 修复已实现（2026-07-12，两个方向都上了，未部署）
+
+代码改在 `bucket_manager.py` + `server.py`，跑了全量测试套件（857 通过、0 新增失败，22 个跟这次改动无关的既有失败在改前改后完全一致——已逐一用 `git stash` 对照确认）。
+
+**方向①：`list_all()` 内存缓存**（`bucket_manager.py`）
+- `BucketManager` 加 `_all_buckets_cache`（按 `include_archive` 分桶存），命中就跳过 `os.walk()`+YAML 解析全量重扫。
+- **结构性写入**（`create`/`update`/`delete`/`archive`/`add_comment`/`delete_comment`）→ 整体失效缓存，下次 `list_all()` 立即看到最新数据。
+- **`touch()`/`_time_ripple()`**（几乎每次召回命中都会触发，含时间涟漪连带改最多5个邻近桶）→ **不整体失效**，改成直接原地更新缓存里对应桶的 `last_active`/`activation_count` 字段——这是关键，否则高频的 touch 会让缓存形同虚设。
+- **踩到的一个真实 bug，顺手修了**：`search()` 会在结果桶字典上直接写 `bucket["score"] = ...`。以前每次 `list_all()` 都从磁盘重新解析出全新字典，这个写入无所谓；**加了缓存之后**，如果不做防护，这个 `score` 字段会一直赖在缓存里，污染下一次跟这次查询无关的读取。修法：`list_all()` 现在**每次返回的都是缓存条目的浅拷贝**，标注 `score` 不会碰到缓存本体。补了回归测试（`test_search_score_annotation_does_not_leak_into_cache`）钉死这一条。
+- **另一个真实设计权衡**：桶文件"天然兼容 Obsidian 直接编辑"，也有 `reclassify_api.py` 这类脱离 `BucketManager`直接改文件的独立脚本——这些路径加了缓存之后不会自动失效。加了两层保险：① 30 秒 TTL（`matching.bucket_list_cache_ttl_sec` 可调）兜底，最坏情况下过期自动重扫；② 新增公开方法 `invalidate_cache()`，任何绕过 `create`/`update` 等标准写入路径直接改文件的代码（含测试自己）必须在改完后手动调一下。跑全量测试时抓到了 `test_feel_flow.py` 里一个测试正是这个模式（改时间戳测排序），已经在测试里加了这行调用。
+
+**方向②：Add Bucket / 主搜索框接上 embedding 语义检索**（`bucket_manager.py` 新增 `search_with_semantic()` + `server.py` 两处接线）
+- 新方法 `BucketManager.search_with_semantic(query, embedding_engine, ...)`：先跑原有关键词/模糊 `search()`，再并行跑 `embedding_engine.search_similar()`，按 id 去重合并——照抄 `breath()` 已经在生产环境验证过的双通道模式，不是发明新机制。`embedding_engine` 传 `None`（或未启用）时自动退化成纯关键词搜索，行为跟改之前一样，不破坏没有向量库的场景。
+- 接线：`/api/facts-skeleton/buckets/search`（Add Bucket 用）和 `/api/search`（Dashboard 主搜索框）都从调 `bucket_mgr.search()` 改成调 `bucket_mgr.search_with_semantic()`——这两个端点本来就是本次事故的触发点，`breath()` 等其它已经自带双通道逻辑的调用点没有动，避免重复检索浪费。
+
+**待办**：这次改动只在这个分支上，**还没有部署到一澜的 VPS**——按部署纪律，要先给 diff 走一遍确认，再照 `docker cp` 流程上线、重启验证。
+
 ### 其它几项"升级"的排期（不需要挪到批量导入之前）
 - **卡片语义检索**（给资料卡加 embedding）：批量导入不依赖它（导入是"桶→卡"的方向，不是"卡内搜卡"），而且现在卡的数量还很少（~2 张），语义检索在数据量小的时候收益也小。等批量导入把卡的数量做起来之后再考虑，顺理成章。
 - **自动提炼**：这就是⑥本身，不是独立项。
@@ -270,8 +288,8 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18001/breath-hook
 ### 往后的路线图（按顺序，不是并列清单）
 
 ```
-① 搜索地基修复（缓存 list_all() 和/或把 Add Bucket 类场景迁到 embedding 检索，
-   照抄 breath() 已验证的双通道模式）—— 见 §12
+① ✅ 搜索地基修复（缓存 list_all() + 把 Add Bucket 类场景迁到 embedding 检索，
+   照抄 breath() 已验证的双通道模式）—— 见 §12，代码已实现，待部署
         ↓
 ② 历史批量导入（⑥）—— 见 §8，建在①修好的地基上
         ↓

@@ -135,6 +135,9 @@ class TestFeelLifecycle:
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(fm.dumps(post))
 
+        # Direct file edits bypass BucketManager's write paths, so list_all()'s
+        # cache doesn't know about them until told.
+        bm.invalidate_cache()
         all_b = await bm.list_all()
         feels = [b for b in all_b if b["metadata"].get("type") == "feel"]
         feels.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)

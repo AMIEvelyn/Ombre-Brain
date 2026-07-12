@@ -31,6 +31,7 @@ import logging
 import re
 import shutil
 import json
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -180,6 +181,18 @@ class BucketManager:
         self.content_weight = scoring.get("content_weight", 1.0)  # Added to allow better content-based matching during merge
         self.lexical_stop_terms = self._build_lexical_stop_terms(config)
 
+        # --- In-memory cache for list_all() / list_all() 内存缓存 ---
+        # Avoids re-walking + re-parsing every .md bucket file on every search
+        # (was O(n) disk+CPU per call, unusable at 7000+ buckets -- see docs
+        # §12). Keyed by include_archive. Invalidated on structural writes
+        # (create/update/delete/archive/comment); a short TTL is kept as a
+        # safety net for out-of-band edits that bypass BucketManager
+        # entirely (buckets are natively Obsidian-editable, and one-off
+        # scripts like reclassify_api.py write bucket files directly).
+        self._all_buckets_cache: dict[bool, list[dict]] = {}
+        self._all_buckets_cache_at: dict[bool, float] = {}
+        self._all_buckets_cache_ttl = config.get("matching", {}).get("bucket_list_cache_ttl_sec", 30.0)
+
     # ---------------------------------------------------------
     # Create a new bucket
     # 创建新桶
@@ -313,6 +326,7 @@ class BucketManager:
             f"Created bucket / 创建记忆桶: {bucket_id} ({bucket_name}) → {primary_domain}/"
             + (" [PINNED]" if pinned else "") + (" [PROTECTED]" if protected else "")
         )
+        self._invalidate_bucket_cache()
         return bucket_id
 
     # ---------------------------------------------------------
@@ -469,6 +483,7 @@ class BucketManager:
             self._move_bucket(file_path, self.permanent_dir, domain)
 
         logger.info(f"Updated bucket / 更新记忆桶: {bucket_id}")
+        self._invalidate_bucket_cache()
         return True
 
     async def add_comment(
@@ -536,6 +551,8 @@ class BucketManager:
             logger.error(f"Failed to write bucket comment / 写入桶评论失败: {file_path}: {e}")
             return None
 
+        self._invalidate_bucket_cache()
+
         if touch:
             current_time = self._parse_iso_datetime(post.get("created", post.get("last_active", "")))
             if current_time is None:
@@ -594,6 +611,7 @@ class BucketManager:
             return {"status": "failed", "comment": target}
 
         logger.info(f"Deleted bucket comment / 已删除年轮: {bucket_id}#{comment_id}")
+        self._invalidate_bucket_cache()
         return {"status": "deleted", "comment": target}
 
     # ---------------------------------------------------------
@@ -629,6 +647,7 @@ class BucketManager:
             return False
 
         logger.info(f"Deleted bucket / 删除记忆桶: {bucket_id}")
+        self._invalidate_bucket_cache()
         return True
 
     def _build_tombstone(self, bucket_id: str, file_path: str) -> dict:
@@ -698,6 +717,16 @@ class BucketManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(frontmatter.dumps(post))
 
+            # touch() fires on almost every recall hit -- patch the cached
+            # copy in place instead of invalidating the whole list_all()
+            # cache, which would otherwise force a full 7000+ bucket rescan
+            # on every recall and defeat the point of caching.
+            self._patch_cached_bucket_metadata(
+                bucket_id,
+                last_active=post["last_active"],
+                activation_count=post["activation_count"],
+            )
+
             # --- Time ripple: boost nearby memories within ±48h ---
             # --- 时间涟漪：±48小时内的记忆轻微唤醒 ---
             current_time = self._parse_iso_datetime(post.get("created", post.get("last_active", "")))
@@ -748,6 +777,9 @@ class BucketManager:
                     post["activation_count"] = round(current_count + 0.3, 1)
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(frontmatter.dumps(post))
+                    self._patch_cached_bucket_metadata(
+                        bucket["id"], activation_count=post["activation_count"]
+                    )
                     rippled += 1
                 except Exception:
                     continue
@@ -858,6 +890,70 @@ class BucketManager:
 
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:limit]
+
+    # ---------------------------------------------------------
+    # Keyword search + embedding vector search, merged.
+    # 关键词检索 + 向量检索，合并去重。
+    #
+    # Mirrors the dual-channel recall breath() already runs in production
+    # (see docs/facts-model-v2-collection-redesign.md §12/§13): search()
+    # alone is a literal/fuzzy text match, so it misses buckets that are
+    # about the same thing worded differently. High-traffic entry points
+    # (Add Bucket picker, main search box) call this instead of search()
+    # so they get the same recall quality breath() already has.
+    # ---------------------------------------------------------
+    async def search_with_semantic(
+        self,
+        query: str,
+        embedding_engine=None,
+        *,
+        limit: int = None,
+        domain_filter: list[str] = None,
+        query_valence: float = None,
+        query_arousal: float = None,
+        include_archive: bool = True,
+        vector_top_k: int = 20,
+        vector_min_score: float = 0.5,
+    ) -> list[dict]:
+        """
+        Keyword/fuzzy search (self.search) plus an embedding similarity
+        channel, merged and deduped by bucket id. embedding_engine is any
+        object exposing `.enabled` and an async `.search_similar(query,
+        top_k)` -- pass None (or a disabled engine) to fall back to
+        keyword-only search unchanged.
+        """
+        limit = limit or self.max_results
+        matches = await self.search(
+            query,
+            limit=max(limit, vector_top_k),
+            domain_filter=domain_filter,
+            query_valence=query_valence,
+            query_arousal=query_arousal,
+            include_archive=include_archive,
+        )
+        matched_ids = {b["id"] for b in matches}
+
+        if embedding_engine is not None and getattr(embedding_engine, "enabled", False):
+            try:
+                vector_results = await embedding_engine.search_similar(query, top_k=vector_top_k)
+            except Exception as e:
+                logger.warning(f"Vector search failed, using keyword only / 向量搜索失败: {e}")
+                vector_results = []
+            for bucket_id, sim_score in vector_results:
+                if bucket_id in matched_ids or sim_score < vector_min_score:
+                    continue
+                bucket = await self.get(bucket_id)
+                if not bucket:
+                    continue
+                if not include_archive and bucket.get("metadata", {}).get("type") == "archived":
+                    continue
+                bucket["score"] = round(sim_score * 100, 2)
+                bucket["vector_match"] = True
+                matches.append(bucket)
+                matched_ids.add(bucket_id)
+
+        matches.sort(key=lambda b: b.get("score", 0), reverse=True)
+        return matches[:limit]
 
     # ---------------------------------------------------------
     # Topic relevance sub-score:
@@ -1292,7 +1388,17 @@ class BucketManager:
         """
         Recursively walk directories (including domain subdirs), list all buckets.
         递归遍历目录（含域子目录），列出所有记忆桶。
+
+        Served from an in-memory cache when fresh (see __init__ / §12 in
+        docs/facts-model-v2-collection-redesign.md); callers get a shallow
+        copy each time so annotating fields like bucket["score"] never
+        corrupts the cached entry.
         """
+        cached = self._all_buckets_cache.get(include_archive)
+        cached_at = self._all_buckets_cache_at.get(include_archive, 0.0)
+        if cached is not None and (time.monotonic() - cached_at) < self._all_buckets_cache_ttl:
+            return [dict(bucket) for bucket in cached]
+
         buckets = []
 
         dirs = [self.permanent_dir, self.dynamic_dir, self.feel_dir]
@@ -1311,7 +1417,42 @@ class BucketManager:
                     if bucket:
                         buckets.append(bucket)
 
-        return buckets
+        self._all_buckets_cache[include_archive] = buckets
+        self._all_buckets_cache_at[include_archive] = time.monotonic()
+        return [dict(bucket) for bucket in buckets]
+
+    def _invalidate_bucket_cache(self) -> None:
+        """
+        Drop the list_all() cache after a structural write (create/update/
+        delete/archive/comment) so the next search sees it immediately.
+        """
+        self._all_buckets_cache.clear()
+        self._all_buckets_cache_at.clear()
+
+    def invalidate_cache(self) -> None:
+        """
+        Public escape hatch: call this after editing bucket .md files
+        directly on disk instead of through create/update/delete/archive
+        (e.g. hand-editing in Obsidian, a one-off migration script, or test
+        setup that pokes frontmatter directly). Without it, list_all()
+        keeps serving the pre-edit cached copy until the TTL expires.
+        """
+        self._invalidate_bucket_cache()
+
+    def _patch_cached_bucket_metadata(self, bucket_id: str, **metadata_updates) -> None:
+        """
+        Update cached bucket copies in place instead of invalidating the
+        whole list_all() cache. Used by touch()/_time_ripple(), which fire
+        on nearly every recall hit -- invalidating on those would rebuild
+        the full 7000+ bucket scan constantly and defeat the cache.
+        """
+        if not metadata_updates:
+            return
+        for cached_list in self._all_buckets_cache.values():
+            for bucket in cached_list:
+                if bucket.get("id") == bucket_id:
+                    bucket.setdefault("metadata", {}).update(metadata_updates)
+                    break
 
     # ---------------------------------------------------------
     # Statistics (counts per category + total size)
@@ -1395,6 +1536,7 @@ class BucketManager:
             return False
 
         logger.info(f"Archived bucket / 归档记忆桶: {bucket_id} → archive/{primary_domain}/")
+        self._invalidate_bucket_cache()
         return True
 
     # ---------------------------------------------------------
