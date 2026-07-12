@@ -52,50 +52,76 @@ LINE_JUDGMENT_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
   ]
 }"""
 
-MILESTONE_EXTRACTION_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的里程碑提炼助手。给你一条已经确认属于同一件具体事实、但桶数量较多的记忆桶时间线（比如一个长期项目或者关系历程），从中挑出真正构成这件事"状态变化"的关键节点，不是每个桶都要。
+MILESTONE_EXTRACTION_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的里程碑提炼助手。给你一条已经确认属于同一件具体事实、但桶数量较多的记忆桶时间线（比如一个长期项目、身体指标、或者关系历程），任务是把它压缩成几个真正构成"状态变化"的关键节点，不是每个桶都要，但也不能把变化过程压丢。
 
-骨架标准（不是死板的三段，是最低要求）：
-- 起因：事情为何出现，最初发生了什么。
-- 经过：客观状态如何发展；只有发生了有意义的转折才增加节点，不是有桶就加。
-- 结果：最后如何结束，留下了什么变化/决定/后续影响。
+第一步：先判断这条线是"状态线"还是"事件线"。
+- 状态线（state）：适用于偏好、身体指标、关系需求、约定、持续状态等——问的是"现在是什么状态"，可能会随时间反转/改变。
+  结构：初始状态 → 有意义的变化 → 最新有效状态。
+  应保留：最早一次明确状态（哪怕它当时还不构成"变化"，作为起点也要留）；中间每一次真正改变了事实内容的节点；最新一次明确有效的状态。
+- 事件线（event）：适用于旅行、争吵、就医、结婚、项目实施等发生过的具体事件——问的是"这件事怎么发生、怎么发展、怎么结束"。
+  结构：发生/起因 → 关键经过与转折 → 结果或最新进展。
+  应保留：事件发生或起因；客观发展中的关键转折；结果、结束状态或当前进展。
 
-反复表达"当时很难受"之类、但没有新增客观变化的桶，不需要单独作为节点，但依然要在 dropped_bucket_ids 里列出来——它们仍然属于这条线，只是不构成独立的时间点。
+筛选规则：
+- 同一天的多个桶如果描述的是同一个状态或同一个事件阶段，合并为一个时间点，并保留全部涉及的 source_bucket_ids，不要只留其中一个代表桶。
+- 不同日期只是重复确认相同内容、没有新增变化时，不新增时间点。
+- 纯情绪重复且没有改变事实发展的桶，可以放进 dropped_bucket_ids；但如果这个情绪造成了决定、行为、关系约定或客观转折，就必须保留为一个时间点。
+- 后来的桶如果只是在回忆更早发生的事情，不要把"记忆桶被写下的日期"误当成"事实发生的日期"——原文里有明确的事实发生日期时，valid_at 要用那个日期，不是记录这条回忆时的日期。
+- 无法确认具体日期时，不要擅自编造一个日期。
 
 只输出严格 JSON，不要用 markdown 代码块包裹：
 {
-  "milestone_bucket_ids": ["按时间顺序排好的、真正构成状态变化的桶 id"],
-  "dropped_bucket_ids": ["同一条线里给你看过、但不构成独立时间点的桶 id"],
-  "reasoning": "一句话说明为什么这样挑"
+  "timeline_type": "state 或 event",
+  "milestones": [
+    {
+      "valid_at": "YYYY-MM-DD",
+      "role": "initial/change/current（状态线用）或 start/turning_point/result（事件线用）",
+      "summary": "这个时间点客观成立的具体状态或事件阶段，提炼过的，不是原文照抄",
+      "source_bucket_ids": ["属于这个时间点的全部桶 id，同一天合并的要全列出来"]
+    }
+  ],
+  "dropped_bucket_ids": ["属于同一条线、但不构成独立时间点的桶 id"],
+  "reasoning": "一句话说明筛选依据"
 }"""
 
-CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的候选事实卡生成助手。给你一条已经确认属于同一件具体事实的记忆桶（已经按时间排好，可能是全部桶，也可能是提炼过的关键节点），生成一张候选事实卡。这只是候选，不会自动写入，一澜会人工审核，所以可以标注置信度，但不要为了凑结果编造原文没有的内容。
+CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的候选事实卡生成助手。这只是候选，不会自动写入，一澜会人工审核，所以可以标注置信度，但不要为了凑结果编造原文没有的内容。
+
+你收到的输入有两种模式（看 input_mode 字段）：
+- "milestones"：上一步已经把这条线提炼成了几个关键节点（每个节点有 valid_at/summary/source_bucket_ids），你只需要把每个 milestone 转成一条 revision（summary 直接作为 content，可以按下面第3条的视角规则小幅度润色措辞，但不能改变节点已经确定的事实内容和时间点），不需要重新分析原始桶。
+- "buckets"：给你的是未经提炼的原始桶（一般是数量较少的小线），你要自己判断这条线是"状态线"还是"事件线"，并按下面的规则从原始内容里提炼出 revisions。
 
 要求：
 1. 标题（title）：具体、稳定、不空泛，一眼看出讲的是什么具体的事，不能是"饮食喜好""我们的关系"这种大类概括。
-2. 时间线（revisions）：**这是最容易做错的一步，务必看清楚**——按时间顺序，每个真正有意义的状态变化各自一条，**不能因为"讲的是同一件事"就偷懒合并成一条笼统总结**。给你几个桶，如果它们显示出这件事在不同时间点状态不一样（比如从喜欢变成不喜欢、从没做变成做了），就必须生成对应数量的时间点，让人从时间线上能看出"发生了什么变化"，而不是只留一句现在的状态。每条 content 要提炼这个时间点当时的状态，不是原文照抄。**除非这条事实完全不涉及具体某个人（纯粹描述一件物品/地点本身的客观属性），内容要延续记忆桶原本"林湛第一人称"的叙述视角来写**（例如"一澜爱吃酸辣粉"这种主谓句式，不要写成脱离视角的"存在对酸辣粉的偏好"）。
+2. 顶层 content：必须等于最后一条（时间上最新）revision 的 content——一张卡打开先看到的是"现在是什么状态/结果"，revisions 里才是完整的变化过程。
+3. 时间线（revisions）：**这是最容易做错的一步，务必看清楚**——按时间顺序，每个真正有意义的状态变化各自一条，**不能因为"讲的是同一件事"就偷懒合并成一条笼统总结**。
+   - 状态线必须体现"最初状态 → 变化 → 最新有效状态"。
+   - 事件线必须体现"发生/起因 → 关键转折 → 结果或当前进展"。
+   - 每条 revision 必须直接写出当时成立的具体事实，不能写成笼统总结（禁止这样做），例子——给你两个桶：
+     - 2020-08-12 的桶：内容是"一澜喜欢吃火锅"
+     - 2026-07-12 的桶：内容是"一澜现在讨厌吃火锅了"
 
-   例子——给你两个桶：
-   - 2020-08-12 的桶：内容是"一澜喜欢吃火锅"
-   - 2026-07-12 的桶：内容是"一澜现在讨厌吃火锅了"
+     正确输出（两个时间点，看得出变化）：
+     "revisions": [
+       {"content": "一澜喜欢吃火锅", "valid_at": "2020-08-12", "source_bucket_ids": [...]},
+       {"content": "一澜现在讨厌吃火锅", "valid_at": "2026-07-12", "source_bucket_ids": [...]}
+     ]
 
-   正确输出（两个时间点，看得出变化）：
-   "revisions": [
-     {"content": "一澜喜欢吃火锅", "valid_at": "2020-08-12", "source_bucket_ids": [...]},
-     {"content": "一澜现在讨厌吃火锅", "valid_at": "2026-07-12", "source_bucket_ids": [...]}
-   ]
-
-   错误输出（合并成一条，丢了变化过程，禁止这样做）：
-   "revisions": [
-     {"content": "一澜对火锅的态度前后不一样", "valid_at": "2026-07-12", "source_bucket_ids": [...]}
-   ]
-
-3. 标签（tags）：除了字面相关的词，如果记忆桶原文里反复出现一个和标题字面不同、但明显在指同一个东西的别称/象征说法（例如一件东西本体叫"手串"，但被当"护身符"看待），要把这个别称也写进标签，方便以后按这个别称也能搜到这张卡。
-4. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。
-5. confidence（0~1）：对这张卡整体判断的把握程度。
+     错误输出（合并成一条，丢了变化过程，禁止这样做）：
+     "revisions": [
+       {"content": "一澜对火锅的态度前后不一样", "valid_at": "2026-07-12", "source_bucket_ids": [...]}
+     ]
+   - 同一天/同一状态的多个来源合并进同一条 revision，保留全部 source_bucket_ids。
+   - 如果只有一个日期、没有历史变化，就只生成一条 revision，它的 content 同时也是顶层 content。
+   - 重复确认同一状态但没有新变化时，不要为了凑数重复生成内容相同的 revision。
+   - **除非这条事实完全不涉及具体某个人（纯粹描述一件物品/地点本身的客观属性），内容要延续记忆桶原本"林湛第一人称"的叙述视角来写**（例如"一澜爱吃酸辣粉"这种主谓句式，不要写成脱离视角的"存在对酸辣粉的偏好"）。
+4. 标签（tags）：除了字面相关的词，如果原文里反复出现一个和标题字面不同、但明显在指同一个东西的别称/象征说法（例如一件东西本体叫"手串"，但被当"护身符"看待），要把这个别称也写进标签，方便以后按这个别称也能搜到这张卡。
+5. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。
+6. confidence（0~1）：对这张卡整体判断的把握程度。
 
 只输出严格 JSON，不要用 markdown 代码块包裹：
 {
   "title": "...",
+  "content": "最新有效状态或事件的最新结果",
   "revisions": [{"content": "...", "valid_at": "YYYY-MM-DD", "source_bucket_ids": ["..."]}],
   "tags": ["..."],
   "suggested_folder_paths": ["一澜 / 喜好与生活 / 饮食"],
@@ -239,23 +265,55 @@ class BatchImportEngine:
             json.dumps(payload, ensure_ascii=False),
         )
         if not result:
-            return {"milestone_bucket_ids": [b["id"] for b in shortlist], "dropped_bucket_ids": [], "reasoning": ""}
-        result.setdefault("milestone_bucket_ids", [])
+            # Fallback: treat every shortlisted bucket as its own milestone
+            # rather than losing the shortlist entirely.
+            return {
+                "timeline_type": "state",
+                "milestones": [
+                    {
+                        "valid_at": (b.get("metadata") or {}).get("created", ""),
+                        "role": "current",
+                        "summary": str(b.get("content", "") or "")[:400],
+                        "source_bucket_ids": [b["id"]],
+                    }
+                    for b in shortlist
+                ],
+                "dropped_bucket_ids": [],
+                "reasoning": "LLM call failed or returned unparseable output",
+            }
+        result.setdefault("timeline_type", "state")
+        result.setdefault("milestones", [])
         result.setdefault("dropped_bucket_ids", [])
+        result.setdefault("reasoning", "")
         return result
 
     # ------------------------------------------------------------------
     # Step ⑤: generate the candidate card
+    #
+    # Either pass `buckets` (small line, no milestone step ran) or
+    # `milestones` (large line -- the dict returned by extract_milestones()),
+    # not both. The prompt itself branches on which one it was given.
     # ------------------------------------------------------------------
-    async def generate_candidate_card(self, line_buckets: list[dict]) -> dict:
+    async def generate_candidate_card(
+        self, *, buckets: list[dict] | None = None, milestones: dict | None = None
+    ) -> dict:
         folder_paths = [
             self.card_store.folder_path(f["id"]) for f in self.card_store.list_folders()
         ]
-        ordered = sorted(line_buckets, key=lambda b: (b.get("metadata") or {}).get("created", "") or "")
-        payload = {
-            "buckets": [_bucket_excerpt(b) for b in ordered],
-            "existing_folder_paths": folder_paths,
-        }
+        if milestones is not None:
+            payload = {
+                "input_mode": "milestones",
+                "timeline_type": milestones.get("timeline_type", ""),
+                "milestones": milestones.get("milestones", []),
+                "existing_folder_paths": folder_paths,
+            }
+        else:
+            ordered = sorted(buckets or [], key=lambda b: (b.get("metadata") or {}).get("created", "") or "")
+            payload = {
+                "input_mode": "buckets",
+                "buckets": [_bucket_excerpt(b) for b in ordered],
+                "existing_folder_paths": folder_paths,
+            }
         result = await self._call_json(
             CANDIDATE_CARD_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
@@ -263,11 +321,12 @@ class BatchImportEngine:
         )
         if not result:
             return {
-                "title": "", "revisions": [], "tags": [],
+                "title": "", "content": "", "revisions": [], "tags": [],
                 "suggested_folder_paths": [], "confidence": 0.0,
                 "reasoning": "LLM call failed or returned unparseable output",
             }
         result.setdefault("title", "")
+        result.setdefault("content", "")
         result.setdefault("revisions", [])
         result.setdefault("tags", [])
         result.setdefault("suggested_folder_paths", [])
@@ -326,12 +385,13 @@ class BatchImportEngine:
         if len(line_buckets) > self.large_line_threshold:
             milestones = await self.extract_milestones(line_buckets)
             dropped_bucket_ids = milestones["dropped_bucket_ids"]
-            milestone_ids = set(milestones["milestone_bucket_ids"]) or {b["id"] for b in line_buckets}
-            candidate_input_buckets = [b for b in line_buckets if b["id"] in milestone_ids]
+            # Milestones carry their own source_bucket_ids (a merged same-day
+            # milestone can point at several); hand the whole structure to
+            # candidate-card generation instead of re-deriving a flat bucket
+            # list, so per-revision provenance survives intact.
+            candidate_card = await self.generate_candidate_card(milestones=milestones)
         else:
-            candidate_input_buckets = line_buckets
-
-        candidate_card = await self.generate_candidate_card(candidate_input_buckets)
+            candidate_card = await self.generate_candidate_card(buckets=line_buckets)
 
         line_id = progress_store.save_line(
             seed_bucket_id=seed_bucket_id,

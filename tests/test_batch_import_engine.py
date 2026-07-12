@@ -93,6 +93,7 @@ async def test_small_line_generates_candidate_without_writing_to_cardstore(
     })
     card_response = json.dumps({
         "title": "对酸辣粉的偏好",
+        "content": "一澜爱吃加糖的酸辣粉",
         "revisions": [
             {"content": "一澜爱吃酸辣粉", "valid_at": "2025-01-01", "source_bucket_ids": [seed_id]},
             {"content": "一澜爱吃加糖的酸辣粉", "valid_at": "2025-06-06", "source_bucket_ids": [later_id]},
@@ -110,6 +111,8 @@ async def test_small_line_generates_candidate_without_writing_to_cardstore(
     assert result["status"] == "candidate"
     assert set(result["line_bucket_ids"]) == {seed_id, later_id}
     assert result["candidate_card"]["title"] == "对酸辣粉的偏好"
+    # content mirrors the latest revision, per Lin Zhan's spec.
+    assert result["candidate_card"]["content"] == result["candidate_card"]["revisions"][-1]["content"]
 
     # Never auto-written.
     assert card_store.all_cards() == []
@@ -177,12 +180,17 @@ async def test_large_line_uses_milestone_extraction(bucket_mgr, engine, progress
         ],
     })
     milestone_response = json.dumps({
-        "milestone_bucket_ids": [seed_id, done_id],
+        "timeline_type": "event",
+        "milestones": [
+            {"valid_at": "2025-01-01", "role": "start", "summary": "开始写书", "source_bucket_ids": [seed_id]},
+            {"valid_at": "2025-06-01", "role": "result", "summary": "书写完了", "source_bucket_ids": [done_id]},
+        ],
         "dropped_bucket_ids": [chat_id],
         "reasoning": "闲聊没有带来客观状态变化",
     })
     card_response = json.dumps({
         "title": "写书这件事的进展",
+        "content": "书写完了",
         "revisions": [
             {"content": "开始写书", "valid_at": "2025-01-01", "source_bucket_ids": [seed_id]},
             {"content": "书写完了", "valid_at": "2025-06-01", "source_bucket_ids": [done_id]},
@@ -203,6 +211,39 @@ async def test_large_line_uses_milestone_extraction(bucket_mgr, engine, progress
     assert card_store.all_cards() == []
     # the "dropped" chat bucket is still part of the line and gets swept too.
     assert progress_store.is_swept(chat_id)
+
+
+@pytest.mark.asyncio
+async def test_generate_candidate_card_milestones_mode_preserves_merged_source_ids(engine):
+    """A same-day merge in the milestone step can point one milestone at
+    several source buckets -- make sure that survives into the payload
+    handed to the candidate-card LLM call, not just a single representative id."""
+    captured = {}
+
+    class _CapturingCompletions:
+        async def create(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            content = json.dumps({
+                "title": "t", "content": "c", "revisions": [], "tags": [],
+                "suggested_folder_paths": [], "confidence": 0.5, "reasoning": "r",
+            })
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    engine.client = SimpleNamespace(chat=SimpleNamespace(completions=_CapturingCompletions()))
+    milestones = {
+        "timeline_type": "state",
+        "milestones": [
+            {"valid_at": "2025-01-01", "role": "initial", "summary": "s1", "source_bucket_ids": ["b1", "b2"]},
+        ],
+        "dropped_bucket_ids": [],
+        "reasoning": "x",
+    }
+
+    await engine.generate_candidate_card(milestones=milestones)
+
+    payload = json.loads(captured["messages"][1]["content"])
+    assert payload["input_mode"] == "milestones"
+    assert payload["milestones"][0]["source_bucket_ids"] == ["b1", "b2"]
 
 
 def test_prefilter_for_milestones_bounds_shortlist_size(engine):
