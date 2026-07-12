@@ -1,7 +1,15 @@
 # 历史批量导入（⑥）—— 架构设计存档
 
 写给：一澜、林湛，以及接手的新会话
-状态：**设计讨论收敛，未开工**。这是 §12 搜索地基修复之后的下一步（见 `facts-model-v2-collection-redesign.md` §8/§13）。这份文档记录的是"批量导入具体怎么跑"的执行架构，不重复记录卡片模型本身的设计（那部分见 `facts-model-v2-collection-redesign.md`）。
+状态：**最小版本已实现（2026-07-12），未部署，等真实跑一次"书"这条线看效果**。这是 §12 搜索地基修复之后的下一步（见 `facts-model-v2-collection-redesign.md` §8/§13）。这份文档记录的是"批量导入具体怎么跑"的执行架构，不重复记录卡片模型本身的设计（那部分见 `facts-model-v2-collection-redesign.md`）。
+
+### 实现状态
+
+代码：`batch_import_engine.py`（拉线/判线/里程碑提炼/候选生成四个步骤 + prompt）、`import_progress_store.py`（独立 sqlite，见 §4）、`scripts/run_batch_import_line.py`（手动跑单条线的入口，`docker exec` 方式，不接进常驻服务）、`config.example.yaml` 新增 `batch_import` 配置块（默认复用 `dehydration` 的 API key/模型，走 Gemini 官方 API）。跑了单元测试（含全套回归），无新增失败。
+
+**这次只实现了跑单条线的能力，没有实现"自动扫完全部7000+桶"的循环驱动**——按之前的约定，先验证这条链路本身的输出质量，再决定要不要建全量扫描的循环（见 §10）。
+
+标签生成、第一人称视角要求（除非事实不涉及人称）、多文件夹建议、候选而非直接写入 这几条约定都已经写进 prompt 里，具体文字见下方"prompt 原文"。
 
 ---
 

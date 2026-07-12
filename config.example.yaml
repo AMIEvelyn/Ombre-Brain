@@ -129,6 +129,18 @@ dehydration:
   max_tokens: 1024
   temperature: 0.1
 
+# --- Batch import / 历史批量导入（拉线引擎）---
+# 见 docs/batch-import-design.md。留空的 api_key/base_url/model 会复用上面
+# dehydration 的配置，不需要单独再配一套 key。
+batch_import:
+  api_key: ""      # 留空 = 复用 dehydration.api_key（走 OMBRE_API_KEY 环境变量）
+  base_url: ""     # 留空 = 复用 dehydration.base_url
+  model: ""        # 留空 = 复用 dehydration.model
+  progress_db_path: ""          # 留空 = state/import_progress.sqlite
+  pull_line_top_k: 30           # 拉线一次最多拉多少个候选桶
+  large_line_threshold: 15      # 一条线超过这个桶数就走里程碑提炼，不逐桶生成时间点
+  milestone_prefilter_k: 12     # 大线里程碑提炼前，先用免费信号粗筛出多少个候选
+
 # --- Anchor / 长期锚点 ---
 # anchor is a small curated set of long-term important memories.
 # It works beside breath surfacing and keyword search.
