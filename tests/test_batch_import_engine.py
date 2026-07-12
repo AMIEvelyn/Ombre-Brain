@@ -10,9 +10,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from batch_import_engine import BatchImportEngine
+from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine
 from cards_store import CardStore
 from import_progress_store import ImportProgressStore
+
+
+def test_candidate_card_prompt_forbids_collapsing_a_timeline_into_one_summary():
+    """Regression guard: Yi Lan caught that an earlier prompt draft only
+    said 'each meaningful change gets its own point' in the abstract, with
+    no worked example -- which risks the LLM writing one summary revision
+    ('态度前后不一样') instead of one revision per actual state ('喜欢' then
+    '讨厌'). The concrete before/after example must stay in the prompt."""
+    assert "一澜喜欢吃火锅" in CANDIDATE_CARD_SYSTEM_PROMPT
+    assert "一澜现在讨厌吃火锅" in CANDIDATE_CARD_SYSTEM_PROMPT
+    assert "禁止这样做" in CANDIDATE_CARD_SYSTEM_PROMPT
 
 
 class _FakeCompletions:
