@@ -210,6 +210,20 @@ class BatchImportEngine:
         self.large_line_threshold = int(cfg.get("large_line_threshold", 6))
         self.milestone_prefilter_k = int(cfg.get("milestone_prefilter_k", 12))
 
+        # Tag sweep: a single similarity search caps out at pull_line_top_k
+        # candidates, which can't reliably surface every member of a long,
+        # tightly-clustered saga (a book, a project) with hundreds of near-
+        # equally-relevant buckets -- see docs/batch-import-design.md. Any
+        # bucket sharing a tag with the seed is pulled in directly, skipping
+        # judge_line entirely (shared tag is strong evidence on its own, and
+        # judging hundreds of candidates individually would blow the
+        # max_tokens budget right back open). A tag used across too large a
+        # share of the whole corpus is treated as a generic mood/domain tag,
+        # not a specific project identifier, and ignored for this purpose.
+        self.tag_sweep_enabled = bool(cfg.get("tag_sweep_enabled", True))
+        self.tag_sweep_max_tag_ratio = float(cfg.get("tag_sweep_max_tag_ratio", 0.05))
+        self.tag_sweep_max_candidates = int(cfg.get("tag_sweep_max_candidates", 400))
+
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
 
     async def _call_json(self, system_prompt: str, user_content: str, *, max_tokens: int = 2000) -> dict | None:
@@ -245,17 +259,61 @@ class BatchImportEngine:
     # ------------------------------------------------------------------
     # Step ②: pull a line
     # ------------------------------------------------------------------
-    async def pull_line(self, seed_bucket: dict) -> list[dict]:
-        """Seed the associative search with the seed bucket's own content,
-        reusing the dual-channel search fixed in §12 rather than a bespoke
-        recall path."""
+    async def pull_line(self, seed_bucket: dict) -> dict:
+        """Two complementary channels, returned separately:
+
+        - "similarity": associative search seeded with the seed bucket's own
+          content, reusing the dual-channel search fixed in §12. Catches
+          buckets that don't share a tag with the seed (e.g. written before
+          a project settled on a consistent tag).
+        - "tag_matched": every bucket sharing a (non-generic) tag with the
+          seed, via _tag_sweep(). Not capped by similarity ranking, so a
+          saga with hundreds of tightly-clustered buckets doesn't lose
+          members to a fixed top-K cutoff.
+
+        Buckets caught by the tag sweep are removed from "similarity" so
+        judge_line() doesn't spend a judgment on something already confirmed.
+        """
         seed_content = str(seed_bucket.get("content", "") or "")
         seed_name = str((seed_bucket.get("metadata") or {}).get("name", "") or "")
         query = f"{seed_name}\n{seed_content}".strip()[:500]
         matches = await self.bucket_mgr.search_with_semantic(
             query, self.embedding_engine, limit=self.pull_line_top_k, include_archive=True,
         )
-        return [b for b in matches if b.get("id") != seed_bucket.get("id")]
+        similarity = [b for b in matches if b.get("id") != seed_bucket.get("id")]
+
+        tag_matched = await self._tag_sweep(seed_bucket) if self.tag_sweep_enabled else []
+        tag_matched_ids = {b["id"] for b in tag_matched}
+        similarity = [b for b in similarity if b["id"] not in tag_matched_ids]
+
+        return {"similarity": similarity, "tag_matched": tag_matched}
+
+    async def _tag_sweep(self, seed_bucket: dict) -> list[dict]:
+        seed_tags = [
+            str(t).strip() for t in (seed_bucket.get("metadata") or {}).get("tags", []) or []
+            if str(t).strip()
+        ]
+        if not seed_tags:
+            return []
+
+        all_buckets = await self.bucket_mgr.list_all(include_archive=True)
+        total = max(1, len(all_buckets))
+        tag_counts: dict[str, int] = {}
+        for b in all_buckets:
+            for t in (b.get("metadata") or {}).get("tags", []) or []:
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+
+        max_count = max(2, int(total * self.tag_sweep_max_tag_ratio))
+        usable_tags = {t for t in seed_tags if 1 < tag_counts.get(t, 0) <= max_count}
+        if not usable_tags:
+            return []
+
+        matched = [
+            b for b in all_buckets
+            if b["id"] != seed_bucket["id"]
+            and usable_tags & set((b.get("metadata") or {}).get("tags", []) or [])
+        ]
+        return matched[: self.tag_sweep_max_candidates]
 
     # ------------------------------------------------------------------
     # Step ③: judge the line
@@ -418,8 +476,10 @@ class BatchImportEngine:
             }
 
     async def _run_single_line_inner(self, seed_bucket: dict, seed_bucket_id: str, progress_store) -> dict:
-        candidates = await self.pull_line(seed_bucket)
-        judgment = await self.judge_line(seed_bucket, candidates)
+        pulled = await self.pull_line(seed_bucket)
+        similarity_candidates = pulled["similarity"]
+        tag_matched_candidates = pulled["tag_matched"]
+        judgment = await self.judge_line(seed_bucket, similarity_candidates)
 
         in_line_ids = {
             v["bucket_id"] for v in judgment["bucket_verdicts"] if v.get("verdict") == "in_line"
@@ -427,7 +487,9 @@ class BatchImportEngine:
         uncertain_ids = {
             v["bucket_id"] for v in judgment["bucket_verdicts"] if v.get("verdict") == "uncertain"
         }
-        by_id = {b["id"]: b for b in candidates}
+        tag_matched_ids = {b["id"] for b in tag_matched_candidates}
+        by_id = {b["id"]: b for b in similarity_candidates}
+        by_id.update({b["id"]: b for b in tag_matched_candidates})
         by_id[seed_bucket["id"]] = seed_bucket
 
         if uncertain_ids:
@@ -436,21 +498,27 @@ class BatchImportEngine:
                 reason="判线拿不准，等待后续证据",
             )
 
-        if not judgment["specific_question"]:
-            # No confident line -- mark just the seed as swept (pass) so the
-            # sweep doesn't retry the same seed forever, but don't touch the
-            # candidates: they're still fully available for their own future line.
+        if not judgment["specific_question"] and not tag_matched_ids:
+            # No confident line and no tag evidence either -- mark just the
+            # seed as swept (pass) so the sweep doesn't retry the same seed
+            # forever, but don't touch the candidates: they're still fully
+            # available for their own future line.
             progress_store.mark_swept([seed_bucket["id"]], line_id="")
             return {
                 "status": "pass",
                 "seed_bucket_id": seed_bucket_id,
-                "reasoning": "specific_question 为空，判定为不足以构成一条线",
+                "reasoning": "specific_question 为空且没有标签证据，判定为不足以构成一条线",
             }
+
+        specific_question = judgment["specific_question"] or (
+            "（拉线判断没给出具体问题，但有共享标签证据，按标签直接归入同一条线）"
+            + str((seed_bucket.get("metadata") or {}).get("name", ""))
+        )
 
         # Only trust verdicts for bucket ids that were actually in the
         # candidates we showed the judge -- guards against a hallucinated
         # bucket_id ending up "swept" without ever having been fetched/used.
-        line_bucket_ids = sorted((in_line_ids | {seed_bucket["id"]}) & set(by_id))
+        line_bucket_ids = sorted((in_line_ids | tag_matched_ids | {seed_bucket["id"]}) & set(by_id))
         line_buckets = [by_id[bid] for bid in line_bucket_ids]
 
         dropped_bucket_ids: list[str] = []
@@ -470,7 +538,7 @@ class BatchImportEngine:
             status="candidate",
             bucket_ids=line_bucket_ids,
             candidate_card=candidate_card,
-            reasoning=judgment.get("specific_question", ""),
+            reasoning=specific_question,
             confidence=float(candidate_card.get("confidence") or 0.0),
         )
         progress_store.mark_swept(line_bucket_ids, line_id=line_id)
@@ -479,7 +547,7 @@ class BatchImportEngine:
             "status": "candidate",
             "line_id": line_id,
             "seed_bucket_id": seed_bucket_id,
-            "specific_question": judgment["specific_question"],
+            "specific_question": specific_question,
             "line_bucket_ids": line_bucket_ids,
             "dropped_bucket_ids": dropped_bucket_ids,
             "candidate_card": candidate_card,

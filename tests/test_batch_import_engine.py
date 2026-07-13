@@ -76,13 +76,88 @@ def engine(test_config, bucket_mgr, card_store):
     return eng
 
 
+@pytest.mark.asyncio
+async def test_tag_sweep_catches_a_saga_bigger_than_pull_line_top_k(bucket_mgr, engine):
+    """This is the real case Yi Lan hit: ~300 tightly-clustered buckets
+    about her book, only pull_line_top_k similarity results ever surfaced,
+    and the final "book printed" bucket didn't make the cut. A shared,
+    non-generic tag should catch all of them regardless of how many there
+    are, uncapped by similarity ranking."""
+    engine.pull_line_top_k = 3  # force a tiny similarity cap to prove the tag sweep isn't limited by it
+    # The generic-tag ratio filter is tested on its own below; a 13-bucket
+    # toy corpus would otherwise flag "文学创作" itself as too broad.
+    engine.tag_sweep_max_tag_ratio = 1.0
+
+    seed_id = await bucket_mgr.create(
+        content="开始写小说", tags=["文学创作", "小说创作"], importance=5, domain=["创作"], name="小说开始",
+    )
+    saga_ids = [
+        await bucket_mgr.create(
+            content=f"继续写小说第{i}章", tags=["文学创作", "小说创作"], importance=5,
+            domain=["创作"], name=f"小说第{i}章",
+        )
+        for i in range(10)
+    ]
+    printed_id = await bucket_mgr.create(
+        content="小说印刷出来了并寄给了朋友", tags=["文学创作", "小说创作"], importance=8,
+        domain=["创作"], name="小说印刷",
+    )
+    unrelated_id = await bucket_mgr.create(
+        content="今天吃了火锅", tags=["日常"], importance=3, domain=["生活"], name="火锅",
+    )
+
+    seed_bucket = await bucket_mgr.get(seed_id)
+    pulled = await engine.pull_line(seed_bucket)
+
+    tag_matched_ids = {b["id"] for b in pulled["tag_matched"]}
+    assert set(saga_ids) | {printed_id} <= tag_matched_ids
+    assert unrelated_id not in tag_matched_ids
+    # tag-matched buckets are pulled out of the similarity list so they
+    # aren't judged (and paid for) twice.
+    similarity_ids = {b["id"] for b in pulled["similarity"]}
+    assert similarity_ids.isdisjoint(tag_matched_ids)
+
+
+@pytest.mark.asyncio
+async def test_tag_sweep_ignores_overly_generic_tags(bucket_mgr, engine):
+    """A tag used across most of the corpus is a mood/domain tag, not a
+    specific project identifier -- sweeping on it would pull in unrelated
+    buckets and blow the cost budget open."""
+    engine.tag_sweep_max_tag_ratio = 0.5
+
+    seed_id = await bucket_mgr.create(
+        content="今天很开心", tags=["日常", "情绪"], importance=5, domain=["生活"], name="开心",
+    )
+    # Make "日常" span most of the corpus (generic), "情绪" stay small (specific).
+    for i in range(20):
+        await bucket_mgr.create(
+            content=f"随便记一笔{i}", tags=["日常"], importance=3, domain=["生活"], name=f"随笔{i}",
+        )
+    specific_id = await bucket_mgr.create(
+        content="又一次因为同样的事情emo了", tags=["情绪"], importance=5, domain=["生活"], name="emo",
+    )
+
+    seed_bucket = await bucket_mgr.get(seed_id)
+    pulled = await engine.pull_line(seed_bucket)
+
+    tag_matched_ids = {b["id"] for b in pulled["tag_matched"]}
+    assert specific_id in tag_matched_ids
+    # None of the 20 "日常"-only buckets should have been swept in via the
+    # generic tag.
+    assert len(tag_matched_ids) == 1
+
+
 def _fixed_pull_line(bucket_mgr, candidate_ids):
-    """Replace pull_line with a fixed candidate set so these tests exercise
-    the judge/milestone/candidate-generation decision logic in isolation,
-    independent of bucket_manager's real BM25/embedding recall ranking
-    (that recall behavior is covered separately in test_bucket_cache.py)."""
+    """Replace pull_line with a fixed similarity-only candidate set (no tag
+    matches) so these tests exercise the judge/milestone/candidate-generation
+    decision logic in isolation, independent of bucket_manager's real
+    BM25/embedding recall ranking (covered separately in test_bucket_cache.py)
+    and independent of the tag-sweep channel (covered by its own tests)."""
     async def _pull(seed_bucket):
-        return [await bucket_mgr.get(bid) for bid in candidate_ids]
+        return {
+            "similarity": [await bucket_mgr.get(bid) for bid in candidate_ids],
+            "tag_matched": [],
+        }
     return _pull
 
 
@@ -306,6 +381,55 @@ async def test_default_large_line_threshold_catches_a_dense_discussion_line(
     # coming through correctly proves all three calls happened in order.
     assert result["candidate_card"]["title"] == "小说创作讨论"
     assert result["dropped_bucket_ids"] == other_ids
+
+
+@pytest.mark.asyncio
+async def test_tag_matched_buckets_join_line_without_individual_judgment(
+    bucket_mgr, engine, progress_store, card_store
+):
+    """Tag-matched buckets must join the line without going through
+    judge_line individually (that's the whole point -- shared tag is
+    strong evidence and judging hundreds one-by-one would reopen the
+    truncation problem). Only one similarity candidate needs judging here;
+    the fake judge response has just one verdict, proving the tag-matched
+    ones weren't sent to the judge at all."""
+    seed_id = await bucket_mgr.create(
+        content="开始写小说", tags=["文学创作"], importance=5, domain=["创作"], name="小说开始",
+    )
+    tag_matched_ids = [
+        await bucket_mgr.create(
+            content=f"小说第{i}章", tags=["文学创作"], importance=5, domain=["创作"], name=f"第{i}章",
+        )
+        for i in range(3)
+    ]
+    fuzzy_only_id = await bucket_mgr.create(
+        content="随口提到写作", tags=[], importance=3, domain=["创作"], name="随口提到",
+    )
+
+    async def fake_pull(seed_bucket):
+        return {
+            "similarity": [await bucket_mgr.get(fuzzy_only_id)],
+            "tag_matched": [await bucket_mgr.get(bid) for bid in tag_matched_ids],
+        }
+
+    engine.pull_line = fake_pull
+    judge_response = json.dumps({
+        "specific_question": "",  # fuzzy candidate alone isn't judged as a real line
+        "bucket_verdicts": [{"bucket_id": fuzzy_only_id, "verdict": "not_related", "reason": "只是随口一提"}],
+    })
+    card_response = json.dumps({
+        "title": "小说创作", "content": "开始写小说",
+        "revisions": [{"content": "开始写小说", "valid_at": "2025-01-01", "source_bucket_ids": [seed_id]}],
+        "tags": [], "suggested_folder_paths": [], "confidence": 0.6, "reasoning": "按标签归入同一条线",
+    })
+    engine.client = FakeLLMClient([judge_response, card_response])
+
+    result = await engine.run_single_line(seed_id, progress_store)
+
+    assert result["status"] == "candidate"
+    assert set(tag_matched_ids) <= set(result["line_bucket_ids"])
+    assert fuzzy_only_id not in result["line_bucket_ids"]
+    assert card_store.all_cards() == []
 
 
 @pytest.mark.asyncio
