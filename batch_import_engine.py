@@ -186,7 +186,14 @@ class BatchImportEngine:
         self.thinking_mode = str(cfg.get("thinking_mode", "disabled") or "disabled").strip().lower()
 
         self.pull_line_top_k = int(cfg.get("pull_line_top_k", 30))
-        self.large_line_threshold = int(cfg.get("large_line_threshold", 15))
+        # Lin Zhan caught (2026-07) that 15 let a genuinely dense line (many
+        # near-duplicate discussion buckets, few actual state changes) slip
+        # past milestone compression entirely and get dumped raw into
+        # candidate-card generation -- which has no real cap on how many
+        # revisions it might try to write. Milestone extraction is cheap
+        # (it's bounded by milestone_prefilter_k regardless of input size),
+        # so default to running it for anything beyond a small handful.
+        self.large_line_threshold = int(cfg.get("large_line_threshold", 6))
         self.milestone_prefilter_k = int(cfg.get("milestone_prefilter_k", 12))
 
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
@@ -334,6 +341,7 @@ class BatchImportEngine:
             self.card_store.folder_path(f["id"]) for f in self.card_store.list_folders()
         ]
         if milestones is not None:
+            item_count = len(milestones.get("milestones", []))
             payload = {
                 "input_mode": "milestones",
                 "timeline_type": milestones.get("timeline_type", ""),
@@ -342,15 +350,19 @@ class BatchImportEngine:
             }
         else:
             ordered = sorted(buckets or [], key=lambda b: (b.get("metadata") or {}).get("created", "") or "")
+            item_count = len(ordered)
             payload = {
                 "input_mode": "buckets",
                 "buckets": [_bucket_excerpt(b) for b in ordered],
                 "existing_folder_paths": folder_paths,
             }
+        # Bounded by large_line_threshold/milestone_prefilter_k in practice,
+        # but scale defensively anyway rather than trust a flat number.
+        max_tokens = min(6000, 1200 + 250 * (item_count + 1))
         result = await self._call_json(
             CANDIDATE_CARD_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
-            max_tokens=3000,
+            max_tokens=max_tokens,
         )
         if not result:
             return {

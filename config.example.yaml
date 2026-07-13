@@ -140,7 +140,9 @@ batch_import:
                                  # 思考模式默认会占用 max_tokens 预算，容易导致输出被截断
   progress_db_path: ""          # 留空 = state/import_progress.sqlite
   pull_line_top_k: 30           # 拉线一次最多拉多少个候选桶
-  large_line_threshold: 15      # 一条线超过这个桶数就走里程碑提炼，不逐桶生成时间点
+  large_line_threshold: 6       # 一条线超过这个桶数就先走里程碑提炼压缩，不逐桶生成时间点；
+                                 # 定太大会让密集讨论型的线（比如反复讨论、没什么新进展的项目）
+                                 # 漏过压缩，直接把一堆原始桶塞给生成候选卡那一步，容易输出超长
   milestone_prefilter_k: 12     # 大线里程碑提炼前，先用免费信号粗筛出多少个候选
 
 # --- Anchor / 长期锚点 ---

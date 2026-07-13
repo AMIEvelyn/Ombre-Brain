@@ -244,6 +244,54 @@ async def test_large_line_uses_milestone_extraction(bucket_mgr, engine, progress
 
 
 @pytest.mark.asyncio
+async def test_default_large_line_threshold_catches_a_dense_discussion_line(
+    bucket_mgr, engine, progress_store
+):
+    """Regression: Lin Zhan caught that the old default (15) let a line with
+    lots of near-duplicate discussion buckets and few real state changes
+    (exactly the 《慁》 book-discussion case) skip milestone compression
+    entirely and get dumped raw into candidate-card generation. Uses the
+    engine's actual default threshold (no override) with a 7-bucket line --
+    one over the old-style "handful" bar -- and checks all three LLM steps
+    (judge, milestone, card) actually ran, not just judge+card."""
+    assert engine.large_line_threshold == 6  # pin the default itself
+
+    seed_id = await bucket_mgr.create(content="讨论小说1", tags=[], importance=5, domain=["创作"], name="讨论1")
+    other_ids = [
+        await bucket_mgr.create(content=f"讨论小说{i}", tags=[], importance=3, domain=["创作"], name=f"讨论{i}")
+        for i in range(2, 8)  # 6 more -> 7 total, over the default threshold of 6
+    ]
+
+    judge_response = json.dumps({
+        "specific_question": "小说创作讨论",
+        "bucket_verdicts": [{"bucket_id": bid, "verdict": "in_line", "reason": "同一本书"} for bid in other_ids],
+    })
+    milestone_response = json.dumps({
+        "timeline_type": "event",
+        "milestones": [{"valid_at": "2025-01-01", "role": "start", "summary": "开始讨论小说", "source_bucket_ids": [seed_id]}],
+        "dropped_bucket_ids": other_ids,
+        "reasoning": "反复讨论，没有客观状态变化",
+    })
+    card_response = json.dumps({
+        "title": "小说创作讨论", "content": "开始讨论小说",
+        "revisions": [{"content": "开始讨论小说", "valid_at": "2025-01-01", "source_bucket_ids": [seed_id]}],
+        "tags": [], "suggested_folder_paths": [], "confidence": 0.7, "reasoning": "x",
+    })
+    engine.client = FakeLLMClient([judge_response, milestone_response, card_response])
+    engine.pull_line = _fixed_pull_line(bucket_mgr, other_ids)
+
+    result = await engine.run_single_line(seed_id, progress_store)
+
+    assert result["status"] == "candidate"
+    # If milestone extraction had been skipped, generate_candidate_card would
+    # have consumed milestone_response as its own answer instead (the exact
+    # failure mode from an earlier bug in this same file) -- title/content
+    # coming through correctly proves all three calls happened in order.
+    assert result["candidate_card"]["title"] == "小说创作讨论"
+    assert result["dropped_bucket_ids"] == other_ids
+
+
+@pytest.mark.asyncio
 async def test_thinking_disabled_by_default_to_protect_max_tokens_budget(engine):
     """Regression: Yi Lan's real run got truncated well before max_tokens
     should have been exhausted by visible JSON alone -- the actual model
