@@ -149,12 +149,26 @@ def _parse_json_response(raw: str) -> dict | None:
     return result if isinstance(result, dict) else None
 
 
+def _bucket_date(bucket: dict) -> str:
+    """The real event date, not "when did this row get written". `date`
+    (backfilled from the bucket name prefix on bulk-imported buckets -- see
+    scripts/backfill_event_dates_from_name.py) must come before `created`,
+    which for a bulk-imported bucket is when the import ran, not when the
+    thing actually happened. Getting this backwards is what made every
+    revision in Yi Lan's first real test run land within a two-day window
+    regardless of the buckets' true dates, which spanned closer to a year --
+    the model had no real signal left to order anything correctly. Used
+    everywhere a bucket's date is read: excerpts, sorting, fallbacks."""
+    meta = bucket.get("metadata", {}) or {}
+    return str(meta.get("date") or meta.get("created") or meta.get("last_active") or "")
+
+
 def _bucket_excerpt(bucket: dict, *, max_chars: int = 400) -> dict:
     meta = bucket.get("metadata", {}) or {}
     content = str(bucket.get("content", "") or "")
     return {
         "bucket_id": bucket.get("id"),
-        "date": meta.get("created") or meta.get("date") or meta.get("last_active") or "",
+        "date": _bucket_date(bucket),
         "domain": meta.get("domain", []),
         "tags": meta.get("tags", []),
         "importance": meta.get("importance", 5),
@@ -273,10 +287,7 @@ class BatchImportEngine:
         """Cheap, free signals first (date extremes / importance / has
         comments) so the LLM only ever sees a small shortlist, not every
         raw bucket in a hundred-plus-bucket line -- see docs §6."""
-        by_date = sorted(
-            line_buckets,
-            key=lambda b: (b.get("metadata") or {}).get("created", "") or "",
-        )
+        by_date = sorted(line_buckets, key=_bucket_date)
         shortlist_ids: set[str] = set()
         k = max(1, self.milestone_prefilter_k // 4)
         for b in by_date[:k]:
@@ -311,7 +322,7 @@ class BatchImportEngine:
                 "timeline_type": "state",
                 "milestones": [
                     {
-                        "valid_at": (b.get("metadata") or {}).get("created", ""),
+                        "valid_at": _bucket_date(b),
                         "role": "current",
                         "summary": str(b.get("content", "") or "")[:400],
                         "source_bucket_ids": [b["id"]],
@@ -349,7 +360,7 @@ class BatchImportEngine:
                 "existing_folder_paths": folder_paths,
             }
         else:
-            ordered = sorted(buckets or [], key=lambda b: (b.get("metadata") or {}).get("created", "") or "")
+            ordered = sorted(buckets or [], key=_bucket_date)
             item_count = len(ordered)
             payload = {
                 "input_mode": "buckets",

@@ -10,9 +10,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine, LLMTruncatedError
+from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine, LLMTruncatedError, _bucket_date
 from cards_store import CardStore
 from import_progress_store import ImportProgressStore
+
+
+@pytest.mark.asyncio
+async def test_bucket_date_prefers_backfilled_date_over_bulk_import_created(bucket_mgr):
+    """Regression: Yi Lan's real run showed every revision landing in a
+    two-day window in 2026 when the buckets actually spanned early-to-mid
+    2025 -- because `created` on a bulk-imported bucket is when the import
+    ran, not when the thing happened. The real event date lives in the
+    `date` field (see scripts/backfill_event_dates_from_name.py) and must
+    win whenever both are present."""
+    bid = await bucket_mgr.create(
+        content="一澜开始写小说", tags=[], importance=5, domain=["创作"], name="小说开始",
+        created="2026-06-30T00:00:00",  # when the bulk import ran
+        date="2025-03-15",              # the real event date
+    )
+    bucket = await bucket_mgr.get(bid)
+    assert _bucket_date(bucket) == "2025-03-15"
 
 
 def test_candidate_card_prompt_forbids_collapsing_a_timeline_into_one_summary():
