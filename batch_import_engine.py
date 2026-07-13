@@ -22,6 +22,11 @@ from openai import AsyncOpenAI
 logger = logging.getLogger("ombre_brain.batch_import")
 
 
+class LLMTruncatedError(Exception):
+    """Raised when max_tokens cut the model off mid-answer. Must never be
+    silently swallowed into a negative verdict -- see run_single_line()."""
+
+
 # ============================================================
 # Prompts (see docs/batch-import-design.md §3/§6/§7 for the design behind
 # these -- the judgment rule below is Lin Zhan's wording, kept verbatim)
@@ -191,7 +196,18 @@ class BatchImportEngine:
         )
         if not response.choices:
             return None
-        return _parse_json_response(response.choices[0].message.content or "")
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+        result = _parse_json_response(raw)
+        if result is None and getattr(choice, "finish_reason", "") == "length":
+            # The model was mid-answer and got cut off by max_tokens -- this
+            # is NOT the same as the model concluding "no line here". Don't
+            # let it silently masquerade as a negative judgment: the caller
+            # already paid for this call and the answer may have been right.
+            raise LLMTruncatedError(
+                f"LLM output truncated by max_tokens={max_tokens} before valid JSON completed"
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Step ②: pull a line
@@ -216,9 +232,14 @@ class BatchImportEngine:
             "seed": _bucket_excerpt(seed_bucket),
             "candidates": [_bucket_excerpt(b) for b in candidates],
         }
+        # One verdict object per candidate; scale the budget with how many
+        # candidates were actually pulled so a full pull_line_top_k batch
+        # doesn't get cut off mid-answer (see LLMTruncatedError).
+        max_tokens = min(8000, 800 + 150 * (len(candidates) + 1))
         result = await self._call_json(
             LINE_JUDGMENT_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
+            max_tokens=max_tokens,
         )
         if not result:
             return {"specific_question": "", "bucket_verdicts": []}
@@ -346,6 +367,22 @@ class BatchImportEngine:
         if not seed_bucket:
             return {"status": "error", "reason": f"bucket not found: {seed_bucket_id}"}
 
+        try:
+            return await self._run_single_line_inner(seed_bucket, seed_bucket_id, progress_store)
+        except LLMTruncatedError as e:
+            # Nothing gets marked swept / saved until this whole function
+            # returns normally -- so bailing out here leaves the seed bucket
+            # fully retryable. Surfaced as its own status so a truncated
+            # call is never mistaken for "the model judged this isn't a line".
+            logger.warning(f"batch_import: {seed_bucket_id}: {e}")
+            return {
+                "status": "error",
+                "error": "llm_truncated",
+                "seed_bucket_id": seed_bucket_id,
+                "reason": str(e) + " -- 建议调大 config.yaml 里 batch_import.pull_line_top_k 对应的 max_tokens 预算，或减少候选数量后重跑同一个 seed_bucket_id",
+            }
+
+    async def _run_single_line_inner(self, seed_bucket: dict, seed_bucket_id: str, progress_store) -> dict:
         candidates = await self.pull_line(seed_bucket)
         judgment = await self.judge_line(seed_bucket, candidates)
 

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine
+from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine, LLMTruncatedError
 from cards_store import CardStore
 from import_progress_store import ImportProgressStore
 
@@ -27,18 +27,20 @@ def test_candidate_card_prompt_forbids_collapsing_a_timeline_into_one_summary():
 
 
 class _FakeCompletions:
-    def __init__(self, responses):
+    def __init__(self, responses, finish_reasons=None):
         self._responses = list(responses)
+        self._finish_reasons = list(finish_reasons) if finish_reasons else None
 
     async def create(self, **kwargs):
         content = self._responses.pop(0)
+        finish_reason = self._finish_reasons.pop(0) if self._finish_reasons else "stop"
         message = SimpleNamespace(content=content)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish_reason)])
 
 
 class FakeLLMClient:
-    def __init__(self, responses):
-        self.chat = SimpleNamespace(completions=_FakeCompletions(responses))
+    def __init__(self, responses, finish_reasons=None):
+        self.chat = SimpleNamespace(completions=_FakeCompletions(responses, finish_reasons))
 
 
 @pytest.fixture
@@ -153,6 +155,34 @@ async def test_uncertain_verdict_goes_to_pending_and_stays_unswept(
     pending = progress_store.list_pending_associations()
     assert len(pending) == 1
     assert set(pending[0]["bucket_ids"]) == {seed_id, maybe_id}
+
+
+@pytest.mark.asyncio
+async def test_truncated_judge_response_is_reported_as_error_not_pass(
+    bucket_mgr, engine, progress_store
+):
+    """Regression: Yi Lan hit this for real -- a 30-candidate line's judge
+    response got cut off by max_tokens mid-JSON, failed to parse, and the
+    old code silently treated that as 'no line found' (status: pass),
+    quietly discarding a real answer with no indication anything broke.
+    A truncated call must surface as its own error, and must not sweep
+    the seed (so it's still retryable)."""
+    seed_id = await bucket_mgr.create(content="一澜创作的小说", tags=[], importance=5, domain=["创作"], name="小说")
+    other_id = await bucket_mgr.create(content="小说设定讨论", tags=[], importance=5, domain=["创作"], name="小说设定")
+
+    truncated_json = '{\n  "specific_question": "一澜创作关于小说的设定",\n  "bucket_verdicts": [\n    {\n      "bucket_id'
+    engine.client = FakeLLMClient([truncated_json], finish_reasons=["length"])
+    engine.pull_line = _fixed_pull_line(bucket_mgr, [other_id])
+
+    result = await engine.run_single_line(seed_id, progress_store)
+
+    assert result["status"] == "error"
+    assert result["error"] == "llm_truncated"
+    # Must stay fully retryable -- not swept, no pending association written.
+    assert not progress_store.is_swept(seed_id)
+    assert not progress_store.is_swept(other_id)
+    assert progress_store.list_pending_associations() == []
+    assert progress_store.list_lines() == []
 
 
 @pytest.mark.asyncio
