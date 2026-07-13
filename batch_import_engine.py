@@ -76,6 +76,8 @@ MILESTONE_EXTRACTION_SYSTEM_PROMPT = """你是「时光馆」批量导入流程�
 - 后来的桶如果只是在回忆更早发生的事情，不要把"记忆桶被写下的日期"误当成"事实发生的日期"——原文里有明确的事实发生日期时，valid_at 要用那个日期，不是记录这条回忆时的日期。
 - 无法确认具体日期时，不要擅自编造一个日期。
 
+候选桶可能有十几个，**summary 和 reasoning 都务必简短**（summary 不超过40字，一句话讲清楚这个节点是什么就够，不要写成一整段），不然输出会太长。
+
 只输出严格 JSON，不要用 markdown 代码块包裹：
 {
   "timeline_type": "state 或 event",
@@ -83,7 +85,7 @@ MILESTONE_EXTRACTION_SYSTEM_PROMPT = """你是「时光馆」批量导入流程�
     {
       "valid_at": "YYYY-MM-DD",
       "role": "initial/change/current（状态线用）或 start/turning_point/result（事件线用）",
-      "summary": "这个时间点客观成立的具体状态或事件阶段，提炼过的，不是原文照抄",
+      "summary": "≤40字，这个时间点客观成立的具体状态或事件阶段",
       "source_bucket_ids": ["属于这个时间点的全部桶 id，同一天合并的要全列出来"]
     }
   ],
@@ -369,9 +371,15 @@ class BatchImportEngine:
     async def extract_milestones(self, line_buckets: list[dict]) -> dict:
         shortlist = self._prefilter_for_milestones(line_buckets)
         payload = {"candidates": [_bucket_excerpt(b) for b in shortlist]}
+        # Same fix as judge_line: this was left on the flat 2000-token
+        # default and never scaled, which is exactly what just truncated on
+        # Yi Lan's real run once the tag sweep started handing it a full
+        # shortlist instead of a handful of buckets.
+        max_tokens = min(6000, 1200 + 250 * (len(shortlist) + 1))
         result = await self._call_json(
             MILESTONE_EXTRACTION_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
+            max_tokens=max_tokens,
         )
         if not result:
             # Fallback: treat every shortlisted bucket as its own milestone
@@ -460,8 +468,16 @@ class BatchImportEngine:
         if not seed_bucket:
             return {"status": "error", "reason": f"bucket not found: {seed_bucket_id}"}
 
+        # Pull happens outside the try block so counts are visible in an
+        # error report even if a later LLM step is what truncates -- Yi Lan
+        # hit this and had no way to tell how many buckets were even in play.
+        pulled = await self.pull_line(seed_bucket)
+        counts = {
+            "similarity_candidates": len(pulled["similarity"]),
+            "tag_matched_candidates": len(pulled["tag_matched"]),
+        }
         try:
-            return await self._run_single_line_inner(seed_bucket, seed_bucket_id, progress_store)
+            return await self._run_single_line_inner(seed_bucket, seed_bucket_id, progress_store, pulled, counts)
         except LLMTruncatedError as e:
             # Nothing gets marked swept / saved until this whole function
             # returns normally -- so bailing out here leaves the seed bucket
@@ -472,11 +488,13 @@ class BatchImportEngine:
                 "status": "error",
                 "error": "llm_truncated",
                 "seed_bucket_id": seed_bucket_id,
-                "reason": str(e) + " -- 建议调大 config.yaml 里 batch_import.pull_line_top_k 对应的 max_tokens 预算，或减少候选数量后重跑同一个 seed_bucket_id",
+                "counts": counts,
+                "reason": str(e) + " -- 建议调大 max_tokens 预算，或减少候选数量后重跑同一个 seed_bucket_id",
             }
 
-    async def _run_single_line_inner(self, seed_bucket: dict, seed_bucket_id: str, progress_store) -> dict:
-        pulled = await self.pull_line(seed_bucket)
+    async def _run_single_line_inner(
+        self, seed_bucket: dict, seed_bucket_id: str, progress_store, pulled: dict, counts: dict,
+    ) -> dict:
         similarity_candidates = pulled["similarity"]
         tag_matched_candidates = pulled["tag_matched"]
         judgment = await self.judge_line(seed_bucket, similarity_candidates)
@@ -507,6 +525,7 @@ class BatchImportEngine:
             return {
                 "status": "pass",
                 "seed_bucket_id": seed_bucket_id,
+                "counts": counts,
                 "reasoning": "specific_question 为空且没有标签证据，判定为不足以构成一条线",
             }
 
@@ -520,6 +539,7 @@ class BatchImportEngine:
         # bucket_id ending up "swept" without ever having been fetched/used.
         line_bucket_ids = sorted((in_line_ids | tag_matched_ids | {seed_bucket["id"]}) & set(by_id))
         line_buckets = [by_id[bid] for bid in line_bucket_ids]
+        counts["line_bucket_count"] = len(line_bucket_ids)
 
         dropped_bucket_ids: list[str] = []
         if len(line_buckets) > self.large_line_threshold:
@@ -548,6 +568,7 @@ class BatchImportEngine:
             "line_id": line_id,
             "seed_bucket_id": seed_bucket_id,
             "specific_question": specific_question,
+            "counts": counts,
             "line_bucket_ids": line_bucket_ids,
             "dropped_bucket_ids": dropped_bucket_ids,
             "candidate_card": candidate_card,

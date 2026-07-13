@@ -10,7 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from batch_import_engine import CANDIDATE_CARD_SYSTEM_PROMPT, BatchImportEngine, LLMTruncatedError, _bucket_date
+from batch_import_engine import (
+    CANDIDATE_CARD_SYSTEM_PROMPT,
+    MILESTONE_EXTRACTION_SYSTEM_PROMPT,
+    BatchImportEngine,
+    LLMTruncatedError,
+    _bucket_date,
+)
 from cards_store import CardStore
 from import_progress_store import ImportProgressStore
 
@@ -270,11 +276,62 @@ async def test_truncated_judge_response_is_reported_as_error_not_pass(
 
     assert result["status"] == "error"
     assert result["error"] == "llm_truncated"
+    # Yi Lan's real error had no way to tell how many buckets were even
+    # pulled -- counts must be visible on every outcome, including this one.
+    assert result["counts"] == {"similarity_candidates": 1, "tag_matched_candidates": 0}
     # Must stay fully retryable -- not swept, no pending association written.
     assert not progress_store.is_swept(seed_id)
     assert not progress_store.is_swept(other_id)
     assert progress_store.list_pending_associations() == []
     assert progress_store.list_lines() == []
+
+
+@pytest.mark.asyncio
+async def test_milestone_extraction_max_tokens_scales_with_shortlist_size(
+    bucket_mgr, engine, progress_store
+):
+    """Regression: extract_milestones() was left on the flat 2000-token
+    default from _call_json's signature and never scaled like judge_line
+    and generate_candidate_card were -- this is exactly what truncated on
+    Yi Lan's real run once the tag sweep started handing it a full
+    12-bucket shortlist instead of a couple of buckets."""
+    engine.large_line_threshold = 1  # force the milestone path
+
+    seed_id = await bucket_mgr.create(content="开始写小说", tags=[], importance=5, domain=["创作"], name="开始")
+    other_ids = [
+        await bucket_mgr.create(content=f"继续写{i}", tags=[], importance=5, domain=["创作"], name=f"继续{i}")
+        for i in range(11)  # -> 12 total with seed, at engine.milestone_prefilter_k's default cap
+    ]
+
+    captured_max_tokens = []
+
+    orig_call_json = engine._call_json
+
+    async def _spy(system_prompt, user_content, *, max_tokens=2000):
+        captured_max_tokens.append(max_tokens)
+        if system_prompt == MILESTONE_EXTRACTION_SYSTEM_PROMPT:
+            return {
+                "timeline_type": "event",
+                "milestones": [{"valid_at": "2025-01-01", "role": "start", "summary": "开始写", "source_bucket_ids": [seed_id]}],
+                "dropped_bucket_ids": other_ids,
+                "reasoning": "x",
+            }
+        return await orig_call_json(system_prompt, user_content, max_tokens=max_tokens)
+
+    engine._call_json = _spy
+    engine.client = FakeLLMClient([
+        json.dumps({"specific_question": "小说进展", "bucket_verdicts": [{"bucket_id": bid, "verdict": "in_line", "reason": "同一本书"} for bid in other_ids]}),
+        json.dumps({"title": "t", "content": "开始写", "revisions": [], "tags": [], "suggested_folder_paths": [], "confidence": 0.5, "reasoning": "x"}),
+    ])
+    engine.pull_line = _fixed_pull_line(bucket_mgr, other_ids)
+
+    await engine.run_single_line(seed_id, progress_store)
+
+    # judge call, then the milestone call (intercepted by the spy) -- its
+    # max_tokens must not be the bare 2000 default.
+    assert len(captured_max_tokens) >= 2
+    milestone_max_tokens = captured_max_tokens[1]
+    assert milestone_max_tokens > 2000
 
 
 @pytest.mark.asyncio
