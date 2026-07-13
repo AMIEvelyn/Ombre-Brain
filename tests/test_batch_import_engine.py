@@ -244,6 +244,29 @@ async def test_large_line_uses_milestone_extraction(bucket_mgr, engine, progress
 
 
 @pytest.mark.asyncio
+async def test_thinking_disabled_by_default_to_protect_max_tokens_budget(engine):
+    """Regression: Yi Lan's real run got truncated well before max_tokens
+    should have been exhausted by visible JSON alone -- the actual model
+    (inherited from her dehydration config) burns tokens on an invisible
+    thinking pass unless explicitly told not to. Must be off by default
+    for these structured-output calls."""
+    captured = {}
+
+    class _CapturingCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            content = json.dumps({"specific_question": "", "bucket_verdicts": []})
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content), finish_reason="stop",
+            )])
+
+    engine.client = SimpleNamespace(chat=SimpleNamespace(completions=_CapturingCompletions()))
+    await engine._call_json("system", "user")
+
+    assert captured.get("extra_body") == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.asyncio
 async def test_generate_candidate_card_milestones_mode_preserves_merged_source_ids(engine):
     """A same-day merge in the milestone step can point one milestone at
     several source buckets -- make sure that survives into the payload

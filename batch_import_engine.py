@@ -49,11 +49,13 @@ LINE_JUDGMENT_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
 
 种子桶（seed）永远是这条线判断的锚点，其它候选桶都是相对种子桶来判断。
 
+候选桶可能有十几二十个，**reason 字段务必简短**（不超过15个字的短语，不要写完整句子），不然输出会太长。
+
 只输出严格 JSON，不要输出任何其它文字，也不要用 markdown 代码块包裹，格式：
 {
   "specific_question": "具体问题或者空字符串",
   "bucket_verdicts": [
-    {"bucket_id": "...", "verdict": "in_line", "reason": "一句话原因"}
+    {"bucket_id": "...", "verdict": "in_line", "reason": "≤15字短语"}
   ]
 }"""
 
@@ -174,6 +176,14 @@ class BatchImportEngine:
             "base_url", "https://generativelanguage.googleapis.com/v1beta/openai"
         )
         self.model = cfg.get("model") or dehy_cfg.get("model", "gemini-2.5-flash-lite")
+        # Unlike dehydration (default "" = provider default), these are
+        # structured classification/extraction calls that don't benefit
+        # from a visible-or-hidden reasoning pass -- and on models that
+        # think by default, that reasoning burns max_tokens invisibly
+        # before any JSON gets written, which is what was actually causing
+        # truncation, not just "too many candidates". Explicitly off unless
+        # overridden.
+        self.thinking_mode = str(cfg.get("thinking_mode", "disabled") or "disabled").strip().lower()
 
         self.pull_line_top_k = int(cfg.get("pull_line_top_k", 30))
         self.large_line_threshold = int(cfg.get("large_line_threshold", 15))
@@ -185,14 +195,16 @@ class BatchImportEngine:
         if self.client is None:
             logger.warning("batch_import: no API key configured, skipping LLM call")
             return None
+        options: dict = {"max_tokens": max_tokens, "temperature": 0.1}
+        if self.thinking_mode and self.thinking_mode != "provider_default":
+            options["extra_body"] = {"thinking": {"type": self.thinking_mode}}
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            max_tokens=max_tokens,
-            temperature=0.1,
+            **options,
         )
         if not response.choices:
             return None
@@ -235,7 +247,7 @@ class BatchImportEngine:
         # One verdict object per candidate; scale the budget with how many
         # candidates were actually pulled so a full pull_line_top_k batch
         # doesn't get cut off mid-answer (see LLMTruncatedError).
-        max_tokens = min(8000, 800 + 150 * (len(candidates) + 1))
+        max_tokens = min(8000, 1000 + 200 * (len(candidates) + 1))
         result = await self._call_json(
             LINE_JUDGMENT_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),

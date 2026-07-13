@@ -136,6 +136,8 @@ batch_import:
   api_key: ""      # 留空 = 复用 dehydration.api_key（走 OMBRE_API_KEY 环境变量）
   base_url: ""     # 留空 = 复用 dehydration.base_url
   model: ""        # 留空 = 复用 dehydration.model
+  thinking_mode: "disabled"     # 判线/生成候选是结构化输出任务，不需要模型思考；
+                                 # 思考模式默认会占用 max_tokens 预算，容易导致输出被截断
   progress_db_path: ""          # 留空 = state/import_progress.sqlite
   pull_line_top_k: 30           # 拉线一次最多拉多少个候选桶
   large_line_threshold: 15      # 一条线超过这个桶数就走里程碑提炼，不逐桶生成时间点
