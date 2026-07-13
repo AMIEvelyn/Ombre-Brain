@@ -176,14 +176,14 @@ class BatchImportEngine:
             "base_url", "https://generativelanguage.googleapis.com/v1beta/openai"
         )
         self.model = cfg.get("model") or dehy_cfg.get("model", "gemini-2.5-flash-lite")
-        # Unlike dehydration (default "" = provider default), these are
-        # structured classification/extraction calls that don't benefit
-        # from a visible-or-hidden reasoning pass -- and on models that
-        # think by default, that reasoning burns max_tokens invisibly
-        # before any JSON gets written, which is what was actually causing
-        # truncation, not just "too many candidates". Explicitly off unless
-        # overridden.
-        self.thinking_mode = str(cfg.get("thinking_mode", "disabled") or "disabled").strip().lower()
+        # Tried defaulting this to "disabled" to free up max_tokens from an
+        # invisible thinking pass -- Yi Lan's real endpoint rejected the
+        # request outright (400: "Unknown name 'thinking': Cannot find
+        # field"), so this API surface isn't available there at all. Default
+        # back to off (don't send the field), same as dehydration.thinking_mode
+        # normally behaves for her. Leave the knob in for setups where the
+        # endpoint does support it.
+        self.thinking_mode = str(cfg.get("thinking_mode", "") or "").strip().lower()
 
         self.pull_line_top_k = int(cfg.get("pull_line_top_k", 30))
         # Lin Zhan caught (2026-07) that 15 let a genuinely dense line (many

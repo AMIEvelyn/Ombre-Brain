@@ -292,12 +292,11 @@ async def test_default_large_line_threshold_catches_a_dense_discussion_line(
 
 
 @pytest.mark.asyncio
-async def test_thinking_disabled_by_default_to_protect_max_tokens_budget(engine):
-    """Regression: Yi Lan's real run got truncated well before max_tokens
-    should have been exhausted by visible JSON alone -- the actual model
-    (inherited from her dehydration config) burns tokens on an invisible
-    thinking pass unless explicitly told not to. Must be off by default
-    for these structured-output calls."""
+async def test_thinking_mode_not_sent_by_default(engine):
+    """Regression: defaulting thinking_mode to "disabled" got Yi Lan's real
+    endpoint a hard 400 ("Unknown name 'thinking': Cannot find field") --
+    that API surface isn't available there at all, so it must NOT be sent
+    unless a config explicitly opts in."""
     captured = {}
 
     class _CapturingCompletions:
@@ -310,6 +309,30 @@ async def test_thinking_disabled_by_default_to_protect_max_tokens_budget(engine)
 
     engine.client = SimpleNamespace(chat=SimpleNamespace(completions=_CapturingCompletions()))
     await engine._call_json("system", "user")
+
+    assert "extra_body" not in captured
+
+
+@pytest.mark.asyncio
+async def test_thinking_mode_sent_when_explicitly_configured(test_config, bucket_mgr, card_store):
+    """The knob still works for setups whose endpoint does support it --
+    just opt-in, not default-on."""
+    cfg = dict(test_config)
+    cfg["batch_import"] = {"thinking_mode": "disabled"}
+    eng = BatchImportEngine(cfg, bucket_mgr, embedding_engine=None, card_store=card_store)
+
+    captured = {}
+
+    class _CapturingCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            content = json.dumps({"specific_question": "", "bucket_verdicts": []})
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content), finish_reason="stop",
+            )])
+
+    eng.client = SimpleNamespace(chat=SimpleNamespace(completions=_CapturingCompletions()))
+    await eng._call_json("system", "user")
 
     assert captured.get("extra_body") == {"thinking": {"type": "disabled"}}
 
