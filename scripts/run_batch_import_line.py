@@ -7,9 +7,20 @@ print the candidate report as JSON. Does not write anything to CardStore
 Usage:
     docker exec ombre-brain python3 /app/scripts/run_batch_import_line.py <seed_bucket_id>
     docker exec ombre-brain python3 /app/scripts/run_batch_import_line.py --query "书稿" --top 5
+    docker exec ombre-brain python3 /app/scripts/run_batch_import_line.py <seed_bucket_id> \
+        --sweep-tags "文学创作,小说创作,慁"
 
 --query prints search hits (id + name + date) so you can pick a seed_bucket_id
 without already knowing one.
+
+--sweep-tags turns on the tag-sweep channel (see docs/batch-import-design.md
+§2.1) for exactly the tags you list, comma-separated. Only pass tags you've
+personally confirmed are specific to this one project/story -- a tag that
+also recurs across other, unrelated topics will sweep those in too (this
+is exactly what happened on the first real test run: broad recurring
+concept tags on the seed bucket pulled in ~300 unrelated buckets about a
+completely different theme). Without --sweep-tags, no tag sweep runs at
+all -- similarity search only.
 """
 
 import argparse
@@ -33,7 +44,13 @@ async def main():
     parser.add_argument("seed_bucket_id", nargs="?", help="Bucket id to start the line from")
     parser.add_argument("--query", help="Search for candidate seed buckets instead of running a line")
     parser.add_argument("--top", type=int, default=10)
+    parser.add_argument(
+        "--sweep-tags", default="",
+        help="Comma-separated tags to sweep on, e.g. '文学创作,小说创作,慁'. Only tags you've "
+        "confirmed are specific to this one project -- see the module docstring.",
+    )
     args = parser.parse_args()
+    sweep_tags = [t.strip() for t in args.sweep_tags.split(",") if t.strip()] or None
 
     config = load_config()
     bucket_mgr = BucketManager(config)
@@ -52,7 +69,7 @@ async def main():
     if not args.seed_bucket_id:
         parser.error("need a seed_bucket_id, or pass --query to find one first")
 
-    result = await engine.run_single_line(args.seed_bucket_id, progress_store)
+    result = await engine.run_single_line(args.seed_bucket_id, progress_store, sweep_tags)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

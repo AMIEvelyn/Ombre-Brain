@@ -261,17 +261,29 @@ class BatchImportEngine:
     # ------------------------------------------------------------------
     # Step ②: pull a line
     # ------------------------------------------------------------------
-    async def pull_line(self, seed_bucket: dict) -> dict:
+    async def pull_line(self, seed_bucket: dict, sweep_tags: list[str] | None = None) -> dict:
         """Two complementary channels, returned separately:
 
         - "similarity": associative search seeded with the seed bucket's own
           content, reusing the dual-channel search fixed in §12. Catches
           buckets that don't share a tag with the seed (e.g. written before
           a project settled on a consistent tag).
-        - "tag_matched": every bucket sharing a (non-generic) tag with the
-          seed, via _tag_sweep(). Not capped by similarity ranking, so a
-          saga with hundreds of tightly-clustered buckets doesn't lose
-          members to a fixed top-K cutoff.
+        - "tag_matched": every bucket sharing a tag in `sweep_tags`, via
+          _tag_sweep(). Not capped by similarity ranking, so a saga with
+          hundreds of tightly-clustered buckets doesn't lose members to a
+          fixed top-K cutoff.
+
+        `sweep_tags` must be given explicitly by a human (e.g. from the CLI
+        script's --sweep-tags) -- see docs/batch-import-design.md §2.1 for
+        why: auto-deriving "which of the seed's own tags are specific
+        enough" from tag frequency alone is NOT safe. Yi Lan's real book
+        line proved this -- the seed also carried broad recurring concept
+        tags ("自我认同"/"陪伴承诺") that happened to fall under the
+        frequency cutoff but aren't specific to one project at all, and
+        swept in ~300 unrelated buckets about a completely different,
+        ongoing relationship theme. Without explicit sweep_tags, no tag
+        sweep runs at all -- similarity search alone, as before this
+        feature existed.
 
         Buckets caught by the tag sweep are removed from "similarity" so
         judge_line() doesn't spend a judgment on something already confirmed.
@@ -284,18 +296,19 @@ class BatchImportEngine:
         )
         similarity = [b for b in matches if b.get("id") != seed_bucket.get("id")]
 
-        tag_matched = await self._tag_sweep(seed_bucket) if self.tag_sweep_enabled else []
+        tag_matched = (
+            await self._tag_sweep(seed_bucket, sweep_tags)
+            if self.tag_sweep_enabled and sweep_tags
+            else []
+        )
         tag_matched_ids = {b["id"] for b in tag_matched}
         similarity = [b for b in similarity if b["id"] not in tag_matched_ids]
 
         return {"similarity": similarity, "tag_matched": tag_matched}
 
-    async def _tag_sweep(self, seed_bucket: dict) -> list[dict]:
-        seed_tags = [
-            str(t).strip() for t in (seed_bucket.get("metadata") or {}).get("tags", []) or []
-            if str(t).strip()
-        ]
-        if not seed_tags:
+    async def _tag_sweep(self, seed_bucket: dict, sweep_tags: list[str]) -> list[dict]:
+        requested_tags = {str(t).strip() for t in sweep_tags if str(t).strip()}
+        if not requested_tags:
             return []
 
         all_buckets = await self.bucket_mgr.list_all(include_archive=True)
@@ -305,8 +318,17 @@ class BatchImportEngine:
             for t in (b.get("metadata") or {}).get("tags", []) or []:
                 tag_counts[t] = tag_counts.get(t, 0) + 1
 
+        # Even human-specified tags get this sanity check -- if someone
+        # accidentally passes a tag that turns out to span most of the
+        # corpus, don't silently sweep in everything.
         max_count = max(2, int(total * self.tag_sweep_max_tag_ratio))
-        usable_tags = {t for t in seed_tags if 1 < tag_counts.get(t, 0) <= max_count}
+        usable_tags = {t for t in requested_tags if tag_counts.get(t, 0) <= max_count}
+        skipped_tags = requested_tags - usable_tags
+        if skipped_tags:
+            logger.warning(
+                f"batch_import: tag sweep skipped overly-common tags {sorted(skipped_tags)} "
+                f"(more than {self.tag_sweep_max_tag_ratio:.0%} of corpus)"
+            )
         if not usable_tags:
             return []
 
@@ -463,7 +485,9 @@ class BatchImportEngine:
     # comes after this pipeline's output quality has actually been checked
     # against one real thread. See docs/batch-import-design.md §10.
     # ------------------------------------------------------------------
-    async def run_single_line(self, seed_bucket_id: str, progress_store) -> dict:
+    async def run_single_line(
+        self, seed_bucket_id: str, progress_store, sweep_tags: list[str] | None = None,
+    ) -> dict:
         seed_bucket = await self.bucket_mgr.get(seed_bucket_id)
         if not seed_bucket:
             return {"status": "error", "reason": f"bucket not found: {seed_bucket_id}"}
@@ -471,7 +495,7 @@ class BatchImportEngine:
         # Pull happens outside the try block so counts are visible in an
         # error report even if a later LLM step is what truncates -- Yi Lan
         # hit this and had no way to tell how many buckets were even in play.
-        pulled = await self.pull_line(seed_bucket)
+        pulled = await self.pull_line(seed_bucket, sweep_tags)
         counts = {
             "similarity_candidates": len(pulled["similarity"]),
             "tag_matched_candidates": len(pulled["tag_matched"]),

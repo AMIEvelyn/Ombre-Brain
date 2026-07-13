@@ -113,7 +113,7 @@ async def test_tag_sweep_catches_a_saga_bigger_than_pull_line_top_k(bucket_mgr, 
     )
 
     seed_bucket = await bucket_mgr.get(seed_id)
-    pulled = await engine.pull_line(seed_bucket)
+    pulled = await engine.pull_line(seed_bucket, sweep_tags=["文学创作", "小说创作"])
 
     tag_matched_ids = {b["id"] for b in pulled["tag_matched"]}
     assert set(saga_ids) | {printed_id} <= tag_matched_ids
@@ -125,10 +125,34 @@ async def test_tag_sweep_catches_a_saga_bigger_than_pull_line_top_k(bucket_mgr, 
 
 
 @pytest.mark.asyncio
+async def test_tag_sweep_requires_explicit_tags_not_auto_derived_from_seed(bucket_mgr, engine):
+    """Regression: the first design auto-derived sweep tags from the seed's
+    own tag list (filtered only by corpus-wide frequency). Yi Lan's real
+    seed also carried broad recurring concept tags ("自我认同"/"陪伴承诺")
+    that slipped under the frequency cutoff but aren't specific to one
+    project -- that swept in ~300 unrelated buckets about a totally
+    different theme. Tag sweep must now require tags a human explicitly
+    named; without sweep_tags, no sweep happens even if the seed has tags."""
+    seed_id = await bucket_mgr.create(
+        content="开始写小说", tags=["文学创作", "自我认同"], importance=5, domain=["创作"], name="小说开始",
+    )
+    await bucket_mgr.create(
+        content="又一次关于自我认同的深夜长谈", tags=["自我认同"], importance=5,
+        domain=["内心"], name="自我认同长谈",
+    )
+
+    seed_bucket = await bucket_mgr.get(seed_id)
+    pulled = await engine.pull_line(seed_bucket)  # no sweep_tags passed
+
+    assert pulled["tag_matched"] == []
+
+
+@pytest.mark.asyncio
 async def test_tag_sweep_ignores_overly_generic_tags(bucket_mgr, engine):
     """A tag used across most of the corpus is a mood/domain tag, not a
     specific project identifier -- sweeping on it would pull in unrelated
-    buckets and blow the cost budget open."""
+    buckets and blow the cost budget open. This check still applies even
+    to explicitly human-specified tags, as a sanity backstop."""
     engine.tag_sweep_max_tag_ratio = 0.5
 
     seed_id = await bucket_mgr.create(
@@ -144,12 +168,12 @@ async def test_tag_sweep_ignores_overly_generic_tags(bucket_mgr, engine):
     )
 
     seed_bucket = await bucket_mgr.get(seed_id)
-    pulled = await engine.pull_line(seed_bucket)
+    pulled = await engine.pull_line(seed_bucket, sweep_tags=["日常", "情绪"])
 
     tag_matched_ids = {b["id"] for b in pulled["tag_matched"]}
     assert specific_id in tag_matched_ids
     # None of the 20 "日常"-only buckets should have been swept in via the
-    # generic tag.
+    # generic tag, even though it was explicitly requested.
     assert len(tag_matched_ids) == 1
 
 
@@ -159,7 +183,7 @@ def _fixed_pull_line(bucket_mgr, candidate_ids):
     decision logic in isolation, independent of bucket_manager's real
     BM25/embedding recall ranking (covered separately in test_bucket_cache.py)
     and independent of the tag-sweep channel (covered by its own tests)."""
-    async def _pull(seed_bucket):
+    async def _pull(seed_bucket, sweep_tags=None):
         return {
             "similarity": [await bucket_mgr.get(bid) for bid in candidate_ids],
             "tag_matched": [],
@@ -463,7 +487,7 @@ async def test_tag_matched_buckets_join_line_without_individual_judgment(
         content="随口提到写作", tags=[], importance=3, domain=["创作"], name="随口提到",
     )
 
-    async def fake_pull(seed_bucket):
+    async def fake_pull(seed_bucket, sweep_tags=None):
         return {
             "similarity": [await bucket_mgr.get(fuzzy_only_id)],
             "tag_matched": [await bucket_mgr.get(bid) for bid in tag_matched_ids],
