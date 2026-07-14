@@ -77,8 +77,16 @@ def progress_store(test_config, tmp_path):
 
 
 @pytest.fixture
-def engine(test_config, bucket_mgr, card_store):
-    eng = BatchImportEngine(test_config, bucket_mgr, embedding_engine=None, card_store=card_store)
+def engine(test_config, bucket_mgr, card_store, tmp_path):
+    # Isolate from the real resources/batch_import_known_projects.json --
+    # otherwise a test bucket tagged e.g. "文学创作" would silently
+    # auto-resolve against the real registry and behave differently
+    # depending on what's registered there at the time.
+    empty_registry = tmp_path / "empty_known_projects.json"
+    empty_registry.write_text("[]", encoding="utf-8")
+    cfg = dict(test_config)
+    cfg["batch_import"] = {"known_projects_path": str(empty_registry)}
+    eng = BatchImportEngine(cfg, bucket_mgr, embedding_engine=None, card_store=card_store)
     return eng
 
 
@@ -557,6 +565,79 @@ async def test_thinking_mode_sent_when_explicitly_configured(test_config, bucket
     await eng._call_json("system", "user")
 
     assert captured.get("extra_body") == {"thinking": {"type": "disabled"}}
+
+
+def _engine_with_known_projects(test_config, bucket_mgr, card_store, tmp_path, projects):
+    registry_path = tmp_path / "known_projects.json"
+    registry_path.write_text(json.dumps(projects, ensure_ascii=False), encoding="utf-8")
+    cfg = dict(test_config)
+    cfg["batch_import"] = {"known_projects_path": str(registry_path)}
+    return BatchImportEngine(cfg, bucket_mgr, embedding_engine=None, card_store=card_store)
+
+
+def test_resolve_sweep_tags_explicit_always_wins_over_registry(
+    test_config, bucket_mgr, card_store, tmp_path
+):
+    engine = _engine_with_known_projects(
+        test_config, bucket_mgr, card_store, tmp_path,
+        [{"id": "p", "name": "项目", "sweep_tags": ["注册标签"]}],
+    )
+    seed = {"metadata": {"tags": ["注册标签"]}}
+    assert engine.resolve_sweep_tags(seed, ["手动指定标签"]) == ["手动指定标签"]
+
+
+@pytest.mark.asyncio
+async def test_run_single_line_auto_resolves_from_known_projects_registry(
+    test_config, bucket_mgr, card_store, progress_store, tmp_path
+):
+    """This is what makes tag sweep viable without typing --sweep-tags on
+    every single run: a project vetted once in the registry (docs §13)
+    should auto-apply when a seed's own tags match it, with no explicit
+    sweep_tags argument needed."""
+    engine = _engine_with_known_projects(
+        test_config, bucket_mgr, card_store, tmp_path,
+        [{"id": "p", "name": "测试项目", "sweep_tags": ["专属标签A", "专属标签B"]}],
+    )
+    engine.pull_line_top_k = 0  # similarity channel contributes nothing; prove the sweep alone forms the line
+
+    seed_id = await bucket_mgr.create(content="种子", tags=["专属标签A"], importance=5, domain=["x"], name="种子桶")
+    matched_id = await bucket_mgr.create(
+        content="另一个", tags=["专属标签B"], importance=5, domain=["x"], name="标签命中桶",
+    )
+
+    engine.client = FakeLLMClient([
+        json.dumps({"specific_question": "", "bucket_verdicts": []}),
+        json.dumps({
+            "title": "t", "content": "c", "revisions": [], "tags": [],
+            "suggested_folder_paths": [], "confidence": 0.5, "reasoning": "x",
+        }),
+    ])
+
+    result = await engine.run_single_line(seed_id, progress_store)  # no sweep_tags passed
+
+    assert result["status"] == "candidate"
+    assert matched_id in result["line_bucket_ids"]
+
+
+@pytest.mark.asyncio
+async def test_tag_sweep_matches_by_substring_not_exact_equality(bucket_mgr, engine):
+    """Yi Lan's "分开与重逢" project wants any tag *containing* 离别/分离/
+    回家 to count, not just an exact tag match -- e.g. a bucket tagged
+    "离别承诺" or "回家的路" should match a sweep pattern of "回家"."""
+    seed_id = await bucket_mgr.create(content="离开", tags=["分开"], importance=5, domain=["x"], name="离开桶")
+    home_id = await bucket_mgr.create(
+        content="想回家", tags=["回家的路"], importance=5, domain=["x"], name="回家桶",
+    )
+    unrelated_id = await bucket_mgr.create(
+        content="无关", tags=["日常"], importance=3, domain=["x"], name="无关桶",
+    )
+
+    seed_bucket = await bucket_mgr.get(seed_id)
+    pulled = await engine.pull_line(seed_bucket, sweep_tags=["回家"])
+
+    tag_matched_ids = {b["id"] for b in pulled["tag_matched"]}
+    assert home_id in tag_matched_ids
+    assert unrelated_id not in tag_matched_ids
 
 
 @pytest.mark.asyncio

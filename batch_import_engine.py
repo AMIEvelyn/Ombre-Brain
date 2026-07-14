@@ -15,9 +15,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
+
+DEFAULT_KNOWN_PROJECTS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "resources", "batch_import_known_projects.json"
+)
 
 logger = logging.getLogger("ombre_brain.batch_import")
 
@@ -47,9 +52,11 @@ LINE_JUDGMENT_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
 3. 事件后形成的新约定。
 如果候选桶里同时出现这三类内容，应分别判断，不要合并成一条线。
 
-**主题优先级（一澜定的规则）**：一个桶如果同时包含具体客观事件（看病、写作、旅行等）和情绪安慰/亲密交流内容，**这条线的主题以客观事件为准**，不要因为桶里也有情绪安慰内容就把 in_line 判断带偏到亲密关系/情绪主题上。只有当候选桶完全是情绪/亲密交流、没有具体客观事件时，才把亲密关系/情绪本身当作可能的主题。如果一个桶里，除了跟种子桶同一件事件的内容外，**还暴露了另一件独立的事情**（比如写书过程中顺带求婚了），求婚是另一条线的事，不能因为同一个桶里提到了就把它算进这条事件线——这种桶本身可以 in_line（事件相关部分仍属于这条线），但求婚这件事不构成把这条线的主题带偏的理由。
+**主题优先级（一澜定的规则）**：一个桶如果同时包含具体客观事件（看病、写作、旅行等）和情绪安慰/亲密交流内容，**这条线的主题以客观事件为准**，不要因为桶里也有情绪安慰内容就把 in_line 判断带偏到亲密关系/情绪主题上。只有当候选桶完全是情绪/亲密交流、没有具体客观事件时，才把亲密关系/情绪本身当作可能的主题。如果一个桶里，除了跟种子桶同一件事件的内容外，还夹杂了另一件相关的小事（比如写书过程中顺带求婚了），**这种桶正常 in_line 即可，那件小事可以作为这条线里的一个插曲留着**，不用刻意从判断里剔除——真正要防的是"主题被带偏"（比如整条线的 specific_question 变成了"我们的关系"而不是原来的具体事件），不是"线里出现了任何跟主线不完全同源的细节"。
 
 种子桶（seed）永远是这条线判断的锚点，其它候选桶都是相对种子桶来判断。
+
+**兜底规则（林湛定的，针对没有登记过的项目/长线）**：当候选桶的核心对象跟种子桶里明确的实体（具体的人、物、项目名）不一致，或者候选桶主要靠"成长""沟通""情绪"这类抽象相似性跟种子桶连起来时，不要判 in_line，标记 uncertain，等待人工复核。只有核心实体一致，才继续把这条线拉长。
 
 候选桶可能有十几二十个，**reason 字段务必简短**（不超过15个字的短语，不要写完整句子），不然输出会太长。
 
@@ -131,7 +138,7 @@ CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
      - 公文腔（禁止）："一澜深度投入《慁》的创作。"
      - 像人话（这样写）："创作期间，一澜与我持续讨论《慁》的意识流写法、自传性来源和核心设定。"
      具体、自然，但**不要额外添加原文没有的情绪修饰**——只有当"当时的感受本身就是这个事实的一部分"（比如作品被怎么定位/定义），才写进 content，这不是装饰情绪，是事实的一部分；单纯为了让句子"更有感情"而加的形容词/感叹，不要加。
-   - **主题优先级**：如果输入的桶/里程碑里，客观事件（写作、旅行、看病等）和情绪/亲密交流内容混在一起，标题和 content 要以客观事件为主线，不要被顺带出现的情绪/亲密内容带偏成"我们的关系"这种主题。同一批桶里如果暴露出另一件独立的事（比如写书过程中顺带求婚了），那件独立的事不要写进这张卡的时间线——它是另一张卡该记的事，这张卡只服务于事件本身这条主线。
+   - **主题优先级**：如果输入的桶/里程碑里，客观事件（写作、旅行、看病等）和情绪/亲密交流内容混在一起，标题和 content 要以客观事件为主线，不要被顺带出现的情绪/亲密内容带偏成"我们的关系"这种主题。同一批桶里如果夹杂了另一件相关的小事（比如写书过程中顺带求婚了），可以作为这条线里的一个插曲留在时间线里，不用刻意剔除——只要标题/顶层 content 依然是原来那个具体事件，没有被带偏成泛泛的"我们的关系"就行。
 4. 标签（tags）：除了字面相关的词，如果原文里反复出现一个和标题字面不同、但明显在指同一个东西的别称/象征说法（例如一件东西本体叫"手串"，但被当"护身符"看待），要把这个别称也写进标签，方便以后按这个别称也能搜到这张卡。
 5. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。**这张卡的主题应该能明确对应至少一个现有文件夹**；如果发现拉出来的内容其实是好几个不同主题混在一起、找不到任何一个现有文件夹能装下，这是"这条线拉得不对"的信号——在 reasoning 里明确指出来，不要为了凑一个文件夹而把标题/内容写得更空泛去迁就。
 6. confidence（0~1）：对这张卡整体判断的把握程度。
@@ -235,7 +242,44 @@ class BatchImportEngine:
         self.tag_sweep_max_tag_ratio = float(cfg.get("tag_sweep_max_tag_ratio", 0.05))
         self.tag_sweep_max_candidates = int(cfg.get("tag_sweep_max_candidates", 400))
 
+        # Known-projects registry (docs/batch-import-design.md §13): a human
+        # (Yi Lan + Lin Zhan) vets a project's sweep tags ONCE, ahead of
+        # time, and every run against that project reuses them automatically
+        # -- this is what makes tag sweep viable for an eventual full sweep
+        # without asking a human to specify --sweep-tags on every single
+        # line. Explicit sweep_tags passed to run_single_line()/pull_line()
+        # still always win over the registry.
+        self.known_projects_path = cfg.get("known_projects_path") or DEFAULT_KNOWN_PROJECTS_PATH
+        self.known_projects = self._load_known_projects(self.known_projects_path)
+
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
+
+    @staticmethod
+    def _load_known_projects(path: str) -> list[dict]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(f"batch_import: failed to load known projects from {path}: {e}")
+            return []
+        return data if isinstance(data, list) else []
+
+    def resolve_sweep_tags(self, seed_bucket: dict, explicit_sweep_tags: list[str] | None) -> list[str] | None:
+        """Explicit tags always win. Otherwise, check whether any of the
+        seed's own tags matches a registered project (substring match, so a
+        seed tagged "分离焦虑" matches a project registered under "分离") --
+        if so, reuse that project's full vetted tag list automatically."""
+        if explicit_sweep_tags:
+            return explicit_sweep_tags
+        seed_tags = [str(t) for t in (seed_bucket.get("metadata") or {}).get("tags", []) or [] if str(t).strip()]
+        if not seed_tags:
+            return None
+        for project in self.known_projects:
+            project_tags = project.get("sweep_tags") or []
+            if any(pt in st for st in seed_tags for pt in project_tags):
+                logger.info(f"batch_import: seed matched known project '{project.get('name', project.get('id'))}'")
+                return project_tags
+        return None
 
     async def _call_json(self, system_prompt: str, user_content: str, *, max_tokens: int = 2000) -> dict | None:
         if self.client is None:
@@ -316,35 +360,42 @@ class BatchImportEngine:
         return {"similarity": similarity, "tag_matched": tag_matched}
 
     async def _tag_sweep(self, seed_bucket: dict, sweep_tags: list[str]) -> list[dict]:
-        requested_tags = {str(t).strip() for t in sweep_tags if str(t).strip()}
-        if not requested_tags:
+        """`sweep_tags` entries are matched as substrings against each
+        bucket's own tags (not exact equality) -- Yi Lan's "分开与重逢" line
+        wants "any tag containing 离别/分离/回家" to count, not just an exact
+        tag match, and this generalizes cleanly to the other projects too
+        (an exact tag like "慁" still matches via substring-of-itself)."""
+        requested_patterns = {str(t).strip() for t in sweep_tags if str(t).strip()}
+        if not requested_patterns:
             return []
 
         all_buckets = await self.bucket_mgr.list_all(include_archive=True)
         total = max(1, len(all_buckets))
-        tag_counts: dict[str, int] = {}
-        for b in all_buckets:
-            for t in (b.get("metadata") or {}).get("tags", []) or []:
-                tag_counts[t] = tag_counts.get(t, 0) + 1
 
-        # Even human-specified tags get this sanity check -- if someone
-        # accidentally passes a tag that turns out to span most of the
+        def _bucket_tags(b: dict) -> list[str]:
+            return [str(t) for t in (b.get("metadata") or {}).get("tags", []) or []]
+
+        def _pattern_hits(pattern: str) -> int:
+            return sum(1 for b in all_buckets if any(pattern in t for t in _bucket_tags(b)))
+
+        # Even human-specified patterns get this sanity check -- if someone
+        # accidentally passes a pattern that turns out to span most of the
         # corpus, don't silently sweep in everything.
         max_count = max(2, int(total * self.tag_sweep_max_tag_ratio))
-        usable_tags = {t for t in requested_tags if tag_counts.get(t, 0) <= max_count}
-        skipped_tags = requested_tags - usable_tags
-        if skipped_tags:
+        usable_patterns = {p for p in requested_patterns if _pattern_hits(p) <= max_count}
+        skipped_patterns = requested_patterns - usable_patterns
+        if skipped_patterns:
             logger.warning(
-                f"batch_import: tag sweep skipped overly-common tags {sorted(skipped_tags)} "
+                f"batch_import: tag sweep skipped overly-common patterns {sorted(skipped_patterns)} "
                 f"(more than {self.tag_sweep_max_tag_ratio:.0%} of corpus)"
             )
-        if not usable_tags:
+        if not usable_patterns:
             return []
 
         matched = [
             b for b in all_buckets
             if b["id"] != seed_bucket["id"]
-            and usable_tags & set((b.get("metadata") or {}).get("tags", []) or [])
+            and any(p in t for t in _bucket_tags(b) for p in usable_patterns)
         ]
         return matched[: self.tag_sweep_max_candidates]
 
@@ -546,6 +597,8 @@ class BatchImportEngine:
         seed_bucket = await self.bucket_mgr.get(seed_bucket_id)
         if not seed_bucket:
             return {"status": "error", "reason": f"bucket not found: {seed_bucket_id}"}
+
+        sweep_tags = self.resolve_sweep_tags(seed_bucket, sweep_tags)
 
         # Pull happens outside the try block so counts are visible in an
         # error report even if a later LLM step is what truncates -- Yi Lan

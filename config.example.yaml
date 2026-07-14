@@ -157,6 +157,11 @@ batch_import:
   tag_sweep_max_tag_ratio: 0.05   # 一个标签如果全库超过这个比例的桶都有，视为太笼统，就算你
                                   # 手动传了也不会拿来扫（防止手滑传错）
   tag_sweep_max_candidates: 400   # 标签扫描最多收多少个桶，防止极端情况下开销失控
+  known_projects_path: ""         # 留空 = 用 resources/batch_import_known_projects.json。
+                                   # 大项目登记表（一澜/林湛提前一次性定好的项目→标签清单，
+                                   # 见 docs/batch-import-design.md §13）。起点桶自己的标签如果
+                                   # 命中登记表里某个项目（子串匹配），自动套用那个项目登记的
+                                   # 完整标签去扫描，不用每次手打 --sweep-tags。
 
 # --- Anchor / 长期锚点 ---
 # anchor is a small curated set of long-term important memories.

@@ -19,7 +19,13 @@ personally confirmed are specific to this one project/story -- a tag that
 also recurs across other, unrelated topics will sweep those in too (this
 is exactly what happened on the first real test run: broad recurring
 concept tags on the seed bucket pulled in ~300 unrelated buckets about a
-completely different theme). Without --sweep-tags, no tag sweep runs at
+completely different theme).
+
+Without --sweep-tags, the seed's own tags are checked against
+resources/batch_import_known_projects.json (docs §13) -- if the seed
+matches a registered project (一澜/林湛 vetted its tags once, ahead of
+time), that project's tag list is applied automatically, no typing
+needed. If it doesn't match anything registered, no tag sweep runs at
 all -- similarity search only.
 """
 
