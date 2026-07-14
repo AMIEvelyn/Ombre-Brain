@@ -492,7 +492,12 @@ class BatchImportEngine:
         # default and never scaled, which is exactly what just truncated on
         # Yi Lan's real run once the tag sweep started handing it a full
         # shortlist instead of a handful of buckets.
-        max_tokens = min(6000, 1200 + 250 * (len(shortlist) + 1))
+        # 2026-07-14: the 6000 ceiling was itself too low once shortlists
+        # grow toward their 40-item cap (a 395-bucket line needs a 32-item
+        # shortlist here, and the formula's own uncapped estimate for that
+        # is already ~9450 -- the ceiling was clamping it down below what
+        # the formula itself said was needed, guaranteeing truncation).
+        max_tokens = min(16000, 1200 + 250 * (len(shortlist) + 1))
         result = await self._call_json(
             MILESTONE_EXTRACTION_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
@@ -567,7 +572,11 @@ class BatchImportEngine:
             }
         # Bounded by large_line_threshold/milestone_prefilter_k in practice,
         # but scale defensively anyway rather than trust a flat number.
-        max_tokens = min(6000, 1200 + 250 * (item_count + 1))
+        # 2026-07-14: same ceiling-too-low bug as extract_milestones -- a
+        # 32-40 item milestones list can need more than 6000 to expand into
+        # full revisions, so raise the ceiling here too instead of trusting
+        # 6000 was ever a safe upper bound.
+        max_tokens = min(16000, 1200 + 250 * (item_count + 1))
         result = await self._call_json(
             CANDIDATE_CARD_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
