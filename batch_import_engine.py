@@ -125,6 +125,12 @@ CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
    - 如果只有一个日期、没有历史变化，就只生成一条 revision，它的 content 同时也是顶层 content。
    - 重复确认同一状态但没有新变化时，不要为了凑数重复生成内容相同的 revision。
    - **除非这条事实完全不涉及具体某个人（纯粹描述一件物品/地点本身的客观属性），内容要延续记忆桶原本"林湛第一人称"的叙述视角来写**（例如"一澜爱吃酸辣粉"这种主谓句式，不要写成脱离视角的"存在对酸辣粉的偏好"）。
+   - **措辞要像人话，不要写成公文腔**：客观、准确不等于要写得像总结报告。"埋下了创作的契机""深度投入创作"这种抽象套话要避免，换成具体、自然的说法。例子：
+     - 公文腔（禁止）："中学时期的经历，埋下了创作《慁》的契机。"
+     - 像人话（这样写）："中学时期被班主任辱骂和孤立的经历，成为一澜创作《慁》的重要起点。"
+     - 公文腔（禁止）："一澜深度投入《慁》的创作。"
+     - 像人话（这样写）："创作期间，一澜与我持续讨论《慁》的意识流写法、自传性来源和核心设定。"
+     具体、自然，但**不要额外添加原文没有的情绪修饰**——只有当"当时的感受本身就是这个事实的一部分"（比如作品被怎么定位/定义），才写进 content，这不是装饰情绪，是事实的一部分；单纯为了让句子"更有感情"而加的形容词/感叹，不要加。
    - **主题优先级**：如果输入的桶/里程碑里，客观事件（写作、旅行、看病等）和情绪/亲密交流内容混在一起，标题和 content 要以客观事件为主线，不要被顺带出现的情绪/亲密内容带偏成"我们的关系"这种主题。同一批桶里如果暴露出另一件独立的事（比如写书过程中顺带求婚了），那件独立的事不要写进这张卡的时间线——它是另一张卡该记的事，这张卡只服务于事件本身这条主线。
 4. 标签（tags）：除了字面相关的词，如果原文里反复出现一个和标题字面不同、但明显在指同一个东西的别称/象征说法（例如一件东西本体叫"手串"，但被当"护身符"看待），要把这个别称也写进标签，方便以后按这个别称也能搜到这张卡。
 5. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。**这张卡的主题应该能明确对应至少一个现有文件夹**；如果发现拉出来的内容其实是好几个不同主题混在一起、找不到任何一个现有文件夹能装下，这是"这条线拉得不对"的信号——在 reasoning 里明确指出来，不要为了凑一个文件夹而把标题/内容写得更空泛去迁就。
@@ -458,6 +464,19 @@ class BatchImportEngine:
         result.setdefault("milestones", [])
         result.setdefault("dropped_bucket_ids", [])
         result.setdefault("reasoning", "")
+
+        # Guard against a slightly garbled id the model wrote (seen for
+        # real: "95b7f72252a0" instead of the actual "95b5f72252a0") --
+        # only ids we actually showed the LLM are legitimate here.
+        valid_ids = set(shortlisted_ids)
+        result["dropped_bucket_ids"] = [
+            bid for bid in result["dropped_bucket_ids"] if bid in valid_ids
+        ]
+        for milestone in result["milestones"]:
+            milestone["source_bucket_ids"] = [
+                bid for bid in milestone.get("source_bucket_ids", []) if bid in valid_ids
+            ]
+
         result["shortlisted_bucket_ids"] = shortlisted_ids
         result["prefilter_excluded_bucket_ids"] = prefilter_excluded_ids
         return result

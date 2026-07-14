@@ -650,3 +650,28 @@ async def test_extract_milestones_reports_prefilter_excluded_separately_from_dro
     assert len(result["shortlisted_bucket_ids"]) < len(buckets)
     assert len(result["prefilter_excluded_bucket_ids"]) > 0
     assert set(result["shortlisted_bucket_ids"]).isdisjoint(result["prefilter_excluded_bucket_ids"])
+
+
+@pytest.mark.asyncio
+async def test_extract_milestones_drops_hallucinated_bucket_ids(bucket_mgr, engine):
+    """Regression: Yi Lan's real run had the model write a slightly garbled
+    id ("95b7f72252a0" instead of the real "95b5f72252a0") into
+    dropped_bucket_ids. Any id not in the shortlist we actually showed the
+    model is not legitimate and must be filtered out, in both
+    dropped_bucket_ids and each milestone's source_bucket_ids."""
+    real_id = await bucket_mgr.create(content="x", tags=[], importance=5, domain=["创作"], name="真实桶")
+    real_bucket = await bucket_mgr.get(real_id)
+    engine.client = FakeLLMClient([json.dumps({
+        "timeline_type": "event",
+        "milestones": [{
+            "valid_at": "2025-01-01", "role": "start", "summary": "s",
+            "source_bucket_ids": [real_id, "hallucinated_id_not_real"],
+        }],
+        "dropped_bucket_ids": [real_id, "another_hallucinated_id"],
+        "reasoning": "x",
+    })])
+
+    result = await engine.extract_milestones([real_bucket])
+
+    assert result["dropped_bucket_ids"] == [real_id]
+    assert result["milestones"][0]["source_bucket_ids"] == [real_id]
