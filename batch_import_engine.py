@@ -47,6 +47,8 @@ LINE_JUDGMENT_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
 3. 事件后形成的新约定。
 如果候选桶里同时出现这三类内容，应分别判断，不要合并成一条线。
 
+**主题优先级（一澜定的规则）**：一个桶如果同时包含具体客观事件（看病、写作、旅行等）和情绪安慰/亲密交流内容，**这条线的主题以客观事件为准**，不要因为桶里也有情绪安慰内容就把 in_line 判断带偏到亲密关系/情绪主题上。只有当候选桶完全是情绪/亲密交流、没有具体客观事件时，才把亲密关系/情绪本身当作可能的主题。如果一个桶里，除了跟种子桶同一件事件的内容外，**还暴露了另一件独立的事情**（比如写书过程中顺带求婚了），求婚是另一条线的事，不能因为同一个桶里提到了就把它算进这条事件线——这种桶本身可以 in_line（事件相关部分仍属于这条线），但求婚这件事不构成把这条线的主题带偏的理由。
+
 种子桶（seed）永远是这条线判断的锚点，其它候选桶都是相对种子桶来判断。
 
 候选桶可能有十几二十个，**reason 字段务必简短**（不超过15个字的短语，不要写完整句子），不然输出会太长。
@@ -123,8 +125,9 @@ CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
    - 如果只有一个日期、没有历史变化，就只生成一条 revision，它的 content 同时也是顶层 content。
    - 重复确认同一状态但没有新变化时，不要为了凑数重复生成内容相同的 revision。
    - **除非这条事实完全不涉及具体某个人（纯粹描述一件物品/地点本身的客观属性），内容要延续记忆桶原本"林湛第一人称"的叙述视角来写**（例如"一澜爱吃酸辣粉"这种主谓句式，不要写成脱离视角的"存在对酸辣粉的偏好"）。
+   - **主题优先级**：如果输入的桶/里程碑里，客观事件（写作、旅行、看病等）和情绪/亲密交流内容混在一起，标题和 content 要以客观事件为主线，不要被顺带出现的情绪/亲密内容带偏成"我们的关系"这种主题。同一批桶里如果暴露出另一件独立的事（比如写书过程中顺带求婚了），那件独立的事不要写进这张卡的时间线——它是另一张卡该记的事，这张卡只服务于事件本身这条主线。
 4. 标签（tags）：除了字面相关的词，如果原文里反复出现一个和标题字面不同、但明显在指同一个东西的别称/象征说法（例如一件东西本体叫"手串"，但被当"护身符"看待），要把这个别称也写进标签，方便以后按这个别称也能搜到这张卡。
-5. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。
+5. 建议文件夹（suggested_folder_paths）：只能从下面提供的"现有文件夹路径"列表里选，可以选多个，也可以一个都不选（如果都不合适，不要编造新路径）。这一步判断的是"这张卡该被归到哪儿"，跟"这是不是同一件事"是两个独立的判断，不要因为归到了同一类文件夹就把标题/内容写得更空泛。**这张卡的主题应该能明确对应至少一个现有文件夹**；如果发现拉出来的内容其实是好几个不同主题混在一起、找不到任何一个现有文件夹能装下，这是"这条线拉得不对"的信号——在 reasoning 里明确指出来，不要为了凑一个文件夹而把标题/内容写得更空泛去迁就。
 6. confidence（0~1）：对这张卡整体判断的把握程度。
 
 只输出严格 JSON，不要用 markdown 代码块包裹：
@@ -366,32 +369,63 @@ class BatchImportEngine:
     # Step ④: milestone extraction (large lines only)
     # ------------------------------------------------------------------
     def _prefilter_for_milestones(self, line_buckets: list[dict]) -> list[dict]:
-        """Cheap, free signals first (date extremes / importance / has
-        comments) so the LLM only ever sees a small shortlist, not every
-        raw bucket in a hundred-plus-bucket line -- see docs §6."""
-        by_date = sorted(line_buckets, key=_bucket_date)
+        """Cheap, free signals only (no LLM call) so the final milestone call
+        only ever sees a shortlist, not every raw bucket in a hundred-plus-
+        bucket line -- see docs §6.
+
+        2026-07-13 fix: a flat 12-slot shortlist picked by "date extremes +
+        importance" from the whole pool silently lost real beats once lines
+        got into the hundreds (Yi Lan's book: the seed bucket itself, her
+        actual "started writing" moment, didn't make the cut and vanished
+        from the timeline with no record of why). Two changes: the shortlist
+        size now scales with line size instead of staying fixed, and slots
+        are chosen by positional quantile across the sorted timeline (one
+        pick per time segment) instead of pure date-extremes/importance, so
+        a huge line's shortlist actually covers its whole span instead of
+        clustering wherever importance happens to be highest.
+        """
+        target_size = min(40, max(self.milestone_prefilter_k, len(line_buckets) // 12))
+
+        with_date = sorted([b for b in line_buckets if _bucket_date(b)], key=_bucket_date)
         shortlist_ids: set[str] = set()
-        k = max(1, self.milestone_prefilter_k // 4)
-        for b in by_date[:k]:
-            shortlist_ids.add(b["id"])
-        for b in by_date[-k:]:
-            shortlist_ids.add(b["id"])
-        by_importance = sorted(
-            line_buckets,
-            key=lambda b: int((b.get("metadata") or {}).get("importance", 5)),
-            reverse=True,
-        )
-        for b in by_importance[: self.milestone_prefilter_k // 2]:
-            shortlist_ids.add(b["id"])
-        for b in line_buckets:
-            if (b.get("metadata") or {}).get("comments"):
+
+        if with_date:
+            segments = min(target_size, len(with_date))
+            for i in range(segments):
+                lo = i * len(with_date) // segments
+                hi = max(lo + 1, (i + 1) * len(with_date) // segments)
+                segment = with_date[lo:hi]
+                best = max(segment, key=lambda b: int((b.get("metadata") or {}).get("importance", 5)))
+                shortlist_ids.add(best["id"])
+            # Always force the true start/end in, regardless of which bucket
+            # a segment's importance-based pick happened to land on.
+            shortlist_ids.add(with_date[0]["id"])
+            shortlist_ids.add(with_date[-1]["id"])
+
+        remaining = target_size - len(shortlist_ids)
+        if remaining > 0:
+            pool = [b for b in line_buckets if b["id"] not in shortlist_ids]
+            pool.sort(
+                key=lambda b: (
+                    bool((b.get("metadata") or {}).get("comments")),
+                    int((b.get("metadata") or {}).get("importance", 5)),
+                ),
+                reverse=True,
+            )
+            for b in pool[:remaining]:
                 shortlist_ids.add(b["id"])
-            if len(shortlist_ids) >= self.milestone_prefilter_k:
-                break
+
         return [b for b in line_buckets if b["id"] in shortlist_ids]
 
     async def extract_milestones(self, line_buckets: list[dict]) -> dict:
         shortlist = self._prefilter_for_milestones(line_buckets)
+        shortlisted_ids = [b["id"] for b in shortlist]
+        # 2026-07-13: without this, there was no way to tell "the LLM saw
+        # this bucket and dropped it" from "the prefilter never showed the
+        # LLM this bucket at all" -- exactly what happened to Yi Lan's seed
+        # bucket, which vanished from the timeline with no record why.
+        prefilter_excluded_ids = [b["id"] for b in line_buckets if b["id"] not in set(shortlisted_ids)]
+
         payload = {"candidates": [_bucket_excerpt(b) for b in shortlist]}
         # Same fix as judge_line: this was left on the flat 2000-token
         # default and never scaled, which is exactly what just truncated on
@@ -406,7 +440,7 @@ class BatchImportEngine:
         if not result:
             # Fallback: treat every shortlisted bucket as its own milestone
             # rather than losing the shortlist entirely.
-            return {
+            result = {
                 "timeline_type": "state",
                 "milestones": [
                     {
@@ -424,6 +458,8 @@ class BatchImportEngine:
         result.setdefault("milestones", [])
         result.setdefault("dropped_bucket_ids", [])
         result.setdefault("reasoning", "")
+        result["shortlisted_bucket_ids"] = shortlisted_ids
+        result["prefilter_excluded_bucket_ids"] = prefilter_excluded_ids
         return result
 
     # ------------------------------------------------------------------
@@ -566,9 +602,11 @@ class BatchImportEngine:
         counts["line_bucket_count"] = len(line_bucket_ids)
 
         dropped_bucket_ids: list[str] = []
+        prefilter_excluded_bucket_ids: list[str] = []
         if len(line_buckets) > self.large_line_threshold:
             milestones = await self.extract_milestones(line_buckets)
             dropped_bucket_ids = milestones["dropped_bucket_ids"]
+            prefilter_excluded_bucket_ids = milestones["prefilter_excluded_bucket_ids"]
             # Milestones carry their own source_bucket_ids (a merged same-day
             # milestone can point at several); hand the whole structure to
             # candidate-card generation instead of re-deriving a flat bucket
@@ -594,6 +632,12 @@ class BatchImportEngine:
             "specific_question": specific_question,
             "counts": counts,
             "line_bucket_ids": line_bucket_ids,
+            # "dropped": the milestone LLM saw it and decided it's not its
+            # own timepoint. "prefilter_excluded": the milestone LLM never
+            # saw it at all -- it didn't make the (size-scaled) shortlist.
+            # These used to be indistinguishable, which is exactly how the
+            # seed bucket vanished from Yi Lan's real timeline with no trace.
             "dropped_bucket_ids": dropped_bucket_ids,
+            "prefilter_excluded_bucket_ids": prefilter_excluded_bucket_ids,
             "candidate_card": candidate_card,
         }

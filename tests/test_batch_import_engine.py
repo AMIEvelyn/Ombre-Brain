@@ -603,3 +603,50 @@ def test_prefilter_for_milestones_bounds_shortlist_size(engine):
     shortlist = engine._prefilter_for_milestones(buckets)
     assert len(shortlist) <= engine.milestone_prefilter_k + 4  # date-extremes + importance overlap loosely
     assert len(shortlist) < len(buckets)
+
+
+def test_prefilter_for_milestones_scales_and_covers_the_whole_timeline(engine):
+    """Regression: Yi Lan's real 377-bucket line got a flat 12-item
+    shortlist picked by date-extremes + importance from the whole pool --
+    the seed bucket (her actual "started writing" moment) didn't happen to
+    win any of those 12 slots and vanished from the timeline entirely, with
+    no record of why. The shortlist must both scale up for a line this
+    size, and spread across the full date range rather than clustering."""
+    buckets = [
+        {
+            "id": f"b{i}",
+            "metadata": {"created": f"2025-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}", "importance": 5},
+        }
+        for i in range(377)
+    ]
+    shortlist = engine._prefilter_for_milestones(buckets)
+
+    assert len(shortlist) > engine.milestone_prefilter_k  # scaled up, not stuck at the old flat default
+
+    months = {b["metadata"]["created"][:7] for b in shortlist}
+    assert len(months) >= 10  # spans most of the year, not clustered into a couple of months
+
+
+@pytest.mark.asyncio
+async def test_extract_milestones_reports_prefilter_excluded_separately_from_dropped(engine):
+    """A bucket the prefilter shortlist never showed the LLM must be
+    reported differently from one the LLM saw and declined to keep as a
+    milestone -- conflating the two is exactly how Yi Lan's seed bucket
+    disappeared without a trace."""
+    buckets = [
+        {"id": f"b{i}", "metadata": {"created": f"2025-01-{i+1:02d}", "importance": 5}, "content": f"c{i}"}
+        for i in range(30)
+    ]
+    engine.milestone_prefilter_k = 3  # force a small shortlist relative to 30 buckets
+    engine.client = FakeLLMClient([json.dumps({
+        "timeline_type": "event",
+        "milestones": [],
+        "dropped_bucket_ids": [],  # LLM saw the shortlist and kept nothing
+        "reasoning": "x",
+    })])
+
+    result = await engine.extract_milestones(buckets)
+
+    assert len(result["shortlisted_bucket_ids"]) < len(buckets)
+    assert len(result["prefilter_excluded_bucket_ids"]) > 0
+    assert set(result["shortlisted_bucket_ids"]).isdisjoint(result["prefilter_excluded_bucket_ids"])
