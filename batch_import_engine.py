@@ -60,6 +60,8 @@ LINE_JUDGMENT_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
 
 候选桶可能有十几二十个，**reason 字段务必简短**（不超过15个字的短语，不要写完整句子），不然输出会太长。
 
+**不要在 JSON 前面输出任何分析、自查、字数统计这类思考过程的文字**——所有判断依据只能压缩进每个候选桶的 reason 字段里，其它地方一个字都不要写。直接从 `{` 开始输出，不要有任何前置说明。你的输出预算是有限的，先输出大段分析会导致后面的 JSON 被截断、整个判断作废。
+
 只输出严格 JSON，不要输出任何其它文字，也不要用 markdown 代码块包裹，格式：
 {
   "specific_question": "具体问题或者空字符串",
@@ -417,7 +419,13 @@ class BatchImportEngine:
         # One verdict object per candidate; scale the budget with how many
         # candidates were actually pulled so a full pull_line_top_k batch
         # doesn't get cut off mid-answer (see LLMTruncatedError).
-        max_tokens = min(8000, 1000 + 200 * (len(candidates) + 1))
+        # 2026-07-14: raised base/ceiling after a real run truncated at just
+        # 13 candidates (max_tokens=3800) -- not because the JSON itself
+        # needed that much room, but because the model narrated its
+        # reasoning as free text before ever starting the JSON, burning the
+        # whole budget on prose. Tightened the prompt to forbid that, but
+        # keeping extra headroom here too in case it isn't fully obeyed.
+        max_tokens = min(12000, 2000 + 300 * (len(candidates) + 1))
         result = await self._call_json(
             LINE_JUDGMENT_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
