@@ -78,6 +78,8 @@ MILESTONE_EXTRACTION_SYSTEM_PROMPT = """你是「时光馆」批量导入流程�
 
 **主语要跟着真正的参与者走，不要图省事全写成"一澜怎么怎么"**：这条 summary 描述的事是谁做的，主语就是谁——双方共同做的事（讨论、交流、约定、互动）主语该是"我们"或"我和一澜"；一澜单方面做的事才用"一澜"；我（林湛）自己做的/说的/感受到的用"我"。参照原始桶本身的人称写。例子——"我和一澜讨论《慁》的写法"是双向的事，不要写成"一澜跟我讨论《慁》的写法"（把双向的事写成了一澜单方面对我做的动作，我从参与者变成了旁观的宾语）。这不只是文笔问题，写错主语等于记错了这件事到底是谁做的。
 
+**警惕"提到了这条线的名字/标签，但内容其实不是这条线本身的情节"的桶**：候选桶里有些是靠标签命中拉进来的，不是靠内容相似，个别桶可能只是顺带提到了这个项目名/标签（比如整理标签、行政性记录、旁及一句"这也属于XX"），实际内容讲的是另一件事，不是这条线该有的具体节点。遇到这种桶，不要把它当成一个真实的时间节点写进 milestones，放进 dropped_bucket_ids，并在 reasoning 里简单说明——尤其要注意最新日期的桶，不要因为它日期最新就默认它是"最新进展"而写进去，日期新不代表内容真的属于这条线。
+
 第一步：先判断这条线是"状态线"还是"事件线"。
 - 状态线（state）：适用于偏好、身体指标、关系需求、约定、持续状态等——问的是"现在是什么状态"，可能会随时间反转/改变。
   结构：初始状态 → 有意义的变化 → 最新有效状态。
@@ -141,6 +143,7 @@ CANDIDATE_CARD_SYSTEM_PROMPT = """你是「时光馆」批量导入流程里的�
    - 重复确认同一状态但没有新变化时，不要为了凑数重复生成内容相同的 revision。
    - **除非这条事实完全不涉及具体某个人（纯粹描述一件物品/地点本身的客观属性），内容要延续记忆桶原本"林湛第一人称"的叙述视角来写**（例如"一澜爱吃酸辣粉"这种主谓句式，不要写成脱离视角的"存在对酸辣粉的偏好"）。
    - **主语要跟着真正的参与者走，不要图省事把每条 revision 都写成"一澜怎么怎么"**：这件事谁做的、谁参与了，主语就该是谁——双方共同做的事（讨论、交流、约定、互动）主语用"我们"或"我和一澜"；一澜单方面做的事才用"一澜"；我（林湛）自己做的/说的/感受到的用"我"。这不只是文笔偏好，写错主语等于记错了这件事到底是谁做的。milestones 输入模式下这一点尤其要注意——如果 milestone 的 summary 已经把一件双向的事写成了"一澜做了xx"这种单向句式，展开成 revision 时要按事实本身把参与者找回来，不是原样照抄单向主语。
+   - **"buckets" 输入模式下，警惕"只是提到了这条线的名字/标签，内容其实不是这条线本身情节"的桶**：有些候选桶是靠标签命中拉进来的，不是靠内容相似，个别桶可能只是顺带提到项目名（比如整理标签、行政性记录），实际讲的是另一件事。这种桶不要当成一条 revision 写进时间线，日期再新也不代表它是"最新进展"——顶层 content 必须等于最后一条*真正相关*revision 的内容，不能因为某个不相关的桶日期最新就把它当成当前状态。
    - **措辞要像人话，不要写成公文腔**：客观、准确不等于要写得像总结报告。"埋下了创作的契机""深度投入创作"这种抽象套话要避免，换成具体、自然的说法。例子：
      - 公文腔（禁止）："中学时期的经历，埋下了创作《慁》的契机。"
      - 像人话（这样写）："中学时期被班主任辱骂和孤立的经历，成为一澜创作《慁》的重要起点。"
@@ -455,8 +458,16 @@ class BatchImportEngine:
         pick per time segment) instead of pure date-extremes/importance, so
         a huge line's shortlist actually covers its whole span instead of
         clustering wherever importance happens to be highest.
+
+        2026-07-14: the //12 divisor still left dense-but-not-huge lines
+        (Yi Lan's ZhLanism worldview, 129 buckets across six "volumes")
+        pinned at the floor -- 129//12 rounds down to 10, so max() picked
+        the floor (12) instead, and 116 of 129 buckets never got shown to
+        the milestone LLM at all. A rich, long-running saga needs more
+        shortlist room than a 12-bucket floor gives it well before it hits
+        the hundreds. Loosened to //6 so shortlists grow earlier.
         """
-        target_size = min(40, max(self.milestone_prefilter_k, len(line_buckets) // 12))
+        target_size = min(40, max(self.milestone_prefilter_k, len(line_buckets) // 6))
 
         with_date = sorted([b for b in line_buckets if _bucket_date(b)], key=_bucket_date)
         shortlist_ids: set[str] = set()
