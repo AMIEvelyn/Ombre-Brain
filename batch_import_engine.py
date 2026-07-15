@@ -519,7 +519,14 @@ class BatchImportEngine:
         # shortlist here, and the formula's own uncapped estimate for that
         # is already ~9450 -- the ceiling was clamping it down below what
         # the formula itself said was needed, guaranteeing truncation).
-        max_tokens = min(16000, 1200 + 250 * (len(shortlist) + 1))
+        # 2026-07-14 (again, same day): after widening the prefilter's
+        # divisor (//12 -> //6, see _prefilter_for_milestones) so dense
+        # mid-size lines actually get a usable shortlist, a real run with a
+        # 22-item shortlist still truncated at 6950 -- not from the outer
+        # ceiling (16000 wasn't reached), but because the per-item budget
+        # itself was too tight for content-dense state-line milestones.
+        # Raised the base/per-item constants for headroom.
+        max_tokens = min(16000, 1500 + 400 * (len(shortlist) + 1))
         result = await self._call_json(
             MILESTONE_EXTRACTION_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
@@ -598,7 +605,11 @@ class BatchImportEngine:
         # 32-40 item milestones list can need more than 6000 to expand into
         # full revisions, so raise the ceiling here too instead of trusting
         # 6000 was ever a safe upper bound.
-        max_tokens = min(16000, 1200 + 250 * (item_count + 1))
+        # 2026-07-14 (again): also bumped the base/per-item constants to
+        # match extract_milestones's fix -- a content-dense shortlist needs
+        # more per-item room than 250 tokens gave it, and this step expands
+        # each milestone into a full revision, so it's at least as exposed.
+        max_tokens = min(16000, 1500 + 400 * (item_count + 1))
         result = await self._call_json(
             CANDIDATE_CARD_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False),
