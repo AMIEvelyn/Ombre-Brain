@@ -48,20 +48,43 @@ async def _fake_bucket_summary(bucket_id):
     return FAKE_BUCKETS.get(bucket_id)
 
 
+class _FakeImage:
+    """Stand-in for mcp.server.fastmcp.Image -- card_attachment_view just
+    needs to pass through whatever read_attachment_image returns, so a
+    sentinel object is enough; no need to exercise the real Image class
+    here (that's an integration concern, verified on real deployment)."""
+    def __init__(self, path):
+        self.path = path
+
+
+def _fake_read_attachment_image(attachment):
+    ext = os.path.splitext(str(attachment.get("url") or ""))[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return None
+    if attachment.get("_missing"):
+        return None
+    return _FakeImage(attachment.get("url"))
+
+
 def main():
     tmp = tempfile.mkdtemp()
     store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
     mcp = FakeMCP()
     cards_mcp.register_card_tools(
-        mcp, store, read_attachment_text=_fake_read_attachment_text, bucket_summary=_fake_bucket_summary,
+        mcp, store,
+        read_attachment_text=_fake_read_attachment_text,
+        read_attachment_image=_fake_read_attachment_image,
+        bucket_summary=_fake_bucket_summary,
     )
     assert set(mcp.tools) == {
-        "card_lookup", "folder_timeline", "card_history", "card_attachment_read", "card_buckets",
+        "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
+        "card_attachment_view", "card_buckets",
     }
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
     card_history = mcp.tools["card_history"]
     card_attachment_read = mcp.tools["card_attachment_read"]
+    card_attachment_view = mcp.tools["card_attachment_view"]
     card_buckets = mcp.tools["card_buckets"]
 
     # --- store helpers used by the tools ---
@@ -144,14 +167,14 @@ def main():
             {"type": "image", "label": "封面图.png", "url": "/api/facts-skeleton/attachments/a.png"},
             {"type": "file", "label": "行程.md", "url": "/api/facts-skeleton/attachments/b.md",
              "_text": "第一天：迪士尼\n第二天：太平山"},
-            {"type": "file", "label": "船票.pdf", "url": "/api/facts-skeleton/attachments/c.pdf",
-             "_text": None},
+            {"type": "file", "label": "船票.doc", "url": "/api/facts-skeleton/attachments/c.doc",
+             "_text": None},  # legacy binary .doc -- still genuinely unsupported, unlike .pdf/.docx now
         ],
     )
     out = _run(card_attachment_read(card="旅行攻略"))
     assert "封面图.png" in out and "读不了图片内容" in out
     assert "行程.md" in out and "第一天：迪士尼" in out
-    assert "船票.pdf" in out and "暂时读不了内容" in out
+    assert "船票.doc" in out and "没有可用的解析库" in out
     print("PASS card_attachment_read: image/text/unsupported all handled")
 
     only_doc = _run(card_attachment_read(card="旅行攻略", label="行程"))
@@ -169,9 +192,36 @@ def main():
     assert "还没接上附件内容读取" in disabled
     print("PASS card_attachment_read: disabled cleanly when not wired up")
 
+    # --- card_attachment_view: experimental image-sending tool ---
+    view = _run(card_attachment_view(card="旅行攻略"))
+    assert isinstance(view, _FakeImage) and view.path == "/api/facts-skeleton/attachments/a.png"
+    print("PASS card_attachment_view: returns the image object directly")
+
+    only_image_by_label = _run(card_attachment_view(card="旅行攻略", label="封面"))
+    assert isinstance(only_image_by_label, _FakeImage)
+    print("PASS card_attachment_view: label filter")
+
+    two_images_card = store.create_card(
+        title="双图卡",
+        attachments=[
+            {"type": "image", "label": "a.png", "url": "/x/a.png"},
+            {"type": "image", "label": "b.png", "url": "/x/b.png"},
+        ],
+    )
+    ambiguous = _run(card_attachment_view(card="双图卡"))
+    assert isinstance(ambiguous, str) and "有多张图片匹配" in ambiguous
+    print("PASS card_attachment_view: ambiguous (multiple images, no label)")
+
+    assert "没找到匹配的图片附件" in _run(card_attachment_view(card="没有附件的卡"))
+    print("PASS card_attachment_view: no image attachments")
+
+    disabled_view = _run(mcp_unwired.tools["card_attachment_view"](card="旅行攻略"))
+    assert isinstance(disabled_view, str) and "还没接上图片查看" in disabled_view
+    print("PASS card_attachment_view: disabled cleanly when not wired up")
+
     # --- card_lookup now hints at attachments + linked buckets (used to say nothing) ---
     out_doc = _run(card_lookup(query="旅行攻略"))
-    assert "📎 附件：1 张图片，2 个文件（行程.md、船票.pdf）" in out_doc
+    assert "📎 附件：1 张图片，2 个文件（行程.md、船票.doc）" in out_doc
     print("PASS card_lookup hints attachment counts + file names")
 
     # --- card_buckets: the other half of card_lookup's "关联了 N 个记忆桶" hint ---

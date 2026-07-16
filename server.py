@@ -9727,8 +9727,10 @@ FACTS_ATTACHMENTS_MAX_FILE_BYTES = 20 * 1024 * 1024
 FACTS_ATTACHMENTS_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 # 2026-07-16: added .json/.py -- Yi Lan wants to attach these to fact cards too.
 FACTS_ATTACHMENTS_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".json", ".py"}
-# Plain-text formats card_attachment_read() can open directly (no parsing
-# library available for .pdf/.doc/.docx yet -- see that function).
+# Formats card_attachment_read() opens by reading the raw bytes as UTF-8
+# text directly -- .docx/.pdf go through separate parsing libraries instead
+# (python-docx/pypdf, see _facts_attachment_text). Legacy binary .doc has no
+# lightweight well-maintained pure-Python parser and stays unsupported.
 FACTS_ATTACHMENTS_TEXT_EXTENSIONS = {".txt", ".md", ".json", ".py"}
 FACTS_ATTACHMENT_TEXT_MAX_CHARS = 4000
 
@@ -9822,29 +9824,79 @@ async def api_facts_skeleton_serve_attachment(request):
     return FileResponse(target)
 
 
-def _facts_attachment_text(attachment: dict) -> str | None:
-    """Read a non-image card attachment's content off disk for the
-    card_attachment_read MCP tool (cards_mcp.py). Returns None for anything
-    that isn't a plain-text format we can open without a parsing library --
-    .pdf/.doc/.docx aren't supported yet, that would need a new dependency.
-    Reuses the same path-traversal guard as api_facts_skeleton_serve_attachment."""
+def _facts_attachment_target_path(attachment: dict) -> str | None:
+    """Shared path-traversal-guarded resolution of an attachment dict's url
+    to its file on disk. None if outside the attachments dir or missing."""
     url = str(attachment.get("url") or "")
     filename = url.rsplit("/", 1)[-1] if url else ""
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in FACTS_ATTACHMENTS_TEXT_EXTENSIONS:
+    if not filename:
         return None
     base_dir = os.path.abspath(_facts_attachments_dir())
     target = os.path.abspath(os.path.join(base_dir, filename))
     if not target.startswith(base_dir + os.sep) or not os.path.isfile(target):
         return None
-    try:
-        with open(target, "r", encoding="utf-8", errors="replace") as f:
-            text = f.read()
-    except Exception:
+    return target
+
+
+def _facts_attachment_text(attachment: dict) -> str | None:
+    """Read a non-image card attachment's content for the card_attachment_read
+    MCP tool (cards_mcp.py). Returns None for anything we can't turn into
+    text -- legacy binary .doc has no lightweight, well-maintained pure-
+    Python parser and isn't supported; everything else (.txt/.md/.json/.py
+    directly, .docx via python-docx, .pdf via pypdf) is."""
+    ext = os.path.splitext(str(attachment.get("url") or ""))[1].lower()
+    target = _facts_attachment_target_path(attachment)
+    if target is None:
         return None
-    if len(text) > FACTS_ATTACHMENT_TEXT_MAX_CHARS:
+
+    text: str | None = None
+    if ext in FACTS_ATTACHMENTS_TEXT_EXTENSIONS:
+        try:
+            with open(target, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except Exception:
+            return None
+    elif ext == ".docx":
+        try:
+            import docx
+            document = docx.Document(target)
+            text = "\n".join(p.text for p in document.paragraphs)
+        except Exception:
+            logger.warning("Failed to extract text from .docx attachment", exc_info=True)
+            return None
+    elif ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(target)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        except Exception:
+            logger.warning("Failed to extract text from .pdf attachment", exc_info=True)
+            return None
+    else:
+        # .doc (legacy binary format) and anything else -- not supported.
+        return None
+
+    if text is not None and len(text) > FACTS_ATTACHMENT_TEXT_MAX_CHARS:
         text = text[:FACTS_ATTACHMENT_TEXT_MAX_CHARS] + "\n…（内容过长，已截断）"
     return text
+
+
+def _facts_attachment_image(attachment: dict):
+    """Build an mcp.server.fastmcp.Image for the card_attachment_view MCP
+    tool -- 2026-07-16 experimental capability, not yet verified against the
+    real ChatGPT connector (see docs/facts-model-v2-collection-redesign.md
+    §14): the MCP protocol supports returning image content from a tool,
+    but whether ChatGPT's connector actually surfaces it to the model as
+    something it can see is unconfirmed. Returns None if the attachment
+    isn't an image or the file is missing."""
+    ext = os.path.splitext(str(attachment.get("url") or ""))[1].lower()
+    if ext not in FACTS_ATTACHMENTS_IMAGE_EXTENSIONS:
+        return None
+    target = _facts_attachment_target_path(attachment)
+    if target is None:
+        return None
+    from mcp.server.fastmcp import Image
+    return Image(path=target)
 
 
 @mcp.custom_route("/api/facts-skeleton", methods=["POST"])
@@ -12985,7 +13037,10 @@ import cards_api
 import cards_mcp
 cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_summary=_bucket_link_summary)
 cards_mcp.register_card_tools(
-    mcp, card_store, read_attachment_text=_facts_attachment_text, bucket_summary=_bucket_link_summary,
+    mcp, card_store,
+    read_attachment_text=_facts_attachment_text,
+    read_attachment_image=_facts_attachment_image,
+    bucket_summary=_bucket_link_summary,
 )
 
 

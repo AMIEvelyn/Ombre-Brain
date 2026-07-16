@@ -34,3 +34,9 @@ python-multipart>=0.0.9
 
 # 向量相似度计算 (导入模式/聚类)
 numpy>=1.24.0
+
+# 资料卡附件文本提取 (card_attachment_read 读 .docx/.pdf 用，见 server.py
+# _facts_attachment_text)。旧版二进制 .doc 格式没有轻量、维护良好的纯 Python
+# 解析库，暂不支持，只支持 .docx。
+python-docx>=1.1.0
+pypdf>=4.0.0

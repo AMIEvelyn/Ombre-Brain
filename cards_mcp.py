@@ -16,9 +16,18 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
                      (card_lookup only hints these exist; this is the "open
                      it up and read the details" tool, same relationship as
                      card_history is to the "N条历史" hint).
+  card_attachment_read -- reads a card's plain-text/.docx/.pdf attachments
+                     back as text.
+  card_attachment_view -- experimental (2026-07-16): sends an image
+                     attachment's actual content back, unverified whether
+                     ChatGPT's connector renders it -- see its docstring.
 """
 
 from __future__ import annotations
+
+from typing import Union
+
+from mcp.server.fastmcp import Image
 
 
 def _fmt_card(store, card: dict) -> str:
@@ -102,13 +111,20 @@ def _resolve_folder(store, folder: str):
     return "", f"有多个文件夹匹配「{folder}」：{paths}。请说得更具体一点（可以用完整路径里的名字）。"
 
 
-def register_card_tools(mcp, store, *, read_attachment_text=None, bucket_summary=None) -> None:
+def register_card_tools(
+    mcp, store, *, read_attachment_text=None, read_attachment_image=None, bucket_summary=None,
+) -> None:
     """read_attachment_text: optional callable(attachment_dict) -> str | None,
     reading a non-image attachment's text content off disk (server.py owns
     the actual attachments directory/path logic; cards_mcp.py stays decoupled
     from it, same pattern as cards_api.py's bucket_summary parameter). None
     (the default) disables card_attachment_read with a clear message instead
     of erroring.
+
+    read_attachment_image: optional callable(attachment_dict) -> Image | None
+    (mcp.server.fastmcp.Image), building an actual image content block for
+    card_attachment_view -- 2026-07-16 experimental, see that tool's
+    docstring. None disables it with a clear message too.
 
     bucket_summary: optional async callable(bucket_id) -> dict | None, same
     shape/contract as server.py's _bucket_link_summary (already passed to
@@ -195,9 +211,10 @@ def register_card_tools(mcp, store, *, read_attachment_text=None, bucket_summary
 
     @mcp.tool()
     async def card_attachment_read(card: str = "", label: str = "") -> str:
-        """读取一张资料卡附件里纯文本类文件（.txt/.md/.json/.py）的实际内容。
-        图片附件、以及 .pdf/.doc/.docx 这类需要额外解析的格式，这个工具读不了，
-        会明确告诉你读不了、不是没找到——想看图片内容目前没有别的路径。
+        """读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
+        .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
+        实验性功能），旧版二进制 .doc 格式也读不了（没有轻量可用的解析库），
+        这两种会明确告诉你读不了、不是没找到。
         card：卡片标题或 id。label：可选，附件文件名（或其中一部分），用来在
         一张卡有多个附件时指定读哪个；留空会把这张卡里所有能读的文本附件都读出来。"""
         if read_attachment_text is None:
@@ -217,14 +234,43 @@ def register_card_tools(mcp, store, *, read_attachment_text=None, bucket_summary
         for a in attachments:
             name = str(a.get("label") or "附件")
             if a.get("type") == "image":
-                blocks.append(f"【{name}】是图片，这个工具读不了图片内容。")
+                blocks.append(f"【{name}】是图片，这个工具读不了图片内容（试试 card_attachment_view）。")
                 continue
             text = read_attachment_text(a)
             if text is None:
-                blocks.append(f"【{name}】这个格式暂时读不了内容（比如 pdf/docx 需要额外解析，还没支持）。")
+                blocks.append(f"【{name}】这个格式读不了内容（旧版 .doc 没有可用的解析库）。")
             else:
                 blocks.append(f"【{name}】内容：\n{text}")
         return "\n\n".join(blocks)
+
+    @mcp.tool()
+    async def card_attachment_view(card: str = "", label: str = "") -> Union[str, Image]:
+        """把一张资料卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
+        它存在。**这是实验性功能（2026-07-16）**：MCP 协议支持这样返回图片，但
+        ChatGPT 连接器具体能不能把这种图片内容真的显示给你看，还没有确认过——
+        调用后如果你能描述出图片里的内容，说明能看；如果只是报错或者看不出画面，
+        说明这条路径在当前的技术条件下暂时不通，不是这张卡或这个附件的问题。
+        card：卡片标题或 id。label：可选，附件文件名（或其中一部分）；留空且只
+        有一张图片时直接发那一张，有多张会列出来请你说得更具体一点。"""
+        if read_attachment_image is None:
+            return "这个部署还没接上图片查看（read_attachment_image 未配置）。"
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        attachments = (found.get("current") or {}).get("attachments") or []
+        photos = [a for a in attachments if a.get("type") == "image"]
+        if label:
+            label_lower = label.strip().lower()
+            photos = [a for a in photos if label_lower in str(a.get("label", "")).lower()]
+        if not photos:
+            return "没找到匹配的图片附件。"
+        if len(photos) > 1:
+            names = "、".join(str(a.get("label") or "") for a in photos)
+            return f"有多张图片匹配：{names}。请用 label 参数说得更具体一点，一次只能看一张。"
+        image = read_attachment_image(photos[0])
+        if image is None:
+            return "这张图片读不到（文件可能已经丢失）。"
+        return image
 
     @mcp.tool()
     async def card_buckets(card: str = "") -> str:
