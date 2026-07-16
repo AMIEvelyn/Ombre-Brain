@@ -12,6 +12,10 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
   card_history    -- the other half of card_lookup's "有 N 条历史" hint: reads
                      back the full timeline of one specific card (see
                      docs/facts-model-v2-collection-redesign.md §14 item 2).
+  card_buckets    -- lists the memory buckets linked to one card as evidence
+                     (card_lookup only hints these exist; this is the "open
+                     it up and read the details" tool, same relationship as
+                     card_history is to the "N条历史" hint).
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ def _fmt_card(store, card: dict) -> str:
     content = str(cur.get("content") or "").strip()
     history = card.get("history") or []
     tags = [str(t) for t in (cur.get("tags") or [])]
+    attachments = cur.get("attachments") or []
+    buckets = card.get("buckets") or []
 
     lines = [f"【{title}】"]
     lines.append(f"  现在：{content}" if content else "  现在：（无内容）")
@@ -30,6 +36,18 @@ def _fmt_card(store, card: dict) -> str:
         lines.append("  " + " ".join(f"#{t}" for t in tags))
     if len(history) > 1:
         lines.append(f"  （有 {len(history)} 条历史，要看变化过程再说）")
+    if attachments:
+        photos = [a for a in attachments if a.get("type") == "image"]
+        files = [a for a in attachments if a.get("type") != "image"]
+        parts = []
+        if photos:
+            parts.append(f"{len(photos)} 张图片")
+        if files:
+            names = "、".join(str(f.get("label")) for f in files if f.get("label"))
+            parts.append(f"{len(files)} 个文件" + (f"（{names}）" if names else ""))
+        lines.append("  📎 附件：" + "，".join(parts))
+    if buckets:
+        lines.append(f"  🫙 关联了 {len(buckets)} 个记忆桶（证据来源）")
     favorites = card.get("folders") or []
     fav = [f for f in favorites if f.get("is_favorite")]
     if fav:
@@ -84,13 +102,18 @@ def _resolve_folder(store, folder: str):
     return "", f"有多个文件夹匹配「{folder}」：{paths}。请说得更具体一点（可以用完整路径里的名字）。"
 
 
-def register_card_tools(mcp, store, *, read_attachment_text=None) -> None:
+def register_card_tools(mcp, store, *, read_attachment_text=None, bucket_summary=None) -> None:
     """read_attachment_text: optional callable(attachment_dict) -> str | None,
     reading a non-image attachment's text content off disk (server.py owns
     the actual attachments directory/path logic; cards_mcp.py stays decoupled
     from it, same pattern as cards_api.py's bucket_summary parameter). None
     (the default) disables card_attachment_read with a clear message instead
-    of erroring."""
+    of erroring.
+
+    bucket_summary: optional async callable(bucket_id) -> dict | None, same
+    shape/contract as server.py's _bucket_link_summary (already passed to
+    cards_api.register_card_routes) -- reused here rather than duplicated,
+    powers card_buckets. None disables it with a clear message too."""
 
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
@@ -202,3 +225,32 @@ def register_card_tools(mcp, store, *, read_attachment_text=None) -> None:
             else:
                 blocks.append(f"【{name}】内容：\n{text}")
         return "\n\n".join(blocks)
+
+    @mcp.tool()
+    async def card_buckets(card: str = "") -> str:
+        """查看一张资料卡关联了哪些记忆桶（这张事实是从哪些原始记忆来的证据来源）。
+        card_lookup 只会提示"关联了 N 个记忆桶"，这个工具才是把这几个桶具体是哪些、
+        写了什么摘要都列出来的入口。
+        card：卡片标题或 id。"""
+        if bucket_summary is None:
+            return "这个部署还没接上记忆桶查询（bucket_summary 未配置）。"
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        title = str((found.get("current") or {}).get("title") or "(无标题)")
+        links = store.get_bucket_links(found["id"])
+        if not links:
+            return f"「{title}」这张卡还没有关联任何记忆桶。"
+        lines = [f"=== 【{title}】关联的记忆桶（共 {len(links)} 个）==="]
+        for link in links:
+            summary = await bucket_summary(link["bucket_id"])
+            rel = str(link.get("relation_type") or "evidence")
+            if not summary:
+                lines.append(f"- [{rel}] {link['bucket_id']}（这个桶已经不存在了）")
+                continue
+            date = str(summary.get("date") or summary.get("created") or "未知日期")
+            name = str(summary.get("name") or link["bucket_id"])
+            preview = str(summary.get("content_preview") or "").strip()
+            body = f"：{preview}" if preview else ""
+            lines.append(f"- [{rel}] {date} 【{name}】{body}")
+        return "\n".join(lines)

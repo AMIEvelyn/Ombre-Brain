@@ -12984,7 +12984,9 @@ async def api_import_review(request):
 import cards_api
 import cards_mcp
 cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_summary=_bucket_link_summary)
-cards_mcp.register_card_tools(mcp, card_store, read_attachment_text=_facts_attachment_text)
+cards_mcp.register_card_tools(
+    mcp, card_store, read_attachment_text=_facts_attachment_text, bucket_summary=_bucket_link_summary,
+)
 
 
 # --- Entry point / 启动入口 ---

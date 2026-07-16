@@ -37,16 +37,32 @@ def _fake_read_attachment_text(attachment):
     return attachment.get("_text")
 
 
+FAKE_BUCKETS = {
+    "b1": {"name": "香港迪士尼一日游", "date": "2026-03-02", "content_preview": "玩了城堡烟花秀"},
+}
+
+
+async def _fake_bucket_summary(bucket_id):
+    """Stand-in for server.py's _bucket_link_summary. None = bucket no longer
+    exists, matching the real contract."""
+    return FAKE_BUCKETS.get(bucket_id)
+
+
 def main():
     tmp = tempfile.mkdtemp()
     store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
     mcp = FakeMCP()
-    cards_mcp.register_card_tools(mcp, store, read_attachment_text=_fake_read_attachment_text)
-    assert set(mcp.tools) == {"card_lookup", "folder_timeline", "card_history", "card_attachment_read"}
+    cards_mcp.register_card_tools(
+        mcp, store, read_attachment_text=_fake_read_attachment_text, bucket_summary=_fake_bucket_summary,
+    )
+    assert set(mcp.tools) == {
+        "card_lookup", "folder_timeline", "card_history", "card_attachment_read", "card_buckets",
+    }
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
     card_history = mcp.tools["card_history"]
     card_attachment_read = mcp.tools["card_attachment_read"]
+    card_buckets = mcp.tools["card_buckets"]
 
     # --- store helpers used by the tools ---
     assert store.search_cards("x") == []
@@ -152,6 +168,28 @@ def main():
     disabled = _run(mcp_unwired.tools["card_attachment_read"](card="旅行攻略"))
     assert "还没接上附件内容读取" in disabled
     print("PASS card_attachment_read: disabled cleanly when not wired up")
+
+    # --- card_lookup now hints at attachments + linked buckets (used to say nothing) ---
+    out_doc = _run(card_lookup(query="旅行攻略"))
+    assert "📎 附件：1 张图片，2 个文件（行程.md、船票.pdf）" in out_doc
+    print("PASS card_lookup hints attachment counts + file names")
+
+    # --- card_buckets: the other half of card_lookup's "关联了 N 个记忆桶" hint ---
+    assert "还没有关联任何记忆桶" in _run(card_buckets(card="旅行攻略"))
+    store.add_bucket_link(doc, "b1", relation_type="evidence")
+    store.add_bucket_link(doc, "b_gone", relation_type="related")  # a bucket that no longer exists
+    out_doc2 = _run(card_lookup(query="旅行攻略"))
+    assert "🫙 关联了 2 个记忆桶" in out_doc2
+    bkts = _run(card_buckets(card="旅行攻略"))
+    assert "关联的记忆桶（共 2 个）" in bkts
+    assert "[evidence] 2026-03-02 【香港迪士尼一日游】：玩了城堡烟花秀" in bkts
+    assert "b_gone（这个桶已经不存在了）" in bkts
+    print("PASS card_buckets: real + vanished bucket, card_lookup count hint")
+
+    # --- bucket_summary=None (not wired up on this deployment) ---
+    disabled_buckets = _run(mcp_unwired.tools["card_buckets"](card="旅行攻略"))
+    assert "还没接上记忆桶查询" in disabled_buckets
+    print("PASS card_buckets: disabled cleanly when not wired up")
 
     print("\nAll cards_mcp tool tests passed.")
 
