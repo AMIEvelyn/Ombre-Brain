@@ -84,7 +84,13 @@ def _resolve_folder(store, folder: str):
     return "", f"有多个文件夹匹配「{folder}」：{paths}。请说得更具体一点（可以用完整路径里的名字）。"
 
 
-def register_card_tools(mcp, store) -> None:
+def register_card_tools(mcp, store, *, read_attachment_text=None) -> None:
+    """read_attachment_text: optional callable(attachment_dict) -> str | None,
+    reading a non-image attachment's text content off disk (server.py owns
+    the actual attachments directory/path logic; cards_mcp.py stays decoupled
+    from it, same pattern as cards_api.py's bucket_summary parameter). None
+    (the default) disables card_attachment_read with a clear message instead
+    of erroring."""
 
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
@@ -163,3 +169,36 @@ def register_card_tools(mcp, store) -> None:
             marker = "（当前）" if i == 0 else ""
             lines.append(f"- {date}{marker}：{content}")
         return "\n".join(lines)
+
+    @mcp.tool()
+    async def card_attachment_read(card: str = "", label: str = "") -> str:
+        """读取一张资料卡附件里纯文本类文件（.txt/.md/.json/.py）的实际内容。
+        图片附件、以及 .pdf/.doc/.docx 这类需要额外解析的格式，这个工具读不了，
+        会明确告诉你读不了、不是没找到——想看图片内容目前没有别的路径。
+        card：卡片标题或 id。label：可选，附件文件名（或其中一部分），用来在
+        一张卡有多个附件时指定读哪个；留空会把这张卡里所有能读的文本附件都读出来。"""
+        if read_attachment_text is None:
+            return "这个部署还没接上附件内容读取（read_attachment_text 未配置）。"
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        attachments = (found.get("current") or {}).get("attachments") or []
+        if not attachments:
+            return "这张卡没有附件。"
+        if label:
+            label_lower = label.strip().lower()
+            attachments = [a for a in attachments if label_lower in str(a.get("label", "")).lower()]
+            if not attachments:
+                return f"这张卡的附件里没有文件名包含「{label}」的。"
+        blocks = []
+        for a in attachments:
+            name = str(a.get("label") or "附件")
+            if a.get("type") == "image":
+                blocks.append(f"【{name}】是图片，这个工具读不了图片内容。")
+                continue
+            text = read_attachment_text(a)
+            if text is None:
+                blocks.append(f"【{name}】这个格式暂时读不了内容（比如 pdf/docx 需要额外解析，还没支持）。")
+            else:
+                blocks.append(f"【{name}】内容：\n{text}")
+        return "\n\n".join(blocks)

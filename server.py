@@ -9725,7 +9725,12 @@ def _parse_tags_field(raw) -> list[str]:
 FACTS_ATTACHMENTS_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 FACTS_ATTACHMENTS_MAX_FILE_BYTES = 20 * 1024 * 1024
 FACTS_ATTACHMENTS_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-FACTS_ATTACHMENTS_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
+# 2026-07-16: added .json/.py -- Yi Lan wants to attach these to fact cards too.
+FACTS_ATTACHMENTS_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".json", ".py"}
+# Plain-text formats card_attachment_read() can open directly (no parsing
+# library available for .pdf/.doc/.docx yet -- see that function).
+FACTS_ATTACHMENTS_TEXT_EXTENSIONS = {".txt", ".md", ".json", ".py"}
+FACTS_ATTACHMENT_TEXT_MAX_CHARS = 4000
 
 
 def _facts_attachments_dir() -> str:
@@ -9815,6 +9820,31 @@ async def api_facts_skeleton_serve_attachment(request):
     if not target.startswith(base_dir + os.sep) or not os.path.isfile(target):
         return PlainTextResponse("attachment not found", status_code=404)
     return FileResponse(target)
+
+
+def _facts_attachment_text(attachment: dict) -> str | None:
+    """Read a non-image card attachment's content off disk for the
+    card_attachment_read MCP tool (cards_mcp.py). Returns None for anything
+    that isn't a plain-text format we can open without a parsing library --
+    .pdf/.doc/.docx aren't supported yet, that would need a new dependency.
+    Reuses the same path-traversal guard as api_facts_skeleton_serve_attachment."""
+    url = str(attachment.get("url") or "")
+    filename = url.rsplit("/", 1)[-1] if url else ""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in FACTS_ATTACHMENTS_TEXT_EXTENSIONS:
+        return None
+    base_dir = os.path.abspath(_facts_attachments_dir())
+    target = os.path.abspath(os.path.join(base_dir, filename))
+    if not target.startswith(base_dir + os.sep) or not os.path.isfile(target):
+        return None
+    try:
+        with open(target, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except Exception:
+        return None
+    if len(text) > FACTS_ATTACHMENT_TEXT_MAX_CHARS:
+        text = text[:FACTS_ATTACHMENT_TEXT_MAX_CHARS] + "\n…（内容过长，已截断）"
+    return text
 
 
 @mcp.custom_route("/api/facts-skeleton", methods=["POST"])
@@ -12954,7 +12984,7 @@ async def api_import_review(request):
 import cards_api
 import cards_mcp
 cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_summary=_bucket_link_summary)
-cards_mcp.register_card_tools(mcp, card_store)
+cards_mcp.register_card_tools(mcp, card_store, read_attachment_text=_facts_attachment_text)
 
 
 # --- Entry point / 启动入口 ---

@@ -8435,7 +8435,7 @@ function renderCardsV2Detail(){
   var cur = card.current || {}; var folders = card.folders || [];
   var path = folders.length ? cardsV2Path(folders[0].id) : '';
   var atts = cur.attachments || [];
-  var photos = atts.filter(function(a){ return a.type === 'image'; }).slice(0, 5);
+  var photos = atts.filter(function(a){ return a.type === 'image'; }).slice(0, 10);
   var files = atts.filter(function(a){ return a.type !== 'image'; });
   var tags = cur.tags || []; var history = card.history || []; var buckets = card.buckets || [];
   var h = '<div class="facts-detail-card">';
@@ -8469,9 +8469,19 @@ function renderCardsV2Detail(){
 function cardsV2ToggleAttachMenu(t){ var m = document.getElementById('cards-v2-' + t + '-attach-menu'); if (m) m.style.display = m.style.display === 'none' ? '' : 'none'; }
 function cardsV2TriggerPicker(t, kind){ cardsV2ToggleAttachMenu(t); var i = document.getElementById('cards-v2-' + t + '-' + kind + '-input'); if (i) i.click(); }
 async function cardsV2OnFileChosen(t, input){ var files = Array.prototype.slice.call(input.files || []); input.value = ''; for (var i=0;i<files.length;i++){ await cardsV2Upload(t, files[i]); } }
+// 2026-07-16: per-type cap (10 photos AND 10 files, not a combined 10) --
+// mirrors cards_api.py's FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE, which is the
+// authoritative check; this is just an earlier, friendlier warning.
+var CARDS_V2_MAX_ATTACH_PER_TYPE = 10;
+var CARDS_V2_IMAGE_EXT_RE = /\.(jpg|jpeg|png|webp|gif)$/i;
 async function cardsV2Upload(t, file){
   var arr = cardsV2Attach[t] || (cardsV2Attach[t] = []);
-  if (arr.length >= 5) { alert('最多 5 个图片/文件。'); return; }
+  var isImage = CARDS_V2_IMAGE_EXT_RE.test(file.name || '');
+  var sameTypeCount = arr.filter(function(a){ return (a.type === 'image') === isImage; }).length;
+  if (sameTypeCount >= CARDS_V2_MAX_ATTACH_PER_TYPE) {
+    alert('最多 ' + CARDS_V2_MAX_ATTACH_PER_TYPE + ' 个' + (isImage ? '图片' : '文件') + '。');
+    return;
+  }
   var fd = new FormData(); fd.append('file', file);
   try { var r = await fetch('/api/facts-skeleton/attachments/upload', { method:'POST', body: fd }); var d = await r.json().catch(function(){return {};}); if (!r.ok) throw new Error(d.error||'上传失败'); arr.push(d); cardsV2RenderThumbs(t); }
   catch(e){ alert('上传失败: ' + e.message); }

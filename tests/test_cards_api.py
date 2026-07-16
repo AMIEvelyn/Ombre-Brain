@@ -89,6 +89,31 @@ def main():
     assert st == 400, r
     print("PASS card create + validation")
 
+    # --- attachment count cap: 10 per type, image/file counted separately ---
+    def _atts(n_images, n_files):
+        return ([{"type": "image", "url": f"/x/i{i}.png"} for i in range(n_images)]
+                + [{"type": "file", "url": f"/x/f{i}.md"} for i in range(n_files)])
+
+    st, r = _call(mcp, "POST", C, body={"title": "附件测试", "attachments": _atts(10, 10)})
+    assert st == 200, r  # exactly at the cap is fine
+    st, r = _call(mcp, "POST", C, body={"title": "附件超限", "attachments": _atts(11, 0)})
+    assert st == 400 and "图片附件最多" in r["error"], r
+    st, r = _call(mcp, "POST", C, body={"title": "附件超限", "attachments": _atts(0, 11)})
+    assert st == 400 and "文件附件最多" in r["error"], r
+    # 10 images + 10 files together is fine -- caps are independent, not combined
+    st, r = _call(mcp, "POST", C, body={"title": "附件测试2", "attachments": _atts(10, 10)})
+    assert st == 200, r
+    print("PASS attachment count cap (per-type, independent)")
+
+    # edit/new-revision paths enforce the same cap
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"attachments": _atts(11, 0)})
+    assert st == 400 and "图片附件最多" in r["error"], r
+    st, r = _call(mcp, "POST", C + "/{card_id}/revisions", path_params={"card_id": cid},
+                  body={"attachments": _atts(0, 11)})
+    assert st == 400 and "文件附件最多" in r["error"], r
+    print("PASS attachment count cap enforced on edit + new revision too")
+
     # --- get card ---
     st, r = _call(mcp, "GET", C + "/{card_id}", path_params={"card_id": cid})
     assert st == 200 and r["card"]["id"] == cid

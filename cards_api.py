@@ -23,6 +23,26 @@ from typing import Any
 
 from starlette.responses import JSONResponse
 
+# 2026-07-16: raised from the frontend's old combined-5 cap to a per-type
+# cap of 10 (Yi Lan wants up to 10 photos AND up to 10 files on one card).
+# Enforced here (not just dashboard.html) so any future caller has to go
+# through the same limit.
+FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE = 10
+
+
+def _validate_attachment_count(attachments) -> str | None:
+    """None if within limits, else an error string. Counts image vs.
+    non-image separately -- the two types are capped independently."""
+    if not isinstance(attachments, list):
+        return None
+    photos = sum(1 for a in attachments if isinstance(a, dict) and a.get("type") == "image")
+    files = sum(1 for a in attachments if isinstance(a, dict) and a.get("type") != "image")
+    if photos > FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE:
+        return f"图片附件最多 {FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE} 个，现在有 {photos} 个。"
+    if files > FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE:
+        return f"文件附件最多 {FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE} 个，现在有 {files} 个。"
+    return None
+
 
 def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
     """Register the /api/cards-skeleton/* routes.
@@ -55,6 +75,9 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         content = str(body.get("content") or "")
         if not title and not content:
             return JSONResponse({"error": "title or content required"}, status_code=400)
+        count_err = _validate_attachment_count(body.get("attachments") or [])
+        if count_err:
+            return JSONResponse({"error": count_err}, status_code=400)
         try:
             card_id = store.create_card(
                 title=title,
@@ -93,6 +116,10 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
                 kwargs[key] = body[key]
         if not kwargs:
             return JSONResponse({"error": "nothing to edit"}, status_code=400)
+        if "attachments" in kwargs:
+            count_err = _validate_attachment_count(kwargs["attachments"])
+            if count_err:
+                return JSONResponse({"error": count_err}, status_code=400)
         try:
             store.edit_current(card_id, **kwargs)
         except Exception as e:
@@ -114,6 +141,10 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         if body.get("valid_at"):
             kwargs["valid_at"] = str(body["valid_at"]).strip()
         kwargs["note"] = str(body.get("note") or "")
+        if "attachments" in kwargs:
+            count_err = _validate_attachment_count(kwargs["attachments"])
+            if count_err:
+                return JSONResponse({"error": count_err}, status_code=400)
         try:
             rev_id = store.add_revision(card_id, **kwargs)
         except ValueError as e:

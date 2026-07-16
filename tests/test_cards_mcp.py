@@ -30,15 +30,23 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+def _fake_read_attachment_text(attachment):
+    """Stand-in for server.py's _facts_attachment_text: 'reads' whatever text
+    was stashed in the fake attachment dict's own "_text" field, mirroring
+    the real function's None-for-unreadable-formats contract."""
+    return attachment.get("_text")
+
+
 def main():
     tmp = tempfile.mkdtemp()
     store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
     mcp = FakeMCP()
-    cards_mcp.register_card_tools(mcp, store)
-    assert set(mcp.tools) == {"card_lookup", "folder_timeline", "card_history"}
+    cards_mcp.register_card_tools(mcp, store, read_attachment_text=_fake_read_attachment_text)
+    assert set(mcp.tools) == {"card_lookup", "folder_timeline", "card_history", "card_attachment_read"}
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
     card_history = mcp.tools["card_history"]
+    card_attachment_read = mcp.tools["card_attachment_read"]
 
     # --- store helpers used by the tools ---
     assert store.search_cards("x") == []
@@ -111,6 +119,39 @@ def main():
     assert "多张卡匹配" in _run(card_history(card="酸辣粉"))
     assert "没找到" in _run(card_history(card="根本没有这张卡"))
     print("PASS card_history ambiguous + missing")
+
+    # --- card_attachment_read: text attachments readable, images/pdf are not ---
+    doc = store.create_card(
+        title="旅行攻略",
+        content="香港三天两夜",
+        attachments=[
+            {"type": "image", "label": "封面图.png", "url": "/api/facts-skeleton/attachments/a.png"},
+            {"type": "file", "label": "行程.md", "url": "/api/facts-skeleton/attachments/b.md",
+             "_text": "第一天：迪士尼\n第二天：太平山"},
+            {"type": "file", "label": "船票.pdf", "url": "/api/facts-skeleton/attachments/c.pdf",
+             "_text": None},
+        ],
+    )
+    out = _run(card_attachment_read(card="旅行攻略"))
+    assert "封面图.png" in out and "读不了图片内容" in out
+    assert "行程.md" in out and "第一天：迪士尼" in out
+    assert "船票.pdf" in out and "暂时读不了内容" in out
+    print("PASS card_attachment_read: image/text/unsupported all handled")
+
+    only_doc = _run(card_attachment_read(card="旅行攻略", label="行程"))
+    assert "行程.md" in only_doc and "封面图.png" not in only_doc
+    print("PASS card_attachment_read label filter")
+
+    no_atts = store.create_card(title="没有附件的卡", content="x")
+    assert "没有附件" in _run(card_attachment_read(card=no_atts))
+    print("PASS card_attachment_read: card with no attachments")
+
+    # --- read_attachment_text=None (not wired up on this deployment) ---
+    mcp_unwired = FakeMCP()
+    cards_mcp.register_card_tools(mcp_unwired, store)
+    disabled = _run(mcp_unwired.tools["card_attachment_read"](card="旅行攻略"))
+    assert "还没接上附件内容读取" in disabled
+    print("PASS card_attachment_read: disabled cleanly when not wired up")
 
     print("\nAll cards_mcp tool tests passed.")
 
