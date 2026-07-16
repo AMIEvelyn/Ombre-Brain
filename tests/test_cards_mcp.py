@@ -182,7 +182,7 @@ def main():
     assert "🫙 关联了 2 个记忆桶" in out_doc2
     bkts = _run(card_buckets(card="旅行攻略"))
     assert "关联的记忆桶（共 2 个）" in bkts
-    assert "[evidence] 2026-03-02 【香港迪士尼一日游】：玩了城堡烟花秀" in bkts
+    assert "[evidence] 2026-03-02 【香港迪士尼一日游】(id: b1)：玩了城堡烟花秀" in bkts
     assert "b_gone（这个桶已经不存在了）" in bkts
     print("PASS card_buckets: real + vanished bucket, card_lookup count hint")
 

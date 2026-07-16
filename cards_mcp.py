@@ -252,5 +252,5 @@ def register_card_tools(mcp, store, *, read_attachment_text=None, bucket_summary
             name = str(summary.get("name") or link["bucket_id"])
             preview = str(summary.get("content_preview") or "").strip()
             body = f"：{preview}" if preview else ""
-            lines.append(f"- [{rel}] {date} 【{name}】{body}")
+            lines.append(f"- [{rel}] {date} 【{name}】(id: {link['bucket_id']}){body}")
         return "\n".join(lines)
