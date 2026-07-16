@@ -3539,7 +3539,7 @@
       <div id="cards-v2-add-attach-menu" class="facts-attachment-menu" style="display:none">
         <div onclick="cardsV2TriggerPicker('add','photo')">🖼 Add Photo</div>
         <div onclick="cardsV2TriggerPicker('add','file')">📄 Attach Files</div>
-        <div onclick="cardsV2ToggleAttachMenu('add');cardsV2ToggleBucketPicker('add')">🫙 Add Bucket</div>
+        <div class="cards-v2-bucket-picker-trigger" onclick="cardsV2ToggleAttachMenu('add');cardsV2ToggleBucketPicker('add')">🫙 Add Bucket</div>
       </div>
       <div id="cards-v2-add-bucket-picker" class="facts-bucket-picker-panel" style="display:none">
         <input type="text" id="cards-v2-add-bucket-search" placeholder="搜标题或粘贴 bucket_id，回车搜索" onkeydown="cardsV2OnBucketSearchKeydown('add', event)" />
@@ -8575,6 +8575,19 @@ function cardsV2PickFolderOption(selectId, folderId){
 document.addEventListener('click', function(e){
   if (e.target.closest('.cards-v2-select-wrap')) return;
   document.querySelectorAll('.cards-v2-select-wrap .facts-bucket-picker-panel').forEach(function(p){ p.style.display = 'none'; });
+});
+// 2026-07-16: click-outside-to-close for the Create form's Add Bucket search
+// panel specifically -- kept as its own listener (not folded into the one
+// above) to avoid the exact race described there: the trigger's own onclick
+// (target phase) opens the panel, then this listener runs in the bubble
+// phase for that same click, so it must recognize and skip clicks on the
+// trigger itself instead of blanket-closing everything.
+document.addEventListener('click', function(e){
+  var panel = document.getElementById('cards-v2-add-bucket-picker');
+  if (!panel || panel.style.display === 'none') return;
+  if (e.target.closest('#cards-v2-add-bucket-picker')) return;
+  if (e.target.closest('.cards-v2-bucket-picker-trigger')) return;
+  panel.style.display = 'none';
 });
 function openCardsV2CreateModal(){
   cardsV2.addTags = []; cardsV2Attach.add = []; cardsV2PendBuckets.add = [];

@@ -1,6 +1,6 @@
 """Facts-model v2 MCP tools (step 3) -- what Lin Zhan actually calls.
 
-Two read-only tools over cards_store.CardStore, wired in from server.py via
+Read-only tools over cards_store.CardStore, wired in from server.py via
 register_card_tools(mcp, store). Kept out of server.py so the surface stays
 small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
 
@@ -9,6 +9,9 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
                      how "取消失效" reads cleanly for Lin Zhan: newest = current.
   folder_timeline -- pull a whole folder's cards onto one chronological line
                      (a narrative ribbon), Yi Lan's headline use-case.
+  card_history    -- the other half of card_lookup's "有 N 条历史" hint: reads
+                     back the full timeline of one specific card (see
+                     docs/facts-model-v2-collection-redesign.md §14 item 2).
 """
 
 from __future__ import annotations
@@ -35,6 +38,33 @@ def _fmt_card(store, card: dict) -> str:
     if other:
         lines.append("  所在文件夹：" + "、".join(store.folder_path(f["id"]) for f in other))
     return "\n".join(lines)
+
+
+def _resolve_card(store, card: str):
+    """Return (card_dict, error_message). Accepts an exact card id or a title
+    (matched against each card's current title; falls back to search_cards'
+    substring match over title/content/tags if no exact title matches)."""
+    card = str(card or "").strip()
+    if not card:
+        return None, "请给一张卡的标题或 id。"
+    found = store.get_card(card)
+    if found:
+        return found, ""
+    candidates = store.search_cards(card)
+    exact = [
+        c for c in candidates
+        if str((c.get("current") or {}).get("title", "")).strip().lower() == card.lower()
+    ]
+    if len(exact) == 1:
+        return exact[0], ""
+    if len(exact) > 1:
+        candidates = exact
+    if not candidates:
+        return None, f"没找到叫「{card}」的资料卡。"
+    if len(candidates) == 1:
+        return candidates[0], ""
+    titles = "、".join(str((c.get("current") or {}).get("title") or c["id"]) for c in candidates)
+    return None, f"有多张卡匹配「{card}」：{titles}。请说得更具体一点。"
 
 
 def _resolve_folder(store, folder: str):
@@ -109,4 +139,27 @@ def register_card_tools(mcp, store) -> None:
             hist = f"（{n} 条历史）" if n > 1 else ""
             body = f"：{content}" if content else ""
             lines.append(f"- {date} 【{title}】{hist}{body}")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def card_history(card: str = "") -> str:
+        """读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
+        最新状态）。card_lookup 对更早的时间点只给一句"有 N 条历史"的提示，这个
+        工具才是真正把那 N 条内容逐条读出来的入口，想知道某件事是怎么一步步变
+        成现在这样时用这个。
+        card：这张卡的标题（推荐，跟 card_lookup 搜到的标题一致）或者卡片 id。
+        标题在多张卡之间重复/不唯一时，会列出候选请你说得更具体一点。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        history = found.get("history") or []
+        if not history:
+            return "这张卡还没有任何时间点记录。"
+        title = str((found.get("current") or {}).get("title") or "(无标题)")
+        lines = [f"=== 【{title}】完整时间线（共 {len(history)} 条，从新到旧）==="]
+        for i, rev in enumerate(history):
+            date = str(rev.get("valid_at") or "未知日期")[:10]
+            content = str(rev.get("content") or "").strip() or "（无内容）"
+            marker = "（当前）" if i == 0 else ""
+            lines.append(f"- {date}{marker}：{content}")
         return "\n".join(lines)

@@ -35,9 +35,10 @@ def main():
     store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
     mcp = FakeMCP()
     cards_mcp.register_card_tools(mcp, store)
-    assert set(mcp.tools) == {"card_lookup", "folder_timeline"}
+    assert set(mcp.tools) == {"card_lookup", "folder_timeline", "card_history"}
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
+    card_history = mcp.tools["card_history"]
 
     # --- store helpers used by the tools ---
     assert store.search_cards("x") == []
@@ -94,6 +95,22 @@ def main():
     assert "多个文件夹匹配" in _run(folder_timeline(folder="喜欢的食物"))
     assert "没找到" in _run(folder_timeline(folder="根本没有这个"))
     print("PASS folder resolution (ambiguous + missing)")
+
+    # --- card_history: the other half of card_lookup's "有 N 条历史" hint ---
+    hist = _run(card_history(card="酸辣粉"))
+    assert "完整时间线（共 2 条" in hist
+    assert hist.index("不爱吃了") < hist.index("爱吃")   # newest first
+    assert "（当前）" in hist
+    assert "2026-05-01" in hist and "2026-01-01" in hist
+    print("PASS card_history full timeline, newest first")
+
+    assert _run(card_history(card=suanla)) == hist        # resolves by id too
+    print("PASS card_history resolve by id")
+
+    store.create_card(title="酸辣粉", content="第二张同名卡", valid_at="2026-04-01")
+    assert "多张卡匹配" in _run(card_history(card="酸辣粉"))
+    assert "没找到" in _run(card_history(card="根本没有这张卡"))
+    print("PASS card_history ambiguous + missing")
 
     print("\nAll cards_mcp tool tests passed.")
 
