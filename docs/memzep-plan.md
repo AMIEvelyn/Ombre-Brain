@@ -1,9 +1,17 @@
 # 时间线 / 事实档案层 —— 设计方案（memzep 架构本地化）
 
-写给：一澜、林湛
-状态：核心闭环已验证通过，Dashboard 展示已完成，继续推进中
+## ⚠️ 2026-07-16：本文档的数据模型已被取代，仅作历史记录保留
 
-**下一步（资料卡片改版 + 历史批量筛选）的设计讨论存档在 `docs/facts-card-and-batch-import-plan.md`**，因为那份内容同时也是"未来线/成就册"模块要共用的地基，横跨两份文档，单独开了一份。
+这份文档设计的 `facts.sqlite`/`predicate_registry`/`exclusive_current`/`multi_current`/`historical_event`/`invalid_at` 那一整套模型，已经被 `docs/facts-model-v2-collection-redesign.md` 推翻替换（改成收藏/歌单式卡片+文件夹多对多，取消三模式和失效机制），**当前唯一权威主文档是那一份**。
+
+这份文档"给新会话/新窗口看的交接须知"里跟具体数据模型无关的通用背景信息（项目是什么、`my-live-vps` 部署踩坑教训、一澜的非技术部署流程、ChatGPT 连接器刷新的坑）已经原样搬到了 `facts-model-v2-collection-redesign.md` 开头，那边同样能看到，不用来回翻两份文档。
+
+保留这份文档的原因：`_facts_skeleton_match_predicates`/`_facts_skeleton_supplement` 这套"关键词命中才触发骨架层查询、否则不打扰心脏"的分流设计思路，以及下面几次真实踩坑记录（"改类型"两次返工那次、`predicate_registry` 中文名没同步进实际数据库那次），对以后设计类似"什么时候该触发额外查询、什么时候不该"的功能仍有参考价值。但 facts.sqlite 这套存储本身和 predicate 模式已经是历史状态，不代表当前实际跑的模型。
+
+---
+
+写给：一澜、林湛
+状态：核心闭环已验证通过，Dashboard 展示已完成，模型已被 v2 取代（见上）
 
 ## 给新会话/新窗口看的交接须知
 
