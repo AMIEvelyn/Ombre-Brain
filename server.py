@@ -10168,9 +10168,19 @@ async def api_facts_skeleton_unlink_bucket(request):
 async def api_facts_skeleton_search_buckets(request):
     """Search memory buckets to link onto a fact/card (the "Add Bucket"
     picker). q can be a keyword (reuses bucket_mgr's existing multi-dim
-    search) or an exact bucket id -- an exact id match is tried first and
-    put at the front of the results so pasting a known bucket_id always
-    works even if the fuzzy searcher wouldn't otherwise surface it."""
+    search) or an exact bucket id/title -- an exact match is tried first,
+    and when one is found the expensive fuzzy+semantic search below is
+    skipped entirely.
+
+    2026-07-16: Yi Lan's actual usage of this picker is always pasting a
+    known bucket_id or exact title, never typing a keyword -- for her,
+    search_with_semantic()'s full-corpus rescan + embedding-API round trip
+    was pure overhead on every request, since the exact match already
+    answers the query. This endpoint is the only caller changed; breath()
+    and every other MCP-tool-facing search path (used by Lin Zhan) still
+    goes through search_with_semantic() unchanged -- deliberately not
+    touched, that's a different usage pattern (loose/associative recall,
+    not exact lookup) and the fix is scoped to this picker only."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
@@ -10187,26 +10197,47 @@ async def api_facts_skeleton_search_buckets(request):
         results.append(exact)
         seen_ids.add(exact["id"])
 
-    try:
-        matches = await bucket_mgr.search_with_semantic(
-            query, embedding_engine, limit=10, include_archive=True
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    for bucket in matches:
-        if bucket["id"] in seen_ids:
-            continue
-        meta = bucket.get("metadata", {}) or {}
-        results.append({
-            "id": bucket["id"],
-            "name": meta.get("name", bucket["id"]),
-            "date": meta.get("date"),
-            "created": meta.get("created", ""),
-            "domain": meta.get("domain", []),
-            "type": meta.get("type", "dynamic"),
-            "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
-        })
-        seen_ids.add(bucket["id"])
+    if not results:
+        # Exact title match: a plain equality scan over the in-memory
+        # list_all() cache (no scoring, no embedding call) -- cheap even
+        # at 7000+ buckets. Only runs when the id lookup above missed.
+        query_lower = query.lower()
+        for bucket in await bucket_mgr.list_all(include_archive=True):
+            meta = bucket.get("metadata", {}) or {}
+            name = str(meta.get("name", "") or "")
+            if name and name.lower() == query_lower and bucket["id"] not in seen_ids:
+                results.append({
+                    "id": bucket["id"],
+                    "name": name,
+                    "date": meta.get("date"),
+                    "created": meta.get("created", ""),
+                    "domain": meta.get("domain", []),
+                    "type": meta.get("type", "dynamic"),
+                    "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+                })
+                seen_ids.add(bucket["id"])
+
+    if not results:
+        try:
+            matches = await bucket_mgr.search_with_semantic(
+                query, embedding_engine, limit=10, include_archive=True
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        for bucket in matches:
+            if bucket["id"] in seen_ids:
+                continue
+            meta = bucket.get("metadata", {}) or {}
+            results.append({
+                "id": bucket["id"],
+                "name": meta.get("name", bucket["id"]),
+                "date": meta.get("date"),
+                "created": meta.get("created", ""),
+                "domain": meta.get("domain", []),
+                "type": meta.get("type", "dynamic"),
+                "content_preview": strip_wikilinks(bucket.get("content", ""))[:200],
+            })
+            seen_ids.add(bucket["id"])
 
     return JSONResponse({"buckets": results[:10]})
 

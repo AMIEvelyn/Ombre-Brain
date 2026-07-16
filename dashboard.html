@@ -3542,8 +3542,8 @@
         <div onclick="cardsV2ToggleAttachMenu('add');cardsV2ToggleBucketPicker('add')">🫙 Add Bucket</div>
       </div>
       <div id="cards-v2-add-bucket-picker" class="facts-bucket-picker-panel" style="display:none">
-        <input type="text" id="cards-v2-add-bucket-search" placeholder="搜关键词或粘贴 bucket_id" oninput="cardsV2OnBucketSearch('add')" />
-        <div id="cards-v2-add-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
+        <input type="text" id="cards-v2-add-bucket-search" placeholder="搜标题或粘贴 bucket_id，回车搜索" onkeydown="cardsV2OnBucketSearchKeydown('add', event)" />
+        <div id="cards-v2-add-bucket-results"><div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div></div>
       </div>
     </div>
     <div class="facts-attachment-thumbs" id="cards-v2-add-attach-thumbs"></div>
@@ -3626,9 +3626,9 @@
       <span>关联新的记忆桶</span>
     </div>
     <div class="profile-proposal-form">
-      <input type="text" id="cards-v2-view-bucket-search" placeholder="搜标题或粘贴 bucket_id" oninput="cardsV2OnViewBucketSearch()" style="grid-column:1/-1;width:100%;" />
+      <input type="text" id="cards-v2-view-bucket-search" placeholder="搜标题或粘贴 bucket_id，回车搜索" onkeydown="cardsV2OnViewBucketKeydown(event)" style="grid-column:1/-1;width:100%;" />
     </div>
-    <div id="cards-v2-view-bucket-results"><div class="loading" style="font-size:12px;">输入关键词开始搜索…</div></div>
+    <div id="cards-v2-view-bucket-results"><div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div></div>
   </div>
 </div>
 
@@ -8488,18 +8488,20 @@ function cardsV2RemoveAttach(t, i){ (cardsV2Attach[t]||[]).splice(i,1); cardsV2R
 function cardsV2ToggleBucketPicker(t){
   var p = document.getElementById('cards-v2-' + t + '-bucket-picker'); if (!p) return;
   var show = p.style.display === 'none'; p.style.display = show ? '' : 'none';
-  if (show){ var i = document.getElementById('cards-v2-' + t + '-bucket-search'); if (i){ i.value=''; i.focus(); } document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; }
+  if (show){ var i = document.getElementById('cards-v2-' + t + '-bucket-search'); if (i){ i.value=''; i.focus(); } document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>'; }
 }
-function cardsV2OnBucketSearch(t){
-  clearTimeout(cardsV2BucketTimer);
-  var v = (document.getElementById('cards-v2-' + t + '-bucket-search').value || '').trim();
-  if (v.length < 2) { document.getElementById('cards-v2-' + t + '-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">再多打一个字就开始搜…</div>'; return; }
-  cardsV2BucketTimer = setTimeout(function(){ cardsV2RunBucketSearch(t); }, 500);
+// 2026-07-16: search-on-Enter instead of debounced search-on-keystroke, same
+// reasoning and same backend endpoint as cardsV2OnViewBucketKeydown -- see
+// docs/facts-model-v2-collection-redesign.md §14.
+function cardsV2OnBucketSearchKeydown(t, event){
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  cardsV2RunBucketSearch(t);
 }
 async function cardsV2RunBucketSearch(t){
   var input = document.getElementById('cards-v2-' + t + '-bucket-search'); var res = document.getElementById('cards-v2-' + t + '-bucket-results');
   if (!input || !res) return; var q = (input.value||'').trim();
-  if (!q){ res.innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; return; }
+  if (!q){ res.innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>'; return; }
   res.innerHTML = '<div class="loading" style="font-size:12px;">搜索中…</div>';
   try {
     var r = await fetch('/api/facts-skeleton/buckets/search?q=' + encodeURIComponent(q)); var d = await r.json().catch(function(){return {};});
@@ -8510,11 +8512,20 @@ async function cardsV2RunBucketSearch(t){
     res.innerHTML = bs.map(function(b, i){
       var already = pend.indexOf(b.id) !== -1;
       var domain = Array.isArray(b.domain)&&b.domain.length ? b.domain.join('·') : '未分类';
-      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(b.name||b.id) + '</div><div class="facts-bucket-result-meta"><div>' + esc(b.id) + '</div><div>' + esc(b.date||b.created||'未知日期') + '</div><div>' + esc(domain) + '</div></div></div><span class="facts-bucket-result-add' + (already?' added':'') + '" onclick="' + (already?'':'cardsV2AddPendBucket(\'' + t + '\',' + i + ')') + '">' + (already?'✓':'+') + '</span></div>';
+      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(b.name||b.id) + '</div><div class="facts-bucket-result-meta"><div>' + esc(b.id) + '</div><div>' + esc(b.date||b.created||'未知日期') + '</div><div>' + esc(domain) + '</div></div></div><span class="facts-bucket-result-add' + (already?' added':'') + '" data-bucket-idx="' + i + '" onclick="' + (already?'':'cardsV2AddPendBucket(\'' + t + '\',' + i + ')') + '">' + (already?'✓':'+') + '</span></div>';
     }).join('');
   } catch(e){ res.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>'; }
 }
-function cardsV2AddPendBucket(t, i){ var b = (cardsV2BucketResults[t]||[])[i]; if (!b) return; var arr = cardsV2PendBuckets[t]||(cardsV2PendBuckets[t]=[]); if (arr.some(function(p){return p.bucket_id===b.id;})) return; arr.push({ bucket_id: b.id, name: b.name||b.id }); cardsV2RenderPendBuckets(t); cardsV2RunBucketSearch(t); }
+function cardsV2AddPendBucket(t, i){
+  var b = (cardsV2BucketResults[t]||[])[i]; if (!b) return;
+  var arr = cardsV2PendBuckets[t]||(cardsV2PendBuckets[t]=[]); if (arr.some(function(p){return p.bucket_id===b.id;})) return;
+  arr.push({ bucket_id: b.id, name: b.name||b.id }); cardsV2RenderPendBuckets(t);
+  // 2026-07-16: flip this row's icon in place instead of re-running the
+  // search -- queuing a pick doesn't need a fresh query either.
+  var res = document.getElementById('cards-v2-' + t + '-bucket-results');
+  var span = res && res.querySelector('span[data-bucket-idx="' + i + '"]');
+  if (span) { span.outerHTML = '<span class="facts-bucket-result-add added" data-bucket-idx="' + i + '">✓</span>'; }
+}
 function cardsV2RemovePendBucket(t, i){ (cardsV2PendBuckets[t]||[]).splice(i,1); cardsV2RenderPendBuckets(t); }
 function cardsV2RenderPendBuckets(t){ var c = document.getElementById('cards-v2-' + t + '-bucket-links'); if (!c) return; c.innerHTML = (cardsV2PendBuckets[t]||[]).map(function(p, i){ return '<span class="facts-bucket-pending-chip" title="' + esc(p.bucket_id) + '"><span>🫙 ' + esc(p.name) + '</span><span class="facts-tag-remove" onclick="cardsV2RemovePendBucket(\'' + t + '\',' + i + ')">×</span></span>'; }).join(''); }
 async function cardsV2FlushBuckets(t, cardId){ var arr = cardsV2PendBuckets[t]||[]; for (var i=0;i<arr.length;i++){ try { await fetch('/api/cards-skeleton/cards/' + cardId + '/buckets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bucket_id: arr[i].bucket_id }) }); } catch(e){} } cardsV2PendBuckets[t] = []; }
@@ -8672,25 +8683,23 @@ function closeCardsV2BucketsModal(){
 // within the same "关联的记忆桶" screen.
 function openCardsV2AddBucketOverlay(){
   var si = document.getElementById('cards-v2-view-bucket-search'); if (si) { si.value = ''; si.focus(); }
-  document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>';
+  document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>';
   document.getElementById('cards-v2-add-bucket-overlay').style.display = '';
 }
 function closeCardsV2AddBucketOverlay(){ document.getElementById('cards-v2-add-bucket-overlay').style.display = 'none'; }
-// 500ms debounce + a 2-character floor before firing: bucket search has no
-// server-side cache (bucket_mgr.search() re-reads every bucket file from disk
-// on every call), so on a large vault (Yi Lan's has 7000+) firing it on every
-// keystroke can back the whole server up. This doesn't fix that root cause
-// (tracked separately), just cuts how often this UI triggers it.
-function cardsV2OnViewBucketSearch(){
-  clearTimeout(cardsV2BucketTimer);
-  var v = (document.getElementById('cards-v2-view-bucket-search').value || '').trim();
-  if (v.length < 2) { document.getElementById('cards-v2-view-bucket-results').innerHTML = '<div class="loading" style="font-size:12px;">再多打一个字就开始搜…</div>'; return; }
-  cardsV2BucketTimer = setTimeout(cardsV2RunViewBucketSearch, 500);
+// 2026-07-16: switched from search-on-every-keystroke (debounced) to
+// search-on-Enter -- Yi Lan's actual usage is always pasting a complete
+// bucket_id or exact title, never typing a partial keyword, so there was
+// nothing worth firing early for. See docs/facts-model-v2-collection-redesign.md §14.
+function cardsV2OnViewBucketKeydown(event){
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  cardsV2RunViewBucketSearch();
 }
 async function cardsV2RunViewBucketSearch(){
   var input = document.getElementById('cards-v2-view-bucket-search'); var res = document.getElementById('cards-v2-view-bucket-results');
   if (!input || !res || !cardsV2.detail) return; var q = (input.value||'').trim();
-  if (!q){ res.innerHTML = '<div class="loading" style="font-size:12px;">输入关键词开始搜索…</div>'; return; }
+  if (!q){ res.innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>'; return; }
   res.innerHTML = '<div class="loading" style="font-size:12px;">搜索中…</div>';
   try {
     var r = await fetch('/api/facts-skeleton/buckets/search?q=' + encodeURIComponent(q)); var d = await r.json().catch(function(){return {};});
@@ -8700,14 +8709,19 @@ async function cardsV2RunViewBucketSearch(){
     res.innerHTML = bs.map(function(b){
       var already = linked.indexOf(b.id) !== -1;
       var domain = Array.isArray(b.domain)&&b.domain.length ? b.domain.join('·') : '未分类';
-      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(b.name||b.id) + '</div><div class="facts-bucket-result-meta"><div>' + esc(b.id) + '</div><div>' + esc(b.date||b.created||'未知日期') + '</div><div>' + esc(domain) + '</div></div></div><span class="facts-bucket-result-add' + (already?' added':'') + '" onclick="' + (already?'':'cardsV2LinkBucketDirect(\'' + b.id + '\')') + '">' + (already?'✓':'+') + '</span></div>';
+      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(b.name||b.id) + '</div><div class="facts-bucket-result-meta"><div>' + esc(b.id) + '</div><div>' + esc(b.date||b.created||'未知日期') + '</div><div>' + esc(domain) + '</div></div></div><span class="facts-bucket-result-add' + (already?' added':'') + '" data-bucket-id="' + esc(b.id) + '" onclick="' + (already?'':'cardsV2LinkBucketDirect(\'' + b.id + '\')') + '">' + (already?'✓':'+') + '</span></div>';
     }).join('');
   } catch(e){ res.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>'; }
 }
 async function cardsV2LinkBucketDirect(bucketId){
   if (!cardsV2.detail) return;
   try { await fetch('/api/cards-skeleton/cards/' + cardsV2.detail.id + '/buckets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bucket_id: bucketId }) }); } catch(e){}
-  await cardsV2LoadBuckets(); cardsV2RunViewBucketSearch(); renderCardsV2Detail();
+  await cardsV2LoadBuckets(); renderCardsV2Detail();
+  // 2026-07-16: flip just this row's own icon instead of re-running the
+  // whole search again -- adding a bucket doesn't need a fresh query.
+  var res = document.getElementById('cards-v2-view-bucket-results');
+  var span = res && res.querySelector('span[data-bucket-id="' + bucketId + '"]');
+  if (span) { span.outerHTML = '<span class="facts-bucket-result-add added" data-bucket-id="' + esc(bucketId) + '">✓</span>'; }
 }
 async function cardsV2LoadBuckets(){
   var card = cardsV2.detail; if (!card) return;
