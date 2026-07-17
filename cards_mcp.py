@@ -21,9 +21,19 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
   card_attachment_view -- experimental (2026-07-16): sends an image
                      attachment's actual content back, unverified whether
                      ChatGPT's connector renders it -- see its docstring.
+  card_attachment_outline -- chapter/section structure for a .docx/.pdf/.md
+                     attachment (see 慁 truncation problem, 2026-07-16),
+                     pairs with card_attachment_read's section_id/start/
+                     max_chars pagination params for reading long documents.
 """
 
 from __future__ import annotations
+
+# Default page size for card_attachment_read's start/max_chars pagination
+# when max_chars isn't given -- same as server.py's whole-file truncation
+# size (FACTS_ATTACHMENT_TEXT_MAX_CHARS), kept as its own constant since
+# cards_mcp.py doesn't import server.py's.
+FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS = 4000
 
 
 def _fmt_card(store, card: dict) -> str:
@@ -108,24 +118,55 @@ def _resolve_folder(store, folder: str):
 
 
 def register_card_tools(
-    mcp, store, *, read_attachment_text=None, read_attachment_image=None, bucket_summary=None,
+    mcp, store, *,
+    read_attachment_text=None, read_attachment_full_text=None, read_attachment_image=None,
+    attachment_outline=None, bucket_summary=None,
 ) -> None:
     """read_attachment_text: optional callable(attachment_dict) -> str | None,
-    reading a non-image attachment's text content off disk (server.py owns
-    the actual attachments directory/path logic; cards_mcp.py stays decoupled
-    from it, same pattern as cards_api.py's bucket_summary parameter). None
-    (the default) disables card_attachment_read with a clear message instead
-    of erroring.
+    reading a non-image attachment's content off disk, truncated to a sane
+    size for the whole-file case (server.py owns the actual attachments
+    directory/path logic; cards_mcp.py stays decoupled from it, same pattern
+    as cards_api.py's bucket_summary parameter). None (the default) disables
+    card_attachment_read with a clear message instead of erroring.
+
+    read_attachment_full_text: optional callable(attachment_dict) -> str |
+    None, same content but untruncated -- needed for card_attachment_read's
+    section_id/start/max_chars pagination, which has to slice a stable,
+    complete string. None disables pagination (whole-file reads still work
+    off read_attachment_text alone).
 
     read_attachment_image: optional callable(attachment_dict) -> Image | None
     (mcp.server.fastmcp.Image), building an actual image content block for
     card_attachment_view -- 2026-07-16 experimental, see that tool's
     docstring. None disables it with a clear message too.
 
+    attachment_outline: optional callable(attachment_dict) -> list[dict] |
+    None, each dict shaped {section_id, title, level, start_position} --
+    powers card_attachment_outline and card_attachment_read's section_id
+    mode. None disables outline-based reading (start/max_chars pagination
+    still works without it).
+
     bucket_summary: optional async callable(bucket_id) -> dict | None, same
     shape/contract as server.py's _bucket_link_summary (already passed to
     cards_api.register_card_routes) -- reused here rather than duplicated,
     powers card_buckets. None disables it with a clear message too."""
+
+    def _resolve_single_attachment(found: dict, label: str):
+        """Return (attachment_dict, error_message) for tools that need to
+        act on exactly one non-image attachment (outline/paginated read).
+        Shared by card_attachment_outline and card_attachment_read's
+        section_id/start/max_chars branch."""
+        attachments = (found.get("current") or {}).get("attachments") or []
+        candidates = [a for a in attachments if a.get("type") != "image"]
+        if label:
+            label_lower = label.strip().lower()
+            candidates = [a for a in candidates if label_lower in str(a.get("label", "")).lower()]
+        if not candidates:
+            return None, f"没找到匹配的非图片附件（label={label!r}）。"
+        if len(candidates) > 1:
+            names = "、".join(str(a.get("label") or "") for a in candidates)
+            return None, f"有多个附件匹配：{names}。请用 label 参数说得更具体一点。"
+        return candidates[0], ""
 
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
@@ -206,18 +247,71 @@ def register_card_tools(
         return "\n".join(lines)
 
     @mcp.tool()
-    async def card_attachment_read(card: str = "", label: str = "") -> str:
+    async def card_attachment_read(
+        card: str = "", label: str = "", section_id: str = "", start: int = 0, max_chars: int = 0,
+    ) -> str:
         """读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
         .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
         实验性功能），旧版二进制 .doc 格式也读不了（没有轻量可用的解析库），
         这两种会明确告诉你读不了、不是没找到。
         card：卡片标题或 id。label：可选，附件文件名（或其中一部分），用来在
-        一张卡有多个附件时指定读哪个；留空会把这张卡里所有能读的文本附件都读出来。"""
-        if read_attachment_text is None:
-            return "这个部署还没接上附件内容读取（read_attachment_text 未配置）。"
+        一张卡有多个附件时指定读哪个。
+
+        不传 section_id/start/max_chars 时：读这张卡里所有能读的文本附件（多个
+        会一起返回），超长的单个附件会被截断并提示改用下面这两种分段方式。
+
+        传了 section_id/start/max_chars 中任意一个时：只能针对一个附件操作，
+        这时 label 必须能唯一定位到那一个附件（附件不止一个又没传 label 会报错，
+        不会瞎猜读哪个）：
+        - section_id：先用 card_attachment_outline 拿到章节列表，传其中一个
+          section_id，只返回那一章的内容，从章节开头读到下一章开头为止。
+        - start + max_chars：不看章节结构，从第 start 个字符开始，读
+          max_chars 个字（max_chars 不传或传 0 时用默认页大小）。返回结果
+          结尾会带"还有更多内容，下次传 start=xxx 继续读"这样的提示，没有
+          更多内容时不会带这个提示。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
+
+        paginated = bool(section_id) or start > 0 or max_chars > 0
+        if paginated:
+            attachment, err = _resolve_single_attachment(found, label)
+            if err:
+                return err
+            name = str(attachment.get("label") or "附件")
+            if read_attachment_full_text is None:
+                return "这个部署还没接上分段读取（read_attachment_full_text 未配置）。"
+            full_text = read_attachment_full_text(attachment)
+            if full_text is None:
+                return f"【{name}】这个格式读不了内容（旧版 .doc 没有可用的解析库）。"
+
+            if section_id:
+                if attachment_outline is None:
+                    return "这个部署还没接上章节解析（attachment_outline 未配置），改用 start/max_chars 分段读吧。"
+                sections = attachment_outline(attachment)
+                if not sections:
+                    return f"【{name}】没有检测到章节结构，用 card_attachment_outline 确认一下，或者改用 start/max_chars 分段读。"
+                idx = next((i for i, s in enumerate(sections) if s.get("section_id") == section_id), None)
+                if idx is None:
+                    return f"没找到 section_id={section_id!r}，用 card_attachment_outline 先看看有哪些章节。"
+                section_start = int(sections[idx]["start_position"])
+                section_end = (
+                    int(sections[idx + 1]["start_position"]) if idx + 1 < len(sections) else len(full_text)
+                )
+                chunk = full_text[section_start:section_end].strip()
+                title = str(sections[idx].get("title") or section_id)
+                return f"=== 【{name}】{title} ===\n{chunk}"
+
+            page_size = max_chars if max_chars > 0 else FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS
+            chunk = full_text[start:start + page_size]
+            end = start + len(chunk)
+            has_more = end < len(full_text)
+            header = f"=== 【{name}】第 {start}-{end} 字（共 {len(full_text)} 字）==="
+            footer = f"\n\n（还有更多内容，下次传 start={end} 继续读）" if has_more else ""
+            return f"{header}\n{chunk}{footer}"
+
+        if read_attachment_text is None:
+            return "这个部署还没接上附件内容读取（read_attachment_text 未配置）。"
         attachments = (found.get("current") or {}).get("attachments") or []
         if not attachments:
             return "这张卡没有附件。"
@@ -238,6 +332,39 @@ def register_card_tools(
             else:
                 blocks.append(f"【{name}】内容：\n{text}")
         return "\n\n".join(blocks)
+
+    @mcp.tool()
+    async def card_attachment_outline(card: str = "", label: str = "") -> str:
+        """解析一张资料卡附件的章节/目录结构（.docx/.pdf/.md），配合
+        card_attachment_read 的 section_id 参数分章节读长文档，不用一次性
+        读全文再自己找位置。
+        .docx 优先读 Word 的"标题1/标题2/标题3"样式；如果整篇都没用过标题样式，
+        会退一步找"第一章""第二节"这类文字标记。.md 按 # / ## / ### 这类标准
+        markdown 标题解析，最可靠。.pdf 只能靠"第一章"这类文字标记（没有样式
+        信息可用），准确度不如前两种。
+        **没检测到章节结构是正常结果，不是报错**——原文档确实没有清晰的章节标记
+        时就是这样，改用 card_attachment_read 的 start/max_chars 分段读全文。
+        card：卡片标题或 id。label：可选，附件文件名（或其中一部分），多个非
+        图片附件时用来指定解析哪一个。"""
+        if attachment_outline is None:
+            return "这个部署还没接上章节解析（attachment_outline 未配置）。"
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        attachment, err = _resolve_single_attachment(found, label)
+        if err:
+            return err
+        name = str(attachment.get("label") or "附件")
+        sections = attachment_outline(attachment)
+        if sections is None:
+            return f"【{name}】这个格式不支持解析章节结构（目前只支持 .docx/.pdf/.md）。"
+        if not sections:
+            return f"【{name}】没有检测到章节结构（可能原文没用标题样式、也没有「第X章」这类文字标记）——用 card_attachment_read 的 start/max_chars 分段读全文吧。"
+        lines = [f"=== 【{name}】章节结构（共 {len(sections)} 节）==="]
+        for s in sections:
+            indent = "  " * (int(s.get("level") or 1) - 1)
+            lines.append(f"{indent}- [{s['section_id']}] {s['title']}")
+        return "\n".join(lines)
 
     @mcp.tool()
     async def card_attachment_view(card: str = "", label: str = ""):

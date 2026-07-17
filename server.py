@@ -9838,47 +9838,162 @@ def _facts_attachment_target_path(attachment: dict) -> str | None:
     return target
 
 
-def _facts_attachment_text(attachment: dict) -> str | None:
-    """Read a non-image card attachment's content for the card_attachment_read
-    MCP tool (cards_mcp.py). Returns None for anything we can't turn into
-    text -- legacy binary .doc has no lightweight, well-maintained pure-
-    Python parser and isn't supported; everything else (.txt/.md/.json/.py
-    directly, .docx via python-docx, .pdf via pypdf) is."""
+def _facts_attachment_full_text(attachment: dict) -> str | None:
+    """Extract an attachment's complete, untruncated text -- .txt/.md/.json/
+    .py read directly, .docx via python-docx, .pdf via pypdf. None for
+    anything we can't turn into text (legacy binary .doc has no lightweight,
+    well-maintained pure-Python parser and isn't supported).
+
+    This is the single canonical text extraction used by card_attachment_read
+    (which truncates it for the whole-file case), its section_id/start
+    pagination, and card_attachment_outline's regex fallback -- all three
+    must agree on exactly the same string so character offsets line up."""
     ext = os.path.splitext(str(attachment.get("url") or ""))[1].lower()
     target = _facts_attachment_target_path(attachment)
     if target is None:
         return None
 
-    text: str | None = None
     if ext in FACTS_ATTACHMENTS_TEXT_EXTENSIONS:
         try:
             with open(target, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
+                return f.read()
         except Exception:
             return None
-    elif ext == ".docx":
+    if ext == ".docx":
         try:
             import docx
             document = docx.Document(target)
-            text = "\n".join(p.text for p in document.paragraphs)
+            return "\n".join(p.text for p in document.paragraphs)
         except Exception:
             logger.warning("Failed to extract text from .docx attachment", exc_info=True)
             return None
-    elif ext == ".pdf":
+    if ext == ".pdf":
         try:
             from pypdf import PdfReader
             reader = PdfReader(target)
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception:
             logger.warning("Failed to extract text from .pdf attachment", exc_info=True)
             return None
-    else:
-        # .doc (legacy binary format) and anything else -- not supported.
+    # .doc (legacy binary format) and anything else -- not supported.
+    return None
+
+
+def _facts_attachment_text(attachment: dict) -> str | None:
+    """Whole-file read for card_attachment_read's no-pagination-params case:
+    same as _facts_attachment_full_text but truncated to a sane size, with a
+    pointer to the pagination tools instead of silently cutting off."""
+    text = _facts_attachment_full_text(attachment)
+    if text is not None and len(text) > FACTS_ATTACHMENT_TEXT_MAX_CHARS:
+        text = (
+            text[:FACTS_ATTACHMENT_TEXT_MAX_CHARS]
+            + "\n…（内容过长，已截断——可以先用 card_attachment_outline 看章节结构，"
+            "再用 card_attachment_read 的 section_id 或 start/max_chars 参数分段读完整内容）"
+        )
+    return text
+
+
+# Matches common Chinese chapter/section markers as a fallback when a .docx
+# has no Heading-styled paragraphs at all, and for .pdf (which pypdf gives us
+# no style/font metadata for, so this regex is the only signal available).
+# Deliberately does NOT try to guess from "short standalone paragraph" shape
+# (Lin Zhan's other suggested signal) -- that's exactly the kind of heuristic
+# that misfires on short dialogue lines/scene breaks, and a wrong chapter
+# split is worse than no split (Lin Zhan just gets the honest "no structure
+# detected" case and falls back to start/max_chars paging instead).
+FACTS_ATTACHMENT_CHAPTER_MARKER_RE = re.compile(
+    r"^[ \t]*(第[0-9一二三四五六七八九十百千零]+[章节回卷部].{0,40})$", re.MULTILINE,
+)
+# Word's built-in heading styles carry a language-independent internal name
+# ("Heading 1") in the vast majority of real-world .docx files regardless of
+# UI locale, but this isn't a hard guarantee across every Word version, so
+# the common Chinese display name is matched too rather than assuming.
+FACTS_ATTACHMENT_DOCX_HEADING_STYLE_RE = re.compile(r"^(?:Heading|标题)[ ]?(\d)$")
+
+
+def _facts_attachment_regex_outline(full_text: str) -> list[dict]:
+    sections = []
+    for i, m in enumerate(FACTS_ATTACHMENT_CHAPTER_MARKER_RE.finditer(full_text)):
+        sections.append({
+            "section_id": f"s{i}", "title": m.group(1).strip(), "level": 1,
+            "start_position": m.start(),
+        })
+    return sections
+
+
+def _facts_attachment_md_outline(full_text: str) -> list[dict]:
+    sections = []
+    for i, m in enumerate(re.finditer(r"^(#{1,6})[ \t]+(.+)$", full_text, re.MULTILINE)):
+        sections.append({
+            "section_id": f"s{i}", "title": m.group(2).strip(), "level": len(m.group(1)),
+            "start_position": m.start(),
+        })
+    return sections
+
+
+def _facts_attachment_docx_style_outline(target: str) -> list[dict]:
+    """Heading-style-based outline: walks paragraphs in document order,
+    tracking Heading N / Title styled ones. start_position is the character
+    offset into "\n".join(p.text for p in document.paragraphs) -- must stay
+    numerically in sync with what _facts_attachment_full_text() returns for
+    .docx, since card_attachment_read's section_id mode slices that same
+    string using these offsets."""
+    import docx
+    document = docx.Document(target)
+    sections = []
+    offset = 0
+    sid = 0
+    for p in document.paragraphs:
+        style_name = str(p.style.name) if p.style is not None else ""
+        level = None
+        if style_name == "Title" or style_name == "标题":
+            level = 1
+        else:
+            m = FACTS_ATTACHMENT_DOCX_HEADING_STYLE_RE.match(style_name)
+            if m:
+                level = int(m.group(1))
+        if level is not None and p.text.strip():
+            sections.append({
+                "section_id": f"s{sid}", "title": p.text.strip(), "level": level,
+                "start_position": offset,
+            })
+            sid += 1
+        offset += len(p.text) + 1  # +1 for the "\n" joiner in the full-text version
+    return sections
+
+
+def _facts_attachment_outline(attachment: dict) -> list[dict] | None:
+    """Chapter/section outline for card_attachment_outline. None if the
+    format isn't supported for outlining at all, or the file can't be read.
+    [] (empty list) means the format IS supported but no structure was
+    detected -- a real, honest answer, not an error; callers should tell
+    Lin Zhan to fall back to start/max_chars paging in that case."""
+    ext = os.path.splitext(str(attachment.get("url") or ""))[1].lower()
+    if ext not in {".docx", ".pdf", ".md"}:
+        return None
+    target = _facts_attachment_target_path(attachment)
+    if target is None:
         return None
 
-    if text is not None and len(text) > FACTS_ATTACHMENT_TEXT_MAX_CHARS:
-        text = text[:FACTS_ATTACHMENT_TEXT_MAX_CHARS] + "\n…（内容过长，已截断）"
-    return text
+    if ext == ".docx":
+        try:
+            sections = _facts_attachment_docx_style_outline(target)
+        except Exception:
+            logger.warning("Failed to build .docx outline from heading styles", exc_info=True)
+            return None
+        if sections:
+            return sections
+        # No Heading-styled paragraphs at all -- fall back to chapter-marker regex.
+        full_text = _facts_attachment_full_text(attachment) or ""
+        return _facts_attachment_regex_outline(full_text)
+    if ext == ".md":
+        return _facts_attachment_md_outline(_facts_attachment_full_text(attachment) or "")
+    if ext == ".pdf":
+        # pypdf gives no font/style metadata through extract_text(), so the
+        # regex marker scan is the only signal available for PDFs -- lower
+        # confidence than the .docx heading-style path, best-effort only.
+        return _facts_attachment_regex_outline(_facts_attachment_full_text(attachment) or "")
+    return None
 
 
 def _facts_attachment_image(attachment: dict):
@@ -13039,7 +13154,9 @@ cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_
 cards_mcp.register_card_tools(
     mcp, card_store,
     read_attachment_text=_facts_attachment_text,
+    read_attachment_full_text=_facts_attachment_full_text,
     read_attachment_image=_facts_attachment_image,
+    attachment_outline=_facts_attachment_outline,
     bucket_summary=_bucket_link_summary,
 )
 

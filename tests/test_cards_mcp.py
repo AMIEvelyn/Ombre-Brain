@@ -66,6 +66,19 @@ def _fake_read_attachment_image(attachment):
     return _FakeImage(attachment.get("url"))
 
 
+def _fake_read_attachment_full_text(attachment):
+    """Stand-in for server.py's _facts_attachment_full_text: untruncated,
+    stashed on the fake attachment dict's own "_full_text" field."""
+    return attachment.get("_full_text")
+
+
+def _fake_attachment_outline(attachment):
+    """Stand-in for server.py's _facts_attachment_outline: whatever section
+    list was stashed on the fake attachment dict's own "_outline" field.
+    None = format not outline-able; [] = outline-able but nothing detected."""
+    return attachment.get("_outline")
+
+
 def main():
     tmp = tempfile.mkdtemp()
     store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
@@ -73,16 +86,19 @@ def main():
     cards_mcp.register_card_tools(
         mcp, store,
         read_attachment_text=_fake_read_attachment_text,
+        read_attachment_full_text=_fake_read_attachment_full_text,
         read_attachment_image=_fake_read_attachment_image,
+        attachment_outline=_fake_attachment_outline,
         bucket_summary=_fake_bucket_summary,
     )
     assert set(mcp.tools) == {
         "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
-        "card_attachment_view", "card_buckets",
+        "card_attachment_outline", "card_attachment_view", "card_buckets",
     }
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
     card_history = mcp.tools["card_history"]
+    card_attachment_outline = mcp.tools["card_attachment_outline"]
     card_attachment_read = mcp.tools["card_attachment_read"]
     card_attachment_view = mcp.tools["card_attachment_view"]
     card_buckets = mcp.tools["card_buckets"]
@@ -185,6 +201,103 @@ def main():
     assert "没有附件" in _run(card_attachment_read(card=no_atts))
     print("PASS card_attachment_read: card with no attachments")
 
+    # --- card_attachment_outline + card_attachment_read pagination (慁-style long doc) ---
+    ch1, ch2, ch3 = "第一章 开始", "第二章 发展", "第三章 结局"
+    body1, body2, body3 = "A" * 50, "B" * 50, "C" * 50
+    novel_text = f"{ch1}\n{body1}\n{ch2}\n{body2}\n{ch3}\n{body3}"
+    novel_outline = [
+        {"section_id": "s0", "title": ch1, "level": 1, "start_position": novel_text.index(ch1)},
+        {"section_id": "s1", "title": ch2, "level": 1, "start_position": novel_text.index(ch2)},
+        {"section_id": "s2", "title": ch3, "level": 1, "start_position": novel_text.index(ch3)},
+    ]
+    novel = store.create_card(
+        title="慁",
+        attachments=[{
+            "type": "file", "label": "慁.docx", "url": "/api/facts-skeleton/attachments/novel.docx",
+            "_full_text": novel_text, "_outline": novel_outline,
+        }],
+    )
+
+    outline_out = _run(card_attachment_outline(card="慁"))
+    assert "章节结构（共 3 节）" in outline_out
+    assert "[s0] 第一章 开始" in outline_out and "[s2] 第三章 结局" in outline_out
+    print("PASS card_attachment_outline: real chapter structure")
+
+    ch2_out = _run(card_attachment_read(card="慁", section_id="s1"))
+    assert "第二章 发展" in ch2_out
+    assert body2 in ch2_out and body1 not in ch2_out and body3 not in ch2_out  # only that chapter's text
+    print("PASS card_attachment_read section_id: exact chapter slice, not neighbors")
+
+    assert "没找到 section_id" in _run(card_attachment_read(card="慁", section_id="s99"))
+    print("PASS card_attachment_read section_id: unknown id handled")
+
+    page1 = _run(card_attachment_read(card="慁", start=0, max_chars=10))
+    assert "还有更多内容" in page1 and "start=10" in page1
+    page2 = _run(card_attachment_read(card="慁", start=10, max_chars=10))
+    assert page1 != page2
+    tail = _run(card_attachment_read(card="慁", start=len(novel_text) - 5, max_chars=100))
+    assert "还有更多内容" not in tail  # reached the end, no next-page prompt
+    print("PASS card_attachment_read start/max_chars: paging + has_more/next_start signal")
+
+    # no chapter structure detected -- an honest [] result, not an error
+    no_structure = store.create_card(
+        title="随笔",
+        attachments=[{
+            "type": "file", "label": "随笔.md", "url": "/api/facts-skeleton/attachments/notes.md",
+            "_full_text": "今天天气不错，写了点感想，没分章节。", "_outline": [],
+        }],
+    )
+    assert "没有检测到章节结构" in _run(card_attachment_outline(card="随笔"))
+    print("PASS card_attachment_outline: honestly reports no structure detected")
+
+    # ambiguous attachment: pagination/outline need exactly one, won't guess
+    two_files = store.create_card(
+        title="双文件卡",
+        attachments=[
+            {"type": "file", "label": "a.md", "url": "/x/a.md", "_full_text": "AAA", "_outline": []},
+            {"type": "file", "label": "b.md", "url": "/x/b.md", "_full_text": "BBB", "_outline": []},
+        ],
+    )
+    assert "有多个附件匹配" in _run(card_attachment_outline(card="双文件卡"))
+    assert "有多个附件匹配" in _run(card_attachment_read(card="双文件卡", start=0, max_chars=10))
+    only_a = _run(card_attachment_outline(card="双文件卡", label="a.md"))
+    assert "a.md" in only_a
+    print("PASS card_attachment_outline/read: ambiguous attachment requires label, doesn't guess")
+
+    # attachment_outline=None (not wired up)
+    mcp_no_outline = FakeMCP()
+    cards_mcp.register_card_tools(
+        mcp_no_outline, store,
+        read_attachment_text=_fake_read_attachment_text,
+        read_attachment_full_text=_fake_read_attachment_full_text,
+    )
+    assert "还没接上章节解析" in _run(mcp_no_outline.tools["card_attachment_outline"](card="慁"))
+    assert "还没接上章节解析" in _run(mcp_no_outline.tools["card_attachment_read"](card="慁", section_id="s0"))
+    print("PASS card_attachment_outline/read: disabled cleanly when attachment_outline not wired up")
+
+    # read_attachment_full_text=None (pagination disabled, whole-file read still fine)
+    mcp_no_fulltext = FakeMCP()
+    cards_mcp.register_card_tools(mcp_no_fulltext, store, read_attachment_text=_fake_read_attachment_text)
+    assert "还没接上分段读取" in _run(mcp_no_fulltext.tools["card_attachment_read"](card="慁", start=0, max_chars=10))
+    print("PASS card_attachment_read: pagination disabled cleanly when read_attachment_full_text not wired up")
+
+    # read_attachment_text=None but read_attachment_full_text/attachment_outline ARE wired --
+    # pagination must not require read_attachment_text at all (real bug caught by a deeper
+    # real-server.py-style integration check, 2026-07-16: the function used to gate on
+    # read_attachment_text before even checking whether this was the paginated branch).
+    mcp_pagination_only = FakeMCP()
+    cards_mcp.register_card_tools(
+        mcp_pagination_only, store,
+        read_attachment_full_text=_fake_read_attachment_full_text,
+        attachment_outline=_fake_attachment_outline,
+    )
+    para_only_read = mcp_pagination_only.tools["card_attachment_read"]
+    para_only_outline = mcp_pagination_only.tools["card_attachment_outline"]
+    assert "第二章 发展" in _run(para_only_read(card="慁", section_id="s1"))
+    assert "章节结构（共 3 节）" in _run(para_only_outline(card="慁"))
+    assert "还没接上附件内容读取" in _run(para_only_read(card="慁"))  # whole-file mode still needs it
+    print("PASS card_attachment_read: section_id/start pagination works without read_attachment_text configured")
+
     # --- read_attachment_text=None (not wired up on this deployment) ---
     mcp_unwired = FakeMCP()
     cards_mcp.register_card_tools(mcp_unwired, store)
@@ -264,7 +377,7 @@ def real_fastmcp_registration_smoke_test():
     names = {t.name for t in tools}
     assert names == {
         "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
-        "card_attachment_view", "card_buckets",
+        "card_attachment_outline", "card_attachment_view", "card_buckets",
     }, names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} tools, no schema errors)")
 
