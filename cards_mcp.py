@@ -56,6 +56,23 @@ from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
 FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS = 4000
 
 
+def _fmt_attachments_summary(attachments: list[dict]) -> str:
+    """"N 张图片，M 个文件（名字）" -- shared by _fmt_card (current state)
+    and card_history (2026-07-17: Yi Lan wants every historical timepoint's
+    attachments visible here too, not just current -- matches the
+    Dashboard's timeline expand view, which got the same fix). Empty string
+    (not called) when there are no attachments."""
+    photos = [a for a in attachments if a.get("type") == "image"]
+    files = [a for a in attachments if a.get("type") != "image"]
+    parts = []
+    if photos:
+        parts.append(f"{len(photos)} 张图片")
+    if files:
+        names = "、".join(str(f.get("label")) for f in files if f.get("label"))
+        parts.append(f"{len(files)} 个文件" + (f"（{names}）" if names else ""))
+    return "，".join(parts)
+
+
 def _fmt_card(store, card: dict) -> str:
     cur = card.get("current") or {}
     title = str(cur.get("title") or "").strip() or "(无标题)"
@@ -72,15 +89,7 @@ def _fmt_card(store, card: dict) -> str:
     if len(history) > 1:
         lines.append(f"  （有 {len(history)} 条历史，要看变化过程再说）")
     if attachments:
-        photos = [a for a in attachments if a.get("type") == "image"]
-        files = [a for a in attachments if a.get("type") != "image"]
-        parts = []
-        if photos:
-            parts.append(f"{len(photos)} 张图片")
-        if files:
-            names = "、".join(str(f.get("label")) for f in files if f.get("label"))
-            parts.append(f"{len(files)} 个文件" + (f"（{names}）" if names else ""))
-        lines.append("  📎 附件：" + "，".join(parts))
+        lines.append("  📎 附件：" + _fmt_attachments_summary(attachments))
     if buckets:
         lines.append(f"  🫙 关联了 {len(buckets)} 个记忆桶（证据来源）")
     favorites = card.get("folders") or []
@@ -314,7 +323,9 @@ def register_card_tools(
         """读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
         最新状态）。card_lookup 对更早的时间点只给一句"有 N 条历史"的提示，这个
         工具才是真正把那 N 条内容逐条读出来的入口，想知道某件事是怎么一步步变
-        成现在这样时用这个。
+        成现在这样时用这个。每个时间点如果带附件也会在这里标出来（图片/文件
+        数量、文件名）——想真的读到内容，把这里的日期传给 card_attachment_read/
+        card_attachment_view/card_attachment_outline 的 at 参数。
         card：这张卡的标题（推荐，跟 card_lookup 搜到的标题一致）或者卡片 id。
         标题在多张卡之间重复/不唯一时，会列出候选请你说得更具体一点。"""
         found, err = _resolve_card(store, card)
@@ -330,6 +341,9 @@ def register_card_tools(
             content = str(rev.get("content") or "").strip() or "（无内容）"
             marker = "（当前）" if i == 0 else ""
             lines.append(f"- {date}{marker}：{content}")
+            att_summary = _fmt_attachments_summary(rev.get("attachments") or [])
+            if att_summary:
+                lines.append(f"    📎 附件：{att_summary}（读取用 at={date}）")
         return "\n".join(lines)
 
     @mcp.tool()

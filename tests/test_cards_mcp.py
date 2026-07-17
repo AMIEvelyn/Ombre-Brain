@@ -175,6 +175,27 @@ def main():
     assert "没找到" in _run(card_history(card="根本没有这张卡"))
     print("PASS card_history ambiguous + missing")
 
+    # --- card_history now shows each timepoint's own attachments too ---
+    # 2026-07-17, Yi Lan's follow-up: the Dashboard's timeline expand view
+    # already shows a historical revision's photos/files; card_history
+    # (Lin Zhan's read of the same timeline) was missing the same info.
+    att_card = store.create_card(
+        title="附件时间线卡", content="第一版", valid_at="2026-01-01",
+        attachments=[{"type": "file", "label": "v1.md", "url": "/x/v1.md"}],
+    )
+    store.add_revision(
+        att_card, content="第二版", valid_at="2026-02-01",
+        attachments=[
+            {"type": "image", "label": "v2.png", "url": "/x/v2.png"},
+            {"type": "file", "label": "v2a.md", "url": "/x/v2a.md"},
+            {"type": "file", "label": "v2b.md", "url": "/x/v2b.md"},
+        ],
+    )
+    att_hist = _run(card_history(card="附件时间线卡"))
+    assert "📎 附件：1 张图片，2 个文件（v2a.md、v2b.md）（读取用 at=2026-02-01）" in att_hist
+    assert "📎 附件：1 个文件（v1.md）（读取用 at=2026-01-01）" in att_hist
+    print("PASS card_history: each timepoint shows its own attachments, with the at= date to read them")
+
     # --- card_attachment_read: text attachments readable, images/pdf are not ---
     doc = store.create_card(
         title="旅行攻略",
