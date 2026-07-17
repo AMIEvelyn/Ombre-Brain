@@ -192,8 +192,12 @@ def main():
         ],
     )
     att_hist = _run(card_history(card="附件时间线卡"))
-    assert "📎 附件：1 张图片（v2.png），2 个文件（v2a.md、v2b.md）（读取用 at=2026-02-01）" in att_hist
-    assert "📎 附件：1 个文件（v1.md）（读取用 at=2026-01-01）" in att_hist
+    # 2026-07-17, third pass: dropped the "读取用 at=" trailing hint -- Lin
+    # Zhan found it misleading now that label alone usually suffices (he
+    # correctly ignored it and just used the filenames directly).
+    assert "📎 附件：1 张图片（v2.png），2 个文件（v2a.md、v2b.md）" in att_hist
+    assert "读取用 at" not in att_hist
+    assert "📎 附件：1 个文件（v1.md）" in att_hist
     print("PASS card_history: each timepoint shows its own attachments, with the at= date to read them")
 
     # --- card_attachment_read: text attachments readable, images/pdf are not ---

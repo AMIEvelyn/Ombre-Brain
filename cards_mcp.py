@@ -419,7 +419,7 @@ def register_card_tools(
             lines.append(f"- {date}{marker}：{content}")
             att_summary = _fmt_attachments_summary(rev.get("attachments") or [])
             if att_summary:
-                lines.append(f"    📎 附件：{att_summary}（读取用 at={date}）")
+                lines.append(f"    📎 附件：{att_summary}")
         return "\n".join(lines)
 
     @mcp.tool()
