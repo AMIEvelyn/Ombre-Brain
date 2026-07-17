@@ -1760,6 +1760,151 @@ class GatewayService:
             logger.exception("Gateway health check failed: %s", exc)
             return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
 
+    async def handle_hook_recall(self, request: Request) -> JSONResponse:
+        """POST /api/hook/recall: a lightweight, non-chat memory lookup for
+        external tools (Codex/Claude Code CLI hooks, etc.) that just want
+        "what does Ombre Brain know about X" without going through
+        /v1/chat/completions. Same bearer-token auth as chat completions.
+        Scoped down from Yinglianchun/Ombre-Brain's version: reuses our
+        existing _select_dynamic_buckets recall pipeline directly instead of
+        their fast/full dual-mode + domain-sentinel machinery, which doesn't
+        have an equivalent in our fork."""
+        auth_result = self._authorize(request.headers.get("Authorization", ""))
+        if auth_result is not None:
+            return auth_result
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid hook recall request"}, status_code=400)
+
+        def bounded_int(value: Any, *, default: int, floor: int, ceiling: int) -> int:
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                parsed = default
+            return max(floor, min(ceiling, parsed))
+
+        messages = body.get("messages")
+        if not isinstance(messages, list):
+            messages = []
+        query = str(
+            body.get("query")
+            or body.get("prompt")
+            or body.get("message")
+            or self._extract_current_turn_user_query(messages)
+            or self._extract_last_user_query(messages)
+            or ""
+        ).strip()
+        if not query:
+            return JSONResponse({"error": "query is required"}, status_code=400)
+
+        session_id = str(
+            body.get("session_id") or request.headers.get("X-Ombre-Session-Id") or "hook"
+        ).strip() or "hook"
+        max_cards = bounded_int(body.get("max_notes", body.get("max_cards")), default=2, floor=0, ceiling=5)
+        max_chars = bounded_int(body.get("max_chars"), default=1200, floor=160, ceiling=2400)
+        include_debug = self._truthy_header(
+            str(body.get("include_debug")) if body.get("include_debug") is not None else None
+        )
+
+        try:
+            cards, recalled_ids, hook_debug = await self._hook_recall_cards(
+                query,
+                session_id,
+                max_cards=max_cards,
+                max_chars=max_chars,
+            )
+        except Exception as exc:
+            logger.warning("Gateway hook recall failed | session=%s error=%s", session_id, exc)
+            return JSONResponse({"error": "hook recall failed"}, status_code=503)
+
+        response: dict[str, Any] = {
+            "ok": True,
+            "query": query,
+            "session_id": session_id,
+            "cards": cards,
+            "notes": cards,
+            "additional_context": self._render_hook_recall_additional_context(cards),
+            "recalled_ids": recalled_ids,
+        }
+        if include_debug:
+            response["debug"] = hook_debug
+        return JSONResponse(response)
+
+    async def _hook_recall_cards(
+        self,
+        query: str,
+        session_id: str,
+        *,
+        max_cards: int,
+        max_chars: int,
+    ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+        if max_cards <= 0:
+            return [], [], {"skip_reason": "max_cards_zero"}
+        all_buckets = await self.bucket_mgr.list_all(include_archive=False)
+        selected_buckets, suppressed = await self._select_dynamic_buckets(query, session_id, all_buckets)
+        cards: list[dict[str, Any]] = []
+        recalled_ids: list[str] = []
+        for bucket in selected_buckets[:max_cards]:
+            card = self._hook_recall_card_from_bucket(bucket, max_chars=max_chars)
+            if not card:
+                continue
+            cards.append(card)
+            recalled_ids.append(card["bucket_id"])
+        debug = {
+            "search_query": query,
+            "candidate_count": len(selected_buckets),
+            "suppressed_count": len(suppressed),
+            "max_cards": max_cards,
+            "max_chars": max_chars,
+        }
+        return cards, recalled_ids, debug
+
+    def _hook_recall_card_from_bucket(self, bucket: dict, *, max_chars: int) -> dict[str, Any] | None:
+        bucket_id = str(bucket.get("id") or "")
+        if not bucket_id:
+            return None
+        metadata = bucket.get("metadata", {}) if isinstance(bucket.get("metadata"), dict) else {}
+        content = bucket_content_for_recall(bucket)[:max_chars]
+        if not content.strip():
+            return None
+        recall_signal = bucket.get("_recall_signal", {}) if isinstance(bucket.get("_recall_signal"), dict) else {}
+        return {
+            "bucket_id": bucket_id,
+            "title": str(metadata.get("name") or bucket_id),
+            "content": content,
+            "created": str(metadata.get("created") or ""),
+            "domain": list(metadata.get("domain") or []),
+            "confidence": self._hook_recall_confidence(recall_signal),
+        }
+
+    @staticmethod
+    def _hook_recall_confidence(recall_signal: dict) -> str:
+        if isinstance(recall_signal, dict) and (
+            recall_signal.get("planner_lexical_match")
+            or recall_signal.get("exact_anchor_match")
+            or recall_signal.get("rare_name_match")
+        ):
+            return "high"
+        semantic_score = recall_signal.get("semantic_score") if isinstance(recall_signal, dict) else None
+        if isinstance(semantic_score, (int, float)) and semantic_score >= 0.6:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _render_hook_recall_additional_context(cards: list[dict[str, Any]]) -> str:
+        if not cards:
+            return ""
+        lines = ["Relevant memory from Ombre Brain (verify before relying on it; may be incomplete or stale):"]
+        for card in cards:
+            lines.append(
+                f"- [{card['bucket_id']}] {card['title']} (confidence:{card['confidence']}): {card['content']}"
+            )
+        return "\n".join(lines)
+
     async def handle_chat(self, request: Request) -> Response:
         auth_result = self._authorize(request.headers.get("Authorization", ""))
         if auth_result is not None:
@@ -15565,6 +15710,9 @@ def create_gateway_app(
     async def upstream_usage_debug(request: Request) -> Response:
         return await request.app.state.gateway_service.handle_upstream_usage_debug(request)
 
+    async def hook_recall(request: Request) -> Response:
+        return await request.app.state.gateway_service.handle_hook_recall(request)
+
     app = Starlette(
         debug=False,
         routes=[
@@ -15573,6 +15721,7 @@ def create_gateway_app(
             Route("/api/debug/injections", injection_debug, methods=["GET"]),
             Route("/api/debug/recall-eval", recall_eval_debug, methods=["GET"]),
             Route("/api/debug/upstream-usage", upstream_usage_debug, methods=["GET"]),
+            Route("/api/hook/recall", hook_recall, methods=["POST"]),
             Route("/v1/models", models, methods=["GET"]),
             Route("/v1/chat/completions", chat_completions, methods=["POST"]),
             Route("/v1/messages", anthropic_messages, methods=["POST"]),

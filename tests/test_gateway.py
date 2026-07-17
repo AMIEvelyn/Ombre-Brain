@@ -1271,6 +1271,139 @@ def test_try_semantic_rescue_skips_when_no_specific_axis(monkeypatch, test_confi
     assert dehydrator.calls == []
 
 
+def test_hook_recall_requires_auth(monkeypatch, test_config, bucket_mgr):
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post("/api/hook/recall", json={"query": "猫粮"})
+
+    assert response.status_code == 401
+
+
+def test_hook_recall_requires_query(monkeypatch, test_config, bucket_mgr):
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/hook/recall",
+            headers={"Authorization": "Bearer gateway-secret"},
+            json={},
+        )
+
+    assert response.status_code == 400
+    assert "query" in response.json()["error"]
+
+
+def test_hook_recall_returns_cards_for_matching_bucket(monkeypatch, test_config, bucket_mgr):
+    bucket_id = _create_bucket(
+        bucket_mgr,
+        content="猫粮下周三之前要补货，目前只剩半袋。",
+        name="猫粮补货提醒",
+        tags=["猫粮"],
+        hours_ago=2,
+    )
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/hook/recall",
+            headers={"Authorization": "Bearer gateway-secret"},
+            json={"query": "猫粮补货", "max_notes": 2},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["query"] == "猫粮补货"
+    assert bucket_id in payload["recalled_ids"]
+    card_ids = [card["bucket_id"] for card in payload["cards"]]
+    assert bucket_id in card_ids
+    matching_card = next(card for card in payload["cards"] if card["bucket_id"] == bucket_id)
+    assert "猫粮" in matching_card["content"]
+    assert matching_card["confidence"] in {"high", "medium", "low"}
+    assert bucket_id in payload["additional_context"]
+    assert "debug" not in payload
+
+
+def test_hook_recall_includes_debug_when_requested(monkeypatch, test_config, bucket_mgr):
+    _create_bucket(
+        bucket_mgr,
+        content="猫粮下周三之前要补货，目前只剩半袋。",
+        name="猫粮补货提醒",
+        tags=["猫粮"],
+        hours_ago=2,
+    )
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/hook/recall",
+            headers={"Authorization": "Bearer gateway-secret"},
+            json={"query": "猫粮补货", "include_debug": "1"},
+        )
+
+    assert response.status_code == 200
+    assert "debug" in response.json()
+    assert response.json()["debug"]["search_query"] == "猫粮补货"
+
+
+def test_hook_recall_extracts_query_from_messages_when_missing(monkeypatch, test_config, bucket_mgr):
+    bucket_id = _create_bucket(
+        bucket_mgr,
+        content="猫粮下周三之前要补货，目前只剩半袋。",
+        name="猫粮补货提醒",
+        tags=["猫粮"],
+        hours_ago=2,
+    )
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/hook/recall",
+            headers={"Authorization": "Bearer gateway-secret"},
+            json={"messages": [{"role": "user", "content": "猫粮补货"}]},
+        )
+
+    assert response.status_code == 200
+    assert bucket_id in response.json()["recalled_ids"]
+
+
+def test_hook_recall_max_cards_zero_returns_empty(monkeypatch, test_config, bucket_mgr):
+    _create_bucket(
+        bucket_mgr,
+        content="猫粮下周三之前要补货，目前只剩半袋。",
+        name="猫粮补货提醒",
+        tags=["猫粮"],
+        hours_ago=2,
+    )
+    app, _, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/hook/recall",
+            headers={"Authorization": "Bearer gateway-secret"},
+            json={"query": "猫粮补货", "max_notes": 0},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["cards"] == []
+    assert response.json()["recalled_ids"] == []
+
+
+def test_hook_recall_confidence_labels_high_and_low():
+    high = GatewayService._hook_recall_confidence(
+        {"exact_anchor_match": True, "semantic_score": 0.1}
+    )
+    medium = GatewayService._hook_recall_confidence({"semantic_score": 0.7})
+    low = GatewayService._hook_recall_confidence({"semantic_score": 0.1})
+    empty = GatewayService._hook_recall_confidence({})
+
+    assert high == "high"
+    assert medium == "medium"
+    assert low == "low"
+    assert empty == "low"
+
+
 def test_gateway_memory_sentinel_llm_defaults_off(monkeypatch, test_config, bucket_mgr):
     _, service, _, _ = _build_service(
         monkeypatch,
