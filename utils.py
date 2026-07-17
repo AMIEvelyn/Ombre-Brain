@@ -496,11 +496,13 @@ def load_config(config_path: str = None) -> dict:
         )
         runtime_config_path = os.path.join(runtime_state_dir, "config.runtime.yaml")
     config["_runtime_config_path"] = runtime_config_path
+    runtime_config: dict = {}
     if os.path.exists(runtime_config_path):
         try:
             with open(runtime_config_path, "r", encoding="utf-8") as f:
-                runtime_config = yaml.safe_load(f) or {}
-            if isinstance(runtime_config, dict):
+                loaded_runtime_config = yaml.safe_load(f) or {}
+            if isinstance(loaded_runtime_config, dict):
+                runtime_config = loaded_runtime_config
                 config = _deep_merge(config, runtime_config)
                 config["_runtime_config_path"] = runtime_config_path
         except yaml.YAMLError as e:
@@ -539,8 +541,14 @@ def load_config(config_path: str = None) -> dict:
     if env_embedding_model:
         config.setdefault("embedding", {})["model"] = env_embedding_model
 
+    # 2026-07-17: guarded with "not already set via the Dashboard" (same fix
+    # as OMBRE_DREAM_ENABLED below) -- without this, an env var meant as a
+    # first-run bootstrap default silently reverts a saved Dashboard toggle
+    # back to the env var's value on every restart, since this function runs
+    # once at startup, after the Dashboard's persisted config.runtime.yaml
+    # has already been merged in.
     env_embedding_enabled = os.environ.get("OMBRE_EMBEDDING_ENABLED", "")
-    if env_embedding_enabled:
+    if env_embedding_enabled and "enabled" not in runtime_config.get("embedding", {}):
         config.setdefault("embedding", {})["enabled"] = env_embedding_enabled.lower() in (
             "1",
             "true",
@@ -574,7 +582,7 @@ def load_config(config_path: str = None) -> dict:
         config.setdefault("reranker", {})["model"] = env_reranker_model
 
     env_reranker_enabled = os.environ.get("OMBRE_RERANKER_ENABLED", "")
-    if env_reranker_enabled:
+    if env_reranker_enabled and "enabled" not in runtime_config.get("reranker", {}):
         config.setdefault("reranker", {})["enabled"] = env_reranker_enabled.lower() in (
             "1",
             "true",
@@ -583,7 +591,7 @@ def load_config(config_path: str = None) -> dict:
         )
 
     env_recall_diagnostics_enabled = os.environ.get("OMBRE_RECALL_DIAGNOSTICS_ENABLED", "")
-    if env_recall_diagnostics_enabled:
+    if env_recall_diagnostics_enabled and "enabled" not in runtime_config.get("recall_diagnostics", {}):
         config.setdefault("recall_diagnostics", {})["enabled"] = env_recall_diagnostics_enabled.lower() in (
             "1",
             "true",
@@ -690,8 +698,16 @@ def load_config(config_path: str = None) -> dict:
     if env_dream_model:
         config.setdefault("dream", {})["model"] = env_dream_model
 
+    # 2026-07-17 real bug (Yi Lan): this ran unconditionally, so a dream.enabled
+    # saved via the Dashboard got silently reverted back to OMBRE_DREAM_ENABLED's
+    # value on every restart -- the README tells everyone to set this in .env
+    # during setup, so any deployment that followed it could never turn dreams
+    # off for good. Guarded the same way as embedding/reranker/recall_diagnostics
+    # above: an explicit choice already persisted to config.runtime.yaml (i.e.
+    # made through the Dashboard) wins; the env var only applies before that's
+    # ever happened.
     env_dream_enabled = os.environ.get("OMBRE_DREAM_ENABLED", "")
-    if env_dream_enabled:
+    if env_dream_enabled and "enabled" not in runtime_config.get("dream", {}):
         config.setdefault("dream", {})["enabled"] = env_dream_enabled.lower() in (
             "1",
             "true",

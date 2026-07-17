@@ -40,6 +40,33 @@ def _dream_config(base: dict, **overrides) -> dict:
     return cfg
 
 
+def test_dream_engine_enabled_config_wins_over_conflicting_env_var(test_config, monkeypatch):
+    """Real bug (2026-07-17, Yi Lan): the Dashboard's dream on/off toggle
+    reconstructs DreamEngine(config) on every save, but self.enabled used to
+    be computed via OMBRE_DREAM_ENABLED first -- so as long as that env var
+    was set (README tells everyone to set it during setup), it won
+    unconditionally no matter what the just-saved config said, and the
+    toggle had zero effect. An explicit config value must win."""
+    monkeypatch.setenv("OMBRE_DREAM_ENABLED", "true")
+    cfg_off = _dream_config(test_config, enabled=False)
+    assert DreamEngine(cfg_off).enabled is False
+
+    monkeypatch.setenv("OMBRE_DREAM_ENABLED", "false")
+    cfg_on = _dream_config(test_config, enabled=True)
+    assert DreamEngine(cfg_on).enabled is True
+
+
+def test_dream_engine_enabled_env_var_still_bootstraps_when_config_has_no_opinion(test_config, monkeypatch):
+    """The other half: with no `enabled` key in dream config at all (fresh
+    install, nothing persisted yet), the env var still works as intended."""
+    cfg = _dream_config(test_config)
+    del cfg["dream"]["enabled"]
+    monkeypatch.setenv("OMBRE_DREAM_ENABLED", "false")
+    assert DreamEngine(cfg).enabled is False
+    monkeypatch.delenv("OMBRE_DREAM_ENABLED", raising=False)
+    assert DreamEngine(cfg).enabled is True  # falls back to True (dream_engine.py's own default)
+
+
 @pytest.mark.asyncio
 async def test_dream_materials_use_recent_memory_and_whisper_not_daily_impression(test_config):
     cfg = _dream_config(test_config)

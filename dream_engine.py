@@ -101,7 +101,19 @@ class DreamEngine:
         cfg = config.get("dream", {}) if isinstance(config.get("dream", {}), dict) else {}
         state_dir = Path(config.get("state_dir") or ".").expanduser().resolve()
 
-        self.enabled = _bool_env("OMBRE_DREAM_ENABLED", bool(cfg.get("enabled", True)))
+        # 2026-07-17 real bug (found by Yi Lan: the Dashboard's dream on/off
+        # toggle had no effect): OMBRE_DREAM_ENABLED used to win unconditionally
+        # whenever it was set at all, permanently overriding whatever config/
+        # the Dashboard said -- not just serving as a first-run default. The
+        # README tells everyone to set it in .env during setup, so this broke
+        # the toggle for every deployment that followed that instruction. Fix:
+        # an explicit `enabled` in config (which the Dashboard always writes)
+        # wins; the env var is only consulted when config doesn't have an
+        # opinion yet (fresh install, no dream.enabled key written anywhere).
+        if "enabled" in cfg:
+            self.enabled = bool(cfg.get("enabled"))
+        else:
+            self.enabled = _bool_env("OMBRE_DREAM_ENABLED", True)
         self.auto_enabled = bool(cfg.get("auto_enabled", True))
         self.surface_enabled = bool(cfg.get("surface_enabled", True))
         self.base_url = (

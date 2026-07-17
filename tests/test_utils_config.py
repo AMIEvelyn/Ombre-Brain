@@ -57,6 +57,59 @@ def test_load_config_reads_runtime_config_before_env_override(tmp_path, monkeypa
     assert config["dream"]["base_url"] == "https://env.example"
 
 
+def test_load_config_dream_enabled_survives_restart_despite_conflicting_env_var(tmp_path, monkeypatch):
+    """Real bug (2026-07-17, Yi Lan): the Dashboard's dream on/off toggle
+    persists to config.runtime.yaml, but OMBRE_DREAM_ENABLED (which the
+    README tells everyone to set in .env during setup) used to win
+    unconditionally on every restart, silently reverting a saved "off" back
+    to "on" -- the toggle looked like it worked (saved fine, no error) but
+    had no lasting effect. A saved choice must survive a restart even with
+    the env var still set to the opposite value."""
+    runtime_path = tmp_path / "state" / "config.runtime.yaml"
+    runtime_path.parent.mkdir()
+    runtime_path.write_text("dream:\n  enabled: false\n", encoding="utf-8")
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(runtime_path.parent))
+    monkeypatch.setenv("OMBRE_DREAM_ENABLED", "true")  # the conflicting env var
+
+    config = load_config(str(tmp_path / "missing-config.yaml"))
+
+    assert config["dream"]["enabled"] is False  # the Dashboard's saved choice wins
+
+
+def test_load_config_dream_env_var_still_bootstraps_a_fresh_install(tmp_path, monkeypatch):
+    """The other half of the same fix: before the Dashboard has ever saved a
+    preference (no config.runtime.yaml entry for dream.enabled at all), the
+    env var must still work as the documented first-run default."""
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("OMBRE_DREAM_ENABLED", "false")
+
+    config = load_config(str(tmp_path / "missing-config.yaml"))
+
+    assert config["dream"]["enabled"] is False
+
+
+def test_load_config_embedding_reranker_recall_diagnostics_same_fix(tmp_path, monkeypatch):
+    """Same restart-reverts-your-choice bug existed for three other toggles
+    that follow the identical env-var-bootstrap pattern -- fixed the same way."""
+    runtime_path = tmp_path / "state" / "config.runtime.yaml"
+    runtime_path.parent.mkdir()
+    runtime_path.write_text(
+        "embedding:\n  enabled: false\nreranker:\n  enabled: false\n"
+        "recall_diagnostics:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OMBRE_STATE_DIR", str(runtime_path.parent))
+    monkeypatch.setenv("OMBRE_EMBEDDING_ENABLED", "true")
+    monkeypatch.setenv("OMBRE_RERANKER_ENABLED", "true")
+    monkeypatch.setenv("OMBRE_RECALL_DIAGNOSTICS_ENABLED", "false")
+
+    config = load_config(str(tmp_path / "missing-config.yaml"))
+
+    assert config["embedding"]["enabled"] is False
+    assert config["reranker"]["enabled"] is False
+    assert config["recall_diagnostics"]["enabled"] is True
+
+
 def test_parse_human_date_reference_accepts_common_memory_formats():
     now = datetime(2026, 6, 15, tzinfo=ZoneInfo("Asia/Shanghai"))
 
