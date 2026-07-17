@@ -1133,10 +1133,13 @@ class CardStore:
         return [c for c in (self.get_card(r["id"]) for r in rows) if c]
 
     def search_cards(self, query: str, *, folder_id: str = "", recursive: bool = True) -> list[dict]:
-        """Find cards whose current revision matches query (case-insensitive
-        substring over title/content/tags). Optionally scope to a folder subtree.
-        Empty query returns everything in scope. Fuzzy matching can be layered on
-        later; substring is deterministic and dependency-free for now."""
+        """Find cards whose id or current revision matches query (case-
+        insensitive substring over id/title/content/tags -- 2026-07-17,
+        Yi Lan's request: pasting a card id, e.g. to find "the other card"
+        for merge, should work here too, not just an exact get_card hit).
+        Optionally scope to a folder subtree. Empty query returns everything
+        in scope. Fuzzy matching can be layered on later; substring is
+        deterministic and dependency-free for now."""
         cards = self.list_cards_in_folder(folder_id, recursive=recursive) if folder_id else self.all_cards()
         q = str(query or "").strip().lower()
         if not q:
@@ -1145,6 +1148,7 @@ class CardStore:
         for card in cards:
             cur = card.get("current") or {}
             hay = " ".join([
+                str(card.get("id", "")),
                 str(cur.get("title", "")),
                 str(cur.get("content", "")),
                 " ".join(str(t) for t in (cur.get("tags") or [])),

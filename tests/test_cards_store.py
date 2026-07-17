@@ -629,6 +629,17 @@ def test_merge_preview_matches_actual_merge_outcome():
     assert len(s.get_card(a)["history"]) == preview["revision_count_after"]
 
 
+def test_search_cards_matches_by_id_substring_too():
+    # 2026-07-17, Yi Lan's request: finding "the other card" for merge by
+    # pasting a (partial) id should work, not just title/content/tags.
+    s = _store()
+    cid = s.create_card(title="不相关的标题", content="不相关的内容")
+    other = s.create_card(title="完全不搭边", content="也不搭边")
+    assert [c["id"] for c in s.search_cards(cid)] == [cid]
+    assert [c["id"] for c in s.search_cards(cid[:6])] == [cid]  # partial id still matches
+    assert other not in [c["id"] for c in s.search_cards(cid)]
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

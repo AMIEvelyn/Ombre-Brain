@@ -8994,7 +8994,7 @@ async function cardsV2RunMergeSearch(){
     if (!cards.length){ body.innerHTML = '<div class="loading" style="font-size:12px;">没搜到匹配的卡（也可能就是这张卡自己）。</div>'; return; }
     body.innerHTML = cards.map(function(c){
       var cur = c.current || {};
-      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(cur.title||'(无标题)') + '</div><div class="facts-bucket-result-meta"><div>' + esc(c.id) + '</div></div></div><span class="facts-bucket-result-add" onclick="cardsV2PickMergeTarget(\'' + esc(c.id) + '\')">选它</span></div>';
+      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(cur.title||'(无标题)') + '</div><div class="facts-bucket-result-meta"><div>' + esc(c.id) + '</div></div></div><span class="facts-bucket-result-add" title="选这张卡合并" onclick="cardsV2PickMergeTarget(\'' + esc(c.id) + '\')">→</span></div>';
     }).join('');
   } catch(e){ body.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>'; }
 }
