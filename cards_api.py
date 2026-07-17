@@ -121,6 +121,20 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"status": "created", "card": store.get_card(card_id)})
 
+    async def list_cards(request):
+        """?q= substring search across every card's current title/content/tags
+        (store.search_cards) -- used by the Dashboard's merge tool to find
+        "the other card" (there's no other global card browser; folders are
+        the normal navigation). Empty/missing q returns nothing rather than
+        every card, since that's the only way this endpoint gets called."""
+        err = _guard(request)
+        if err:
+            return err
+        q = str(request.query_params.get("q") or "").strip()
+        if not q:
+            return JSONResponse({"cards": []})
+        return JSONResponse({"cards": store.search_cards(q)})
+
     async def get_card(request):
         err = _guard(request)
         if err:
@@ -360,7 +374,7 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         if not bucket_id:
             return JSONResponse({"error": "bucket_id required"}, status_code=400)
         try:
-            added = store.add_bucket_link(card_id, bucket_id, relation_type=str(body.get("relation_type") or "evidence"), note=str(body.get("note") or ""))
+            added = store.add_bucket_link(card_id, bucket_id, note=str(body.get("note") or ""))
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"status": "linked" if added else "already_linked", "bucket_id": bucket_id})
@@ -376,9 +390,45 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             return JSONResponse({"error": "link not found"}, status_code=404)
         return JSONResponse({"status": "unlinked", "card_id": card_id, "bucket_id": bucket_id})
 
+    # ---- merge / dedup (§14 item 4) ----------------------------------
+    async def merge_preview(request):
+        err = _guard(request)
+        if err:
+            return err
+        body = await _body(request)
+        card_a = str(body.get("card_a") or "").strip()
+        card_b = str(body.get("card_b") or "").strip()
+        if not card_a or not card_b:
+            return JSONResponse({"error": "card_a and card_b required"}, status_code=400)
+        try:
+            preview = store.merge_preview(card_a, card_b)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"preview": preview})
+
+    async def merge_cards(request):
+        err = _guard(request)
+        if err:
+            return err
+        body = await _body(request)
+        card_a = str(body.get("card_a") or "").strip()
+        card_b = str(body.get("card_b") or "").strip()
+        keep = str(body.get("keep") or "").strip()
+        if not card_a or not card_b or not keep:
+            return JSONResponse({"error": "card_a, card_b and keep are required"}, status_code=400)
+        if keep not in (card_a, card_b):
+            return JSONResponse({"error": "keep must be card_a or card_b"}, status_code=400)
+        discard = card_b if keep == card_a else card_a
+        try:
+            result = store.merge_cards(keep, discard)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"status": "merged", "result": result, "card": store.get_card(result["kept_id"])})
+
     # ---- register everything ----------------------------------------
     routes = [
         ("/api/cards-skeleton/cards", ["POST"], create_card),
+        ("/api/cards-skeleton/cards", ["GET"], list_cards),
         ("/api/cards-skeleton/cards/{card_id}", ["GET"], get_card),
         ("/api/cards-skeleton/cards/{card_id}", ["PATCH"], edit_card),
         ("/api/cards-skeleton/cards/{card_id}", ["DELETE"], delete_card),
@@ -396,6 +446,8 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         ("/api/cards-skeleton/cards/{card_id}/buckets", ["GET"], card_buckets),
         ("/api/cards-skeleton/cards/{card_id}/buckets", ["POST"], add_card_bucket),
         ("/api/cards-skeleton/cards/{card_id}/buckets/{bucket_id}", ["DELETE"], remove_card_bucket),
+        ("/api/cards-skeleton/cards/merge/preview", ["POST"], merge_preview),
+        ("/api/cards-skeleton/cards/merge", ["POST"], merge_cards),
     ]
     for path, methods, handler in routes:
         mcp.custom_route(path, methods=methods)(handler)

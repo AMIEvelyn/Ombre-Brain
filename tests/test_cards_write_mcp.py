@@ -43,6 +43,7 @@ def main():
         "card_create", "card_create_folder", "card_add_to_folder", "card_remove_from_folder",
         "card_edit_title", "card_edit_tags", "card_edit_content",
         "card_new_revision", "card_link_bucket", "card_unlink_bucket",
+        "card_merge_preview", "card_merge",
     }
     assert "card_delete" not in mcp.tools  # deliberately scoped out, see docstring
     # 2026-07-17, second pass: card_add_content/card_delete_content are gone --
@@ -219,12 +220,33 @@ def main():
     assert "本来就没关联" in unlink_again
     print("PASS card_link_bucket/card_unlink_bucket: idempotent link, real unlink")
 
+    # --- card_merge_preview / card_merge (§14 item 4) ---
+    card_merge_preview = mcp.tools["card_merge_preview"]
+    card_merge = mcp.tools["card_merge"]
+    dup_a = store.create_card(title="体重记录A", content="120斤", tags=["健康"], valid_at="2026-01-01")
+    dup_b = store.create_card(title="瘦了", content="115斤", tags=["减肥"], valid_at="2026-02-01")
+    preview_out = _run(card_merge_preview(card_a="体重记录A", card_b="瘦了"))
+    assert "合并预览" in preview_out and "2 条时间点" in preview_out
+    merge_out = _run(card_merge(card_a="体重记录A", card_b="瘦了", keep="体重记录A"))
+    assert "已合并" in merge_out and dup_b in merge_out
+    merged = store.get_card(dup_a)
+    assert len(merged["history"]) == 2
+    assert set(merged["current"]["tags"]) == {"健康", "减肥"}
+    # the discarded id now transparently resolves to the kept card
+    assert store.get_card(dup_b)["id"] == dup_a
+    print("PASS card_merge_preview/card_merge: interleaves timeline, unions tags, old id redirects")
+
+    keep_missing = _run(card_merge(card_a="体重记录A", card_b="瘦了", keep="不存在的卡"))
+    assert "没找到" in keep_missing
+    print("PASS card_merge: keep must resolve to a real card")
+
     # --- missing-card resolution shared across all write tools ---
     for fn, kwargs in [
         (card_edit_title, {"card": "不存在的卡", "title": "x"}),
         (card_edit_content, {"card": "不存在的卡", "content": "x"}),
         (card_new_revision, {"card": "不存在的卡"}),
         (card_link_bucket, {"card": "不存在的卡", "bucket_id": "b1"}),
+        (card_merge_preview, {"card_a": "不存在的卡", "card_b": "瘦了"}),
     ]:
         out = _run(fn(**kwargs))
         assert "没找到" in out, (fn.__name__, out)
@@ -246,8 +268,9 @@ def real_fastmcp_registration_smoke_test():
     cards_mcp.register_card_write_tools(mcp, store)
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
-    assert len(names) == 17, names  # 2026-07-17: card_add_content/card_delete_content folded into card_edit_content
+    assert len(names) == 19, names  # 2026-07-17: +card_merge_preview, +card_merge (§14 item 4)
     assert "card_create" in names and "card_lookup" in names
+    assert "card_merge_preview" in names and "card_merge" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")
 
 

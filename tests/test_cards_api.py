@@ -288,6 +288,32 @@ def main():
     assert st == 200 and r["card"]["current"]["title_author"] == AUTHOR_YI_LAN, r
     print("PASS edit_card: title_author only reassigned when the title text actually changes")
 
+    # --- GET /cards?q= : card search, backs the Dashboard's merge-tool card picker ---
+    st, r = _call(mcp, "POST", C, body={"title": "搜索测试卡", "content": "内容"})
+    search_cid = r["card"]["id"]
+    st, r = _call(mcp, "GET", C, query={})
+    assert st == 200 and r["cards"] == [], r  # no q -- deliberately empty, not "everything"
+    st, r = _call(mcp, "GET", C, query={"q": "搜索测试卡"})
+    assert st == 200 and any(c["id"] == search_cid for c in r["cards"]), r
+    print("PASS GET /cards?q=: empty query returns nothing, real query finds the card")
+
+    # --- merge / dedup (§14 item 4) ---
+    dup_a = store.create_card(title="体重记录A", content="120斤", tags=["健康"], valid_at="2026-01-01")
+    dup_b = store.create_card(title="瘦了", content="115斤", tags=["减肥"], valid_at="2026-02-01")
+    st, r = _call(mcp, "POST", C + "/merge/preview", body={"card_a": dup_a, "card_b": dup_b})
+    assert st == 200 and r["preview"]["revision_count_after"] == 2, r
+    st, r = _call(mcp, "POST", C + "/merge", body={"card_a": dup_a, "card_b": dup_b, "keep": dup_a})
+    assert st == 200 and r["result"]["kept_id"] == dup_a and r["result"]["discarded_id"] == dup_b, r
+    assert set(r["card"]["current"]["tags"]) == {"健康", "减肥"}
+    st, r = _call(mcp, "GET", C + "/{card_id}", path_params={"card_id": dup_b})
+    assert st == 200 and r["card"]["id"] == dup_a, r  # old id transparently redirects
+    # bad requests
+    st, r = _call(mcp, "POST", C + "/merge", body={"card_a": dup_a, "card_b": dup_b, "keep": "somewhere-else"})
+    assert st == 400, r
+    st, r = _call(mcp, "POST", C + "/merge/preview", body={"card_a": dup_a, "card_b": dup_a})
+    assert st == 400, r  # can't merge a card with itself
+    print("PASS merge/preview + merge: unions tags, redirects old id, rejects bad keep/self-merge")
+
     print(f"\nAll cards_api endpoint tests passed. ({len(mcp.routes)} routes registered)")
 
 

@@ -491,6 +491,144 @@ def test_content_editor_save_flow_via_parse_content_text():
         assert e.author == AUTHOR_LIN_ZHAN and "林湛写的" in e.text_preview
 
 
+def test_merge_interleaves_revisions_and_leaves_each_timepoint_untouched():
+    s = _store()
+    a = s.create_card(title="香港旅行A", content="出发", valid_at="2026-03-01")
+    s.add_revision(a, content="到景点", valid_at="2026-03-03")
+    b = s.create_card(title="香港旅行B", content="午饭", valid_at="2026-03-02")
+    s.add_revision(b, content="回家", valid_at="2026-03-05")
+    result = s.merge_cards(a, b)
+    assert result["kept_id"] == a and result["discarded_id"] == b
+    assert result["revisions_merged"] == 2
+    card = s.get_card(a)
+    contents_in_order = [h["content"] for h in card["history"]]  # newest first
+    assert contents_in_order == ["一澜：回家", "一澜：到景点", "一澜：午饭", "一澜：出发"]
+    assert card["current"]["content"] == "一澜：回家"  # b's latest wins overall
+
+
+def test_merge_unions_folders_and_buckets_dedup_by_id():
+    s = _store()
+    shared = s.create_folder("旅行")
+    only_a = s.create_folder("一澜收藏")
+    only_b = s.create_folder("我们")
+    a = s.create_card(title="A", content="x", folder_ids=[shared, only_a])
+    b = s.create_card(title="B", content="y", folder_ids=[shared, only_b])
+    s.add_bucket_link(a, "bucket1")
+    s.add_bucket_link(a, "bucket_shared")
+    s.add_bucket_link(b, "bucket_shared")  # overlap -- dedup, not duplicated
+    s.add_bucket_link(b, "bucket2")
+    s.merge_cards(a, b)
+    folder_ids = {f["id"] for f in s.get_card_folders(a)}
+    assert folder_ids == {shared, only_a, only_b}
+    bucket_ids = {link["bucket_id"] for link in s.get_bucket_links(a)}
+    assert bucket_ids == {"bucket1", "bucket2", "bucket_shared"}
+    # the discarded card's own membership rows are gone, not duplicated
+    assert s.get_card_folders(b) == s.get_card_folders(a)  # b now resolves through to a
+
+
+def test_merge_unions_current_tags_without_rewriting_either_revisions_own_tags():
+    s = _store()
+    a = s.create_card(title="A", content="x", tags=["旅行", "云南"], valid_at="2026-01-01")
+    b = s.create_card(title="B", content="y", tags=["云南", "洱海", "纪念"], valid_at="2026-01-02")
+    s.merge_cards(a, b)
+    card = s.get_card(a)
+    assert card["current"]["tags"] == ["旅行", "云南", "洱海", "纪念"]  # union, order-stable, deduped
+    # the underlying revision row's own tags column was never rewritten
+    raw = [h for h in card["history"] if h["title"] == "A"][0]
+    assert raw["tags"] == ["旅行", "云南"]
+
+
+def test_merge_tags_override_cleared_by_next_explicit_tag_edit():
+    s = _store()
+    a = s.create_card(title="A", content="x", tags=["旅行"], valid_at="2026-01-01")
+    b = s.create_card(title="B", content="y", tags=["洱海"], valid_at="2026-01-02")
+    s.merge_cards(a, b)
+    assert s.get_card(a)["current"]["tags"] == ["旅行", "洱海"]
+    s.edit_current(a, tags=["新标签"])
+    assert s.get_card(a)["current"]["tags"] == ["新标签"]  # override superseded, not appended to
+
+
+def test_merge_attachments_all_kept_no_dedup():
+    s = _store()
+    a = s.create_card(title="A", content="x", attachments=[{"type": "image", "url": "/x/1.png"}])
+    b = s.create_card(title="B", content="y", attachments=[{"type": "image", "url": "/x/1.png"}])  # same content, different upload
+    s.merge_cards(a, b)
+    total_attachments = sum(len(h["attachments"]) for h in s.get_card(a)["history"])
+    assert total_attachments == 2  # both kept, no content-hash dedup (Yi Lan's call)
+
+
+def test_merge_discard_id_becomes_permanent_redirect():
+    s = _store()
+    a = s.create_card(title="A", content="x")
+    b = s.create_card(title="B", content="y")
+    folder = s.create_folder("某馆")
+    s.merge_cards(a, b)
+    # every id-taking read/write transparently resolves the old id
+    assert s.get_card(b)["id"] == a
+    assert s.get_current_revision(b) == s.get_current_revision(a)
+    assert s.list_revisions(b) == s.list_revisions(a)
+    s.add_revision(b, content="改到旧id上", valid_at="2099-01-01")
+    assert s.get_current_revision(a)["content"] == "一澜：改到旧id上"
+    assert s.add_card_to_folder(b, folder)
+    assert folder in [f["id"] for f in s.get_card_folders(a)]
+    assert s.add_bucket_link(b, "some_bucket")
+    assert "some_bucket" in [l["bucket_id"] for l in s.get_bucket_links(a)]
+
+
+def test_merge_flattens_tombstone_chains_no_multi_hop_redirect():
+    s = _store()
+    a = s.create_card(title="A", content="x")
+    b = s.create_card(title="B", content="y")
+    c = s.create_card(title="C", content="z")
+    s.merge_cards(a, b)  # b -> a
+    s.merge_cards(c, a)  # a (and everything pointing at it) -> c
+    assert s._resolve_id(a) == c
+    assert s._resolve_id(b) == c  # flattened directly to c, not a two-hop chain through a
+    assert s.get_card(b)["id"] == c
+    assert s.get_card(a)["id"] == c
+
+
+def test_merge_rejects_same_card_and_already_merged_pair():
+    s = _store()
+    a = s.create_card(title="A", content="x")
+    b = s.create_card(title="B", content="y")
+    try:
+        s.merge_cards(a, a)
+        assert False, "should have raised"
+    except ValueError:
+        pass
+    s.merge_cards(a, b)
+    try:
+        s.merge_cards(a, b)  # b already resolves to a now
+        assert False, "should have raised"
+    except ValueError:
+        pass
+
+
+def test_all_cards_excludes_merge_tombstones():
+    s = _store()
+    a = s.create_card(title="A", content="x")
+    b = s.create_card(title="B", content="y")
+    s.merge_cards(a, b)
+    ids = [c["id"] for c in s.all_cards()]
+    assert ids.count(a) == 1  # not doubled up via b's tombstone resolving back to it
+    assert b not in ids
+
+
+def test_merge_preview_matches_actual_merge_outcome():
+    s = _store()
+    a = s.create_card(title="A", content="x", tags=["t1"], valid_at="2026-01-01")
+    s.add_revision(a, content="x2", valid_at="2026-01-02")
+    b = s.create_card(title="B", content="y", tags=["t2"], valid_at="2026-01-03")
+    preview = s.merge_preview(a, b)
+    assert preview["revision_count_after"] == 3
+    assert preview["tags_after"] == ["t1", "t2"]
+    result = s.merge_cards(a, b)
+    assert result["revisions_merged"] == 1  # only b's own revision count, matching preview's card_b
+    assert result["tags_after"] == preview["tags_after"]
+    assert len(s.get_card(a)["history"]) == preview["revision_count_after"]
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

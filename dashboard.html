@@ -3693,6 +3693,16 @@
   </div>
 </div>
 
+<div id="cards-v2-merge-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2MergeModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2MergeModal()">‹</button><span>合并到另一张卡</span></div>
+    <div class="profile-proposal-form">
+      <input type="text" id="cards-v2-merge-search" placeholder="搜另一张卡的标题，回车搜索" onkeydown="cardsV2OnMergeSearchKeydown(event)" style="grid-column:1/-1;width:100%;" />
+    </div>
+    <div id="cards-v2-merge-body"><div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div></div>
+  </div>
+</div>
+
 <div class="content" id="word-map-view" style="display:none">
   <div class="word-map-shell">
     <div class="word-map-toolbar">
@@ -5066,7 +5076,7 @@ async function loadProfileFacts() {
 
 
 var FACTS_CONTENT_COLLAPSE_CHARS = 120;
-// bucket_id -> {bucket_id,name,date,domain,relation_type} picks not yet POSTed
+// bucket_id -> {bucket_id,name,date,domain} picks not yet POSTed
 // (flushed to /api/facts-skeleton/facts/{id}/buckets on Add/Save, same
 // "queue then flush" pattern as attachments/tags).
  // last search hits, referenced by index from result-row onclicks
@@ -5148,8 +5158,8 @@ var FACTS_CONTENT_COLLAPSE_CHARS = 120;
 // used for attachments/tags in these same forms.
 // ------------------------------------------------------------------
 
-// Each of relation_type/id/date/domain on its own line (not slash-joined
-// on one line) per Yi Lan's spec -- caller wraps this in a container div.
+// Each of id/date/domain on its own line (not slash-joined on one line)
+// per Yi Lan's spec -- caller wraps this in a container div.
 
 
 
@@ -8569,6 +8579,7 @@ function renderCardsV2Detail(){
     + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
     + '<div onclick="openCardsV2BucketsModal()">🫙 View Bucket' + (buckets.length ? '（' + buckets.length + '）' : '') + '</div>'
     + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
+    + '<div onclick="openCardsV2MergeModal()">🔗 合并到另一张卡</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
     + '</div></div>';
   var titleColor = CARDS_V2_AUTHOR_COLOR[cur.title_author] || '';
@@ -8960,6 +8971,79 @@ async function cardsV2LinkBucketDirect(bucketId){
   var span = res && res.querySelector('span[data-bucket-id="' + bucketId + '"]');
   if (span) { span.outerHTML = '<span class="facts-bucket-result-add added" data-bucket-id="' + esc(bucketId) + '">✓</span>'; }
 }
+// ---- Merge / dedup (docs/facts-model-v2-collection-redesign.md §14 item 4) ----
+// Manual, deterministic: pick the other card, preview the interleaved result,
+// pick which id survives, confirm. No auto-detection of duplicates anywhere.
+function openCardsV2MergeModal(){
+  if (!cardsV2.detail) return; toggleCardsV2Menu();
+  var si = document.getElementById('cards-v2-merge-search'); if (si) { si.value = ''; si.focus(); }
+  document.getElementById('cards-v2-merge-body').innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>';
+  document.getElementById('cards-v2-merge-overlay').style.display = '';
+}
+function closeCardsV2MergeModal(){ document.getElementById('cards-v2-merge-overlay').style.display = 'none'; }
+function cardsV2OnMergeSearchKeydown(event){ if (event.key !== 'Enter') return; event.preventDefault(); cardsV2RunMergeSearch(); }
+async function cardsV2RunMergeSearch(){
+  var input = document.getElementById('cards-v2-merge-search'); var body = document.getElementById('cards-v2-merge-body');
+  if (!input || !body || !cardsV2.detail) return; var q = (input.value||'').trim();
+  if (!q){ body.innerHTML = '<div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div>'; return; }
+  body.innerHTML = '<div class="loading" style="font-size:12px;">搜索中…</div>';
+  try {
+    var r = await fetch('/api/cards-skeleton/cards?q=' + encodeURIComponent(q)); var d = await r.json().catch(function(){return {};});
+    if (!r.ok) throw new Error(d.error||'搜索失败');
+    var cards = (Array.isArray(d.cards) ? d.cards : []).filter(function(c){ return c.id !== cardsV2.detail.id; });
+    if (!cards.length){ body.innerHTML = '<div class="loading" style="font-size:12px;">没搜到匹配的卡（也可能就是这张卡自己）。</div>'; return; }
+    body.innerHTML = cards.map(function(c){
+      var cur = c.current || {};
+      return '<div class="facts-bucket-result-row"><div class="facts-bucket-result-info"><div class="facts-bucket-result-name">' + esc(cur.title||'(无标题)') + '</div><div class="facts-bucket-result-meta"><div>' + esc(c.id) + '</div></div></div><span class="facts-bucket-result-add" onclick="cardsV2PickMergeTarget(\'' + esc(c.id) + '\')">选它</span></div>';
+    }).join('');
+  } catch(e){ body.innerHTML = '<div class="loading" style="font-size:12px;">搜索失败: ' + esc(e.message) + '</div>'; }
+}
+async function cardsV2PickMergeTarget(otherId){
+  if (!cardsV2.detail) return;
+  var body = document.getElementById('cards-v2-merge-body');
+  body.innerHTML = '<div class="loading" style="font-size:12px;">读取预览中…</div>';
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/merge/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ card_a: cardsV2.detail.id, card_b: otherId }) });
+    var d = await r.json().catch(function(){return {};});
+    if (!r.ok) throw new Error(d.error||'预览失败');
+    cardsV2RenderMergePreview(d.preview);
+  } catch(e){ body.innerHTML = '<div class="loading" style="font-size:12px;">预览失败: ' + esc(e.message) + '</div>'; }
+}
+function cardsV2RenderMergePreview(preview){
+  var body = document.getElementById('cards-v2-merge-body'); if (!body) return;
+  var a = preview.card_a, b = preview.card_b;
+  var h = '<div style="font-size:13px;line-height:1.7;">';
+  h += '<div><b>' + esc(a.title||'(无标题)') + '</b>（' + a.revision_count + ' 条历史）</div>';
+  h += '<div>+ <b>' + esc(b.title||'(无标题)') + '</b>（' + b.revision_count + ' 条历史）</div>';
+  h += '<div style="margin-top:8px;">合并后：' + preview.revision_count_after + ' 条时间点交错排成一条时间线，每个原时间点原封不动</div>';
+  if (preview.tags_after && preview.tags_after.length) h += '<div>标签（并集）：' + preview.tags_after.map(function(t){ return '#' + esc(t); }).join(' ') + '</div>';
+  if (preview.folder_paths_after && preview.folder_paths_after.length) h += '<div>所在文件夹（并集）：' + preview.folder_paths_after.map(esc).join('、') + '</div>';
+  h += '<div>关联记忆桶（并集）：' + preview.bucket_count_after + ' 个</div>';
+  h += '<div>附件总数：' + preview.attachment_count_after + '（全部保留，不做去重）</div>';
+  h += '</div>';
+  h += '<div style="margin-top:14px;font-size:13px;">合并后保留哪一张的 id？</div>';
+  h += '<div style="margin-top:6px;"><label style="display:block;margin-bottom:6px;"><input type="radio" name="cards-v2-merge-keep" value="' + esc(a.id) + '" checked> ' + esc(a.title||'(无标题)') + '（当前这张）</label>';
+  h += '<label style="display:block;"><input type="radio" name="cards-v2-merge-keep" value="' + esc(b.id) + '"> ' + esc(b.title||'(无标题)') + '</label></div>';
+  h += '<button type="button" class="facts-form-submit" style="margin-top:14px;" onclick="cardsV2ConfirmMerge(\'' + esc(a.id) + '\',\'' + esc(b.id) + '\')">确认合并</button>';
+  body.innerHTML = h;
+}
+async function cardsV2ConfirmMerge(aId, bId){
+  var keep = document.querySelector('input[name="cards-v2-merge-keep"]:checked');
+  if (!keep) return;
+  if (!confirm('确定要合并吗？另一张卡的 id 会永久重定向到保留的这张，不会再单独出现，也不会丢数据。')) return;
+  var body = document.getElementById('cards-v2-merge-body');
+  body.innerHTML = '<div class="loading" style="font-size:12px;">合并中…</div>';
+  var keptId = keep.value;
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/merge', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ card_a: aId, card_b: bId, keep: keptId }) });
+    var d = await r.json().catch(function(){return {};});
+    if (!r.ok) throw new Error(d.error||'合并失败');
+  } catch(e){ body.innerHTML = '<div class="loading" style="font-size:12px;">合并失败: ' + esc(e.message) + '</div>'; return; }
+  closeCardsV2MergeModal();
+  cardsV2.detail = { id: keptId };
+  await cardsV2ReloadDetail();
+  loadCardsV2();
+}
 async function cardsV2LoadBuckets(){
   var card = cardsV2.detail; if (!card) return;
   var links = [];
@@ -8971,7 +9055,7 @@ async function cardsV2LoadBuckets(){
     var b = l.bucket;
     var name = b ? (b.name || l.bucket_id) : (l.bucket_id + '（桶已不存在）');
     var domain = b && Array.isArray(b.domain) && b.domain.length ? b.domain.join('·') : '';
-    var meta = [l.relation_type||'evidence', l.bucket_id, (b&&(b.date||b.created))||'', domain].filter(Boolean).join(' / ');
+    var meta = [l.bucket_id, (b&&(b.date||b.created))||'', domain].filter(Boolean).join(' / ');
     return '<div class="facts-bucket-links-row" id="cards-v2-bkt-' + esc(l.bucket_id) + '" style="padding:10px 0;border-bottom:1px solid var(--border);">'
       + '<div style="cursor:pointer;" onclick="cardsV2ExpandBucket(\'' + esc(l.bucket_id) + '\')"><b>' + esc(name) + '</b><div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + esc(meta) + '</div></div>'
       + '<div class="cards-v2-bkt-full" style="display:none;font-size:13px;margin-top:8px;color:var(--text-dim);white-space:pre-wrap;"></div>'

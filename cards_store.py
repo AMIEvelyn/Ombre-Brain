@@ -93,7 +93,9 @@ class CardStore:
             """
             CREATE TABLE IF NOT EXISTS cards (
                 id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                merged_into TEXT NOT NULL DEFAULT '',
+                tags_override TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS card_revisions (
@@ -142,6 +144,14 @@ class CardStore:
         )
         conn.commit()
         self._migrate_authorship_columns(conn)
+        self._migrate_merge_columns(conn)
+        # 2026-07-17 (Yi Lan + Lin Zhan): relation_type on card_buckets
+        # (evidence/origin/related) turned out never to be used by either of
+        # them in practice -- everything is 'evidence' -- so it's retired as
+        # a real distinction. Cheap to normalize any stray value on every
+        # startup; a no-op once nothing but 'evidence' exists.
+        conn.execute("UPDATE card_buckets SET relation_type = 'evidence' WHERE relation_type != 'evidence'")
+        conn.commit()
         conn.close()
 
     def _migrate_authorship_columns(self, conn: sqlite3.Connection) -> None:
@@ -203,6 +213,59 @@ class CardStore:
             if rendered != row["content"]:
                 conn.execute("UPDATE card_revisions SET content = ? WHERE id = ?", (rendered, row["id"]))
         conn.commit()
+
+    def _migrate_merge_columns(self, conn: sqlite3.Connection) -> None:
+        """Migration-safe ALTER TABLE for the merge/dedup tool (2026-07-17,
+        docs/facts-model-v2-collection-redesign.md §14 item 4):
+
+        merged_into: a permanent redirect pointer, set on the discarded card
+        when two cards get merged (merge_cards). Distinct from the eventual
+        card recycle bin (§14 item 7, for real deletions with a restore/purge
+        window) -- a merge tombstone never gets purged, it's not "pending
+        deletion", the discarded id's data all still lives under the kept
+        id forever, this is just so an old id never dead-ends.
+
+        tags_override: holds the union of both cards' current tags right
+        after a merge, without rewriting either original revision's own
+        `tags` column (Lin Zhan's call: the timeline's real timepoints stay
+        byte-for-byte untouched; only the card-level "what tags show right
+        now" reads through this instead). Cleared back to '' the next time
+        anyone explicitly sets tags (edit_current/add_revision with a real
+        tags= value) -- from then on the ordinary latest-revision tags take
+        over again, same as any card that was never merged.
+
+        Both default to '' for every pre-existing row via the column
+        DEFAULT itself -- '' means "not merged" / "no override", a no-op."""
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
+        if "merged_into" not in existing:
+            conn.execute("ALTER TABLE cards ADD COLUMN merged_into TEXT NOT NULL DEFAULT ''")
+        if "tags_override" not in existing:
+            conn.execute("ALTER TABLE cards ADD COLUMN tags_override TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+    def _resolve_id(self, card_id: str) -> str:
+        """Follow a card's merged_into tombstone pointer to the canonical
+        living card id, if it was ever merged away. The overwhelming common
+        case (never merged) resolves to itself with one cheap SELECT. The
+        hop-count bound is defensive only -- merge_cards() flattens every
+        existing tombstone that pointed at the card being discarded, so a
+        chain longer than one hop should never actually occur."""
+        card_id = str(card_id or "")
+        if not card_id:
+            return card_id
+        conn = self._connect()
+        seen: set[str] = set()
+        current = card_id
+        for _ in range(10):
+            if current in seen:
+                break
+            seen.add(current)
+            row = conn.execute("SELECT merged_into FROM cards WHERE id = ?", (current,)).fetchone()
+            if not row or not row["merged_into"]:
+                break
+            current = row["merged_into"]
+        conn.close()
+        return current
 
     @staticmethod
     def _now_iso() -> str:
@@ -408,6 +471,7 @@ class CardStore:
         in the new segment list), raises SegmentOwnershipError unless
         force=True -- same rule, same exception shape, as edit_current's
         whole-content replace."""
+        card_id = self._resolve_id(card_id)
         author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
@@ -449,6 +513,8 @@ class CardStore:
             ),
         )
         rev_id = cursor.lastrowid
+        if tags is not None:
+            conn.execute("UPDATE cards SET tags_override = '' WHERE id = ?", (card_id,))
         conn.commit()
         conn.close()
         return rev_id
@@ -486,6 +552,7 @@ class CardStore:
         SegmentOwnershipError instead of silently overwriting someone
         else's words. Use add_content_segment to add your own text without
         touching what's already there (never needs force)."""
+        card_id = self._resolve_id(card_id)
         author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
@@ -519,6 +586,8 @@ class CardStore:
             f"UPDATE card_revisions SET {set_clause} WHERE id = ?",
             (*updates.values(), int(current["id"])),
         )
+        if tags is not None:
+            conn.execute("UPDATE cards SET tags_override = '' WHERE id = ?", (card_id,))
         conn.commit()
         conn.close()
         return True
@@ -607,6 +676,7 @@ class CardStore:
         return True
 
     def get_current_revision(self, card_id: str) -> dict | None:
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         row = conn.execute(
             """
@@ -620,6 +690,7 @@ class CardStore:
 
     def list_revisions(self, card_id: str) -> list[dict]:
         """Full timeline, newest first."""
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         rows = conn.execute(
             "SELECT * FROM card_revisions WHERE card_id = ? ORDER BY valid_at DESC, id DESC",
@@ -629,17 +700,29 @@ class CardStore:
         return [self._revision_row(row) for row in rows]
 
     def get_card(self, card_id: str) -> dict | None:
-        """Card with its current state, full history, and folder memberships."""
+        """Card with its current state, full history, and folder memberships.
+        A merged-away id transparently resolves to the card it was merged
+        into (see merge_cards) -- an old id never just dead-ends."""
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (str(card_id),)).fetchone()
         conn.close()
         if not card:
             return None
         history = self.list_revisions(card_id)
+        current = history[0] if history else None
+        if current and card["tags_override"]:
+            try:
+                override_tags = json.loads(card["tags_override"])
+            except (TypeError, ValueError):
+                override_tags = None
+            if override_tags is not None:
+                current = dict(current)
+                current["tags"] = override_tags
         return {
             "id": card["id"],
             "created_at": card["created_at"],
-            "current": history[0] if history else None,
+            "current": current,
             "history": history,
             "folders": self.get_card_folders(card_id),
             "buckets": self.get_bucket_links(card_id),
@@ -755,6 +838,7 @@ class CardStore:
     def add_card_to_folder(self, card_id: str, folder_id: str) -> bool:
         """File a card into a folder. Idempotent -- returns False if it was
         already there (no duplicate row), True if newly linked."""
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         cursor = conn.execute(
             "INSERT OR IGNORE INTO card_folders (card_id, folder_id, created_at) VALUES (?, ?, ?)",
@@ -769,6 +853,7 @@ class CardStore:
         """Unlink a card from one folder. The card itself stays (it may end up
         in zero folders -- an allowed 'unfiled' card). Not the same as
         delete_card."""
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         cursor = conn.execute(
             "DELETE FROM card_folders WHERE card_id = ? AND folder_id = ?",
@@ -783,6 +868,7 @@ class CardStore:
         """Every folder this card is filed into -- backs the QQ-Music-style
         'which folders am I in' manager. is_favorite flags the ones that are
         favorite collections (for the star)."""
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         rows = conn.execute(
             """
@@ -840,18 +926,26 @@ class CardStore:
         return entries
 
     # ==================================================================
-    # card <-> memory-bucket links (evidence / origin / related)
+    # card <-> memory-bucket links (evidence)
     # ==================================================================
-    def add_bucket_link(self, card_id: str, bucket_id: str, *, relation_type: str = "evidence", note: str = "") -> bool:
-        """Link a memory bucket to a card as evidence/origin/related. Idempotent:
-        returns False if that bucket was already linked, True if newly linked."""
+    def add_bucket_link(self, card_id: str, bucket_id: str, *, note: str = "") -> bool:
+        """Link a memory bucket to a card as evidence. Idempotent: returns
+        False if that bucket was already linked, True if newly linked.
+
+        2026-07-17 (Yi Lan + Lin Zhan): dropped the relation_type param
+        (evidence/origin/related) -- neither of them ever actually used
+        anything but the default 'evidence' in practice, so it was retired
+        as a real distinction rather than kept as an unused decision surface.
+        Every link is 'evidence' now; merging two cards' bucket links is a
+        plain union by bucket_id, no relation_type to reconcile."""
+        card_id = self._resolve_id(card_id)
         bucket_id = str(bucket_id or "").strip()
         if not bucket_id:
             raise ValueError("bucket_id is required")
         conn = self._connect()
         cursor = conn.execute(
-            "INSERT OR IGNORE INTO card_buckets (card_id, bucket_id, relation_type, note, created_at) VALUES (?, ?, ?, ?, ?)",
-            (str(card_id), bucket_id, str(relation_type or "evidence"), str(note or ""), self._now_iso()),
+            "INSERT OR IGNORE INTO card_buckets (card_id, bucket_id, relation_type, note, created_at) VALUES (?, ?, 'evidence', ?, ?)",
+            (str(card_id), bucket_id, str(note or ""), self._now_iso()),
         )
         conn.commit()
         added = cursor.rowcount > 0
@@ -859,6 +953,7 @@ class CardStore:
         return added
 
     def remove_bucket_link(self, card_id: str, bucket_id: str) -> bool:
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         cursor = conn.execute(
             "DELETE FROM card_buckets WHERE card_id = ? AND bucket_id = ?",
@@ -870,6 +965,7 @@ class CardStore:
         return removed
 
     def get_bucket_links(self, card_id: str) -> list[dict]:
+        card_id = self._resolve_id(card_id)
         conn = self._connect()
         rows = conn.execute(
             "SELECT * FROM card_buckets WHERE card_id = ? ORDER BY created_at",
@@ -879,11 +975,160 @@ class CardStore:
         return [dict(row) for row in rows]
 
     # ==================================================================
+    # merge / dedup (docs/facts-model-v2-collection-redesign.md §14 item 4)
+    #
+    # Two cards that turned out to describe the same real thing get folded
+    # into one: their timelines interleave by date (revisions are re-parented
+    # to the kept card's id, never rewritten -- every original timepoint's
+    # title/content/attachments stay exactly as recorded), folders and bucket
+    # links union, current tags union (see tags_override on the cards table).
+    # No auto-detection, no guessing which content "wins" -- Yi Lan and Lin
+    # Zhan pick the two cards and which id survives; this just does the
+    # bookkeeping precisely and leaves nothing orphaned or duplicated.
+    # ==================================================================
+    def merge_preview(self, card_a_id: str, card_b_id: str) -> dict:
+        """Non-destructive: what merging these two cards would produce,
+        without touching any data. Call this before merge_cards."""
+        a_id = self._resolve_id(card_a_id)
+        b_id = self._resolve_id(card_b_id)
+        if a_id == b_id:
+            raise ValueError("这两张卡已经是同一张卡了（可能已经被合并过）。")
+        card_a = self.get_card(a_id)
+        card_b = self.get_card(b_id)
+        if not card_a or not card_b:
+            raise ValueError("卡片不存在。")
+        tags_a = [str(t) for t in ((card_a.get("current") or {}).get("tags") or [])]
+        tags_b = [str(t) for t in ((card_b.get("current") or {}).get("tags") or [])]
+        tags_after = list(dict.fromkeys(tags_a + tags_b))
+        folder_ids_after = list(dict.fromkeys(
+            [f["id"] for f in (card_a.get("folders") or [])] + [f["id"] for f in (card_b.get("folders") or [])]
+        ))
+        bucket_ids_after = list(dict.fromkeys(
+            [b["bucket_id"] for b in (card_a.get("buckets") or [])]
+            + [b["bucket_id"] for b in (card_b.get("buckets") or [])]
+        ))
+        attachment_count_after = sum(
+            len(rev.get("attachments") or [])
+            for rev in (card_a.get("history") or []) + (card_b.get("history") or [])
+        )
+        return {
+            "card_a": {
+                "id": a_id,
+                "title": (card_a.get("current") or {}).get("title", ""),
+                "revision_count": len(card_a.get("history") or []),
+            },
+            "card_b": {
+                "id": b_id,
+                "title": (card_b.get("current") or {}).get("title", ""),
+                "revision_count": len(card_b.get("history") or []),
+            },
+            "revision_count_after": len(card_a.get("history") or []) + len(card_b.get("history") or []),
+            "tags_after": tags_after,
+            "folder_paths_after": [self.folder_path(fid) for fid in folder_ids_after],
+            "bucket_count_after": len(bucket_ids_after),
+            "attachment_count_after": attachment_count_after,
+        }
+
+    def merge_cards(self, keep_id: str, discard_id: str) -> dict:
+        """Merge discard_id into keep_id. Interleaving is just re-parenting:
+        every one of discard_id's revisions gets its card_id column changed
+        to keep_id, so the two timelines sort together by valid_at with no
+        content rewritten. Folders and bucket links union (dedup by
+        folder_id / bucket_id, already enforced by their UNIQUE constraints).
+        Current tags union into keep_id's tags_override (see that column's
+        docstring in _migrate_merge_columns) -- neither card's own latest
+        revision row is touched.
+
+        discard_id becomes a permanent tombstone: its `cards` row survives
+        with merged_into=keep_id (not deleted), and every id-taking method
+        in this class resolves through that pointer transparently, forever.
+        This is a redirect, not a pending deletion -- unrelated to the
+        eventual card recycle bin (§14 item 7), which will be about
+        undoing real card_delete calls, not merges.
+
+        Any tombstone that already pointed at discard_id gets flattened to
+        point directly at keep_id first, so redirects never chain."""
+        keep_id = self._resolve_id(keep_id)
+        discard_id = self._resolve_id(discard_id)
+        if keep_id == discard_id:
+            raise ValueError("这两张卡已经是同一张卡了（可能已经被合并过）。")
+        conn = self._connect()
+        keep_row = conn.execute("SELECT id FROM cards WHERE id = ?", (keep_id,)).fetchone()
+        discard_row = conn.execute("SELECT id FROM cards WHERE id = ?", (discard_id,)).fetchone()
+        if not keep_row or not discard_row:
+            conn.close()
+            raise ValueError("卡片不存在。")
+
+        keep_current = conn.execute(
+            "SELECT tags FROM card_revisions WHERE card_id = ? ORDER BY valid_at DESC, id DESC LIMIT 1",
+            (keep_id,),
+        ).fetchone()
+        discard_current = conn.execute(
+            "SELECT tags FROM card_revisions WHERE card_id = ? ORDER BY valid_at DESC, id DESC LIMIT 1",
+            (discard_id,),
+        ).fetchone()
+        keep_tags = json.loads(keep_current["tags"]) if keep_current and keep_current["tags"] else []
+        discard_tags = json.loads(discard_current["tags"]) if discard_current and discard_current["tags"] else []
+        tags_after = list(dict.fromkeys([str(t) for t in keep_tags] + [str(t) for t in discard_tags]))
+
+        revisions_merged = conn.execute(
+            "SELECT COUNT(*) AS c FROM card_revisions WHERE card_id = ?", (discard_id,)
+        ).fetchone()["c"]
+        folders_merged = conn.execute(
+            "SELECT COUNT(*) AS c FROM card_folders WHERE card_id = ?", (discard_id,)
+        ).fetchone()["c"]
+        buckets_merged = conn.execute(
+            "SELECT COUNT(*) AS c FROM card_buckets WHERE card_id = ?", (discard_id,)
+        ).fetchone()["c"]
+
+        # Flatten pre-existing tombstones so nothing ever chains through
+        # more than one redirect hop.
+        conn.execute("UPDATE cards SET merged_into = ? WHERE merged_into = ?", (keep_id, discard_id))
+
+        conn.execute("UPDATE card_revisions SET card_id = ? WHERE card_id = ?", (keep_id, discard_id))
+
+        now = self._now_iso()
+        for row in conn.execute("SELECT folder_id FROM card_folders WHERE card_id = ?", (discard_id,)).fetchall():
+            conn.execute(
+                "INSERT OR IGNORE INTO card_folders (card_id, folder_id, created_at) VALUES (?, ?, ?)",
+                (keep_id, row["folder_id"], now),
+            )
+        conn.execute("DELETE FROM card_folders WHERE card_id = ?", (discard_id,))
+
+        for row in conn.execute("SELECT bucket_id, note FROM card_buckets WHERE card_id = ?", (discard_id,)).fetchall():
+            conn.execute(
+                "INSERT OR IGNORE INTO card_buckets (card_id, bucket_id, relation_type, note, created_at) "
+                "VALUES (?, ?, 'evidence', ?, ?)",
+                (keep_id, row["bucket_id"], row["note"], now),
+            )
+        conn.execute("DELETE FROM card_buckets WHERE card_id = ?", (discard_id,))
+
+        conn.execute(
+            "UPDATE cards SET tags_override = ? WHERE id = ?",
+            (json.dumps(tags_after, ensure_ascii=False), keep_id),
+        )
+        conn.execute("UPDATE cards SET merged_into = ? WHERE id = ?", (keep_id, discard_id))
+
+        conn.commit()
+        conn.close()
+        return {
+            "kept_id": keep_id,
+            "discarded_id": discard_id,
+            "revisions_merged": revisions_merged,
+            "folders_merged": folders_merged,
+            "buckets_merged": buckets_merged,
+            "tags_after": tags_after,
+        }
+
+    # ==================================================================
     # lookup helpers (back the MCP tools in cards_mcp.py)
     # ==================================================================
     def all_cards(self) -> list[dict]:
+        """Every living card -- excludes merge tombstones (merged_into != ''),
+        so a card merged away doesn't show up twice (once under its own id,
+        once again via its canonical id resolving back to the same card)."""
         conn = self._connect()
-        rows = conn.execute("SELECT id FROM cards ORDER BY created_at").fetchall()
+        rows = conn.execute("SELECT id FROM cards WHERE merged_into = '' ORDER BY created_at").fetchall()
         conn.close()
         return [c for c in (self.get_card(r["id"]) for r in rows) if c]
 

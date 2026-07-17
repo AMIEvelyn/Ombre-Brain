@@ -30,7 +30,9 @@ register_card_write_tools(mcp, store) is the separate write surface (2026-07-17,
 docs/facts-model-v2-collection-redesign.md §14 item 3): card_create,
 card_create_folder, card_add_to_folder, card_remove_from_folder,
 card_edit_title, card_edit_tags, card_edit_content, card_new_revision,
-card_link_bucket, card_unlink_bucket.
+card_link_bucket, card_unlink_bucket, card_merge_preview, card_merge (merge
+tool, §14 item 4 -- manual/deterministic timeline interleave, no auto
+duplicate detection; see merge_cards' docstring in cards_store.py).
 No card_delete (Yi Lan wants a recycle-bin review step first, not built yet)
 and no attachment upload (no binary-file channel through an MCP tool call).
 
@@ -133,6 +135,37 @@ def _resolve_folder(store, folder: str):
         return matches[0]["id"], ""
     paths = "、".join(f"{store.folder_path(m['id'])}" for m in matches)
     return "", f"有多个文件夹匹配「{folder}」：{paths}。请说得更具体一点（可以用完整路径里的名字）。"
+
+
+def _fmt_merge_preview(preview: dict) -> str:
+    a, b = preview["card_a"], preview["card_b"]
+    lines = [
+        f"合并预览：【{a['title'] or '(无标题)'}】（{a['revision_count']} 条历史）"
+        f" + 【{b['title'] or '(无标题)'}】（{b['revision_count']} 条历史）",
+        f"合并后：{preview['revision_count_after']} 条时间点交错排成一条时间线",
+    ]
+    if preview["tags_after"]:
+        lines.append("标签（并集）：" + "、".join(preview["tags_after"]))
+    if preview["folder_paths_after"]:
+        lines.append("所在文件夹（并集）：" + "、".join(preview["folder_paths_after"]))
+    lines.append(f"关联记忆桶（并集）：{preview['bucket_count_after']} 个")
+    lines.append(f"附件总数：{preview['attachment_count_after']}（全部保留，不做去重）")
+    lines.append("确认要合并的话，调 card_merge，并指定 keep 保留哪一张。")
+    return "\n".join(lines)
+
+
+def _fmt_merge_result(store, result: dict) -> str:
+    card = store.get_card(result["kept_id"])
+    cur = (card or {}).get("current") or {}
+    lines = [
+        f"已合并。保留【{cur.get('title') or '(无标题)'}】（id: {result['kept_id']}）",
+        f"旧 id {result['discarded_id']} 已合并进去，永久重定向到这张卡，不会再单独出现。",
+        f"合入 {result['revisions_merged']} 条历史时间点、"
+        f"{result['folders_merged']} 个文件夹归属、{result['buckets_merged']} 个记忆桶关联。",
+    ]
+    if result["tags_after"]:
+        lines.append("当前标签（并集）：" + "、".join(result["tags_after"]))
+    return "\n".join(lines)
 
 
 def register_card_tools(
@@ -662,16 +695,15 @@ def register_card_write_tools(mcp, store) -> None:
         return f"已加新时间点：{_card_result(found['id'])}"
 
     @mcp.tool()
-    async def card_link_bucket(card: str = "", bucket_id: str = "", relation_type: str = "evidence") -> str:
-        """把一个记忆桶关联到一张卡上，作为这张卡内容的证据来源。
-        relation_type：关系类型，默认 evidence（证据），也可以传 origin/related。"""
+    async def card_link_bucket(card: str = "", bucket_id: str = "") -> str:
+        """把一个记忆桶关联到一张卡上，作为这张卡内容的证据来源。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
         if not bucket_id:
             return "请给要关联的记忆桶 id。"
         try:
-            added = store.add_bucket_link(found["id"], bucket_id, relation_type=relation_type or "evidence")
+            added = store.add_bucket_link(found["id"], bucket_id)
         except ValueError as e:
             return str(e)
         return "已关联。" if added else "已经关联过了。"
@@ -686,3 +718,53 @@ def register_card_write_tools(mcp, store) -> None:
             return "请给要取消关联的记忆桶 id。"
         removed = store.remove_bucket_link(found["id"], bucket_id)
         return "已取消关联。" if removed else "这张卡本来就没关联这个记忆桶。"
+
+    @mcp.tool()
+    async def card_merge_preview(card_a: str = "", card_b: str = "") -> str:
+        """预览合并两张卡的结果，不会真的执行合并。用在"这两张卡讲的其实是
+        同一件事，误建成了两张，想合成一张"的情况——先看一眼合并后会是
+        什么样子，确认没问题再调 card_merge 真正执行。
+        card_a / card_b：两张卡各自的标题或 id，顺序不影响预览内容（真正
+        合并时才需要指定保留哪一张的 id）。"""
+        found_a, err = _resolve_card(store, card_a)
+        if err:
+            return f"卡A：{err}"
+        found_b, err = _resolve_card(store, card_b)
+        if err:
+            return f"卡B：{err}"
+        try:
+            preview = store.merge_preview(found_a["id"], found_b["id"])
+        except ValueError as e:
+            return str(e)
+        return _fmt_merge_preview(preview)
+
+    @mcp.tool()
+    async def card_merge(card_a: str = "", card_b: str = "", keep: str = "") -> str:
+        """真正执行合并：把两张卡的时间线按日期见缝插针合并成一张卡——每个
+        原有时间点的标题/内容/附件原封不动，只是排进同一条时间线；标签、
+        关联的记忆桶、所在文件夹都取并集去重；附件全部保留，不做去重。
+        建议先调 card_merge_preview 看一眼再执行。
+        card_a / card_b：两张卡各自的标题或 id。
+        keep：合并后保留哪一张的标题或 id（必须是 card_a 或 card_b 其中
+        一张）；另一张会变成一个永久指向保留卡的重定向——以后不管谁还拿着
+        旧的标题/id 去查，都会自动跳到合并后的卡，不会丢数据也不会查不到。"""
+        found_a, err = _resolve_card(store, card_a)
+        if err:
+            return f"卡A：{err}"
+        found_b, err = _resolve_card(store, card_b)
+        if err:
+            return f"卡B：{err}"
+        keep = str(keep or "").strip()
+        if not keep:
+            return "请指定合并后保留哪张卡（keep 传 card_a 或 card_b 的标题/id）。"
+        found_keep, err = _resolve_card(store, keep)
+        if err:
+            return f"keep：{err}"
+        if found_keep["id"] not in (found_a["id"], found_b["id"]):
+            return "keep 必须是 card_a 或 card_b 其中一张卡。"
+        discard_id = found_b["id"] if found_keep["id"] == found_a["id"] else found_a["id"]
+        try:
+            result = store.merge_cards(found_keep["id"], discard_id)
+        except ValueError as e:
+            return str(e)
+        return _fmt_merge_result(store, result)

@@ -339,8 +339,8 @@ def main():
 
     # --- card_buckets: the other half of card_lookup's "关联了 N 个记忆桶" hint ---
     assert "还没有关联任何记忆桶" in _run(card_buckets(card="旅行攻略"))
-    store.add_bucket_link(doc, "b1", relation_type="evidence")
-    store.add_bucket_link(doc, "b_gone", relation_type="related")  # a bucket that no longer exists
+    store.add_bucket_link(doc, "b1")
+    store.add_bucket_link(doc, "b_gone")  # a bucket that no longer exists
     out_doc2 = _run(card_lookup(query="旅行攻略"))
     assert "🫙 关联了 2 个记忆桶" in out_doc2
     bkts = _run(card_buckets(card="旅行攻略"))
