@@ -2125,6 +2125,26 @@
     width: 100%;
     grid-column: 1 / -1;
   }
+  .facts-content-editor {
+    min-height: 220px !important;
+  }
+  .facts-content-editor-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .facts-tag-insert-btn {
+    align-self: flex-start;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .facts-tag-insert-btn:hover { background: var(--border); }
   .cards-v2-select {
     width: 100%;
     cursor: pointer;
@@ -3533,7 +3553,10 @@
       <span></span><span></span>
     </div>
     <div class="profile-proposal-form">
-      <textarea id="cards-v2-add-content" placeholder="内容（可选）"></textarea>
+      <div class="facts-content-editor-row">
+        <textarea id="cards-v2-add-content" class="facts-content-editor" placeholder="内容（可选）——就是一段普通文字，想标出这是自己写的就点下面的按钮"></textarea>
+        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-add-content')">+ 标记为我写的</button>
+      </div>
     </div>
     <div class="facts-tags-row" id="cards-v2-add-tags"></div>
     <div class="profile-proposal-form">
@@ -3572,7 +3595,12 @@
   <div class="facts-modal-panel">
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2EditModal()">‹</button><span>编辑（不留新时间点）</span></div>
     <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-title" placeholder="标题" /><span></span><span></span></div>
-    <div class="profile-proposal-form"><textarea id="cards-v2-edit-content" placeholder="内容"></textarea></div>
+    <div class="profile-proposal-form">
+      <div class="facts-content-editor-row">
+        <textarea id="cards-v2-edit-content" class="facts-content-editor" placeholder="内容"></textarea>
+        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-edit-content')">+ 标记为我写的</button>
+      </div>
+    </div>
     <div class="facts-tags-row" id="cards-v2-edit-tags"></div>
     <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onCardsV2EditTagKeydown(event)" /><span></span><span></span></div>
     <div class="facts-attachment-toolbar">
@@ -3594,7 +3622,12 @@
   <div class="facts-modal-panel">
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2RevisionModal()">‹</button><span>New Revision（新增时间点）</span></div>
     <div class="profile-proposal-form"><input type="text" id="cards-v2-rev-title" placeholder="标题" /></div>
-    <div class="profile-proposal-form"><textarea id="cards-v2-rev-content" placeholder="这个新时间点的内容"></textarea></div>
+    <div class="profile-proposal-form">
+      <div class="facts-content-editor-row">
+        <textarea id="cards-v2-rev-content" class="facts-content-editor" placeholder="这个新时间点的内容"></textarea>
+        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-rev-content')">+ 标记为我写的</button>
+      </div>
+    </div>
     <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-valid-at" /><span></span><span></span></div>
     <div class="facts-attachment-toolbar">
       <button type="button" class="facts-attachment-add-btn" onclick="cardsV2ToggleAttachMenu('rev')">+ 添加图片/文件</button>
@@ -8472,18 +8505,22 @@ function cardsV2RenderContent(content){
   return '<div class="facts-detail-content">' + cardsV2Markdown(shown) + toggle + '</div>';
 }
 
-// content_segments-aware rendering: a single segment (the common case) looks
-// exactly like before (no author clutter); two or more segments each get a
-// colored left border + small author label, matching the "one color per
-// author" scheme -- falls back to the old flat-content path for any legacy
-// card somehow still without segments.
+// content_segments-aware rendering (2026-07-17, second pass): every segment
+// with a real author gets a colored left border + small author label, even
+// when it's the card's only segment -- matches _render_content on the
+// backend, which now labels by "does this segment have a real author",
+// not by segment count. A segment with no author (author=None -- text typed
+// without tagging it, see parse_content_text) renders as plain text, no
+// color. Falls back to the old flat-content path only when there are no
+// segments at all (legacy safety net, shouldn't normally happen).
 function cardsV2RenderContentSegments(cur){
   var segments = cur.content_segments || [];
-  if (segments.length < 2) return cardsV2RenderContent(cur.content);
+  if (!segments.length) return cardsV2RenderContent(cur.content);
   var over = (cur.content || '').length > FACTS_CONTENT_COLLAPSE_CHARS;
   var toggle = over ? '<span class="facts-detail-content-toggle" onclick="cardsV2ToggleContent()">' + (cardsV2ContentExpanded ? '收起' : '展开') + '</span>' : '';
   var body = segments.map(function(s){
-    var color = CARDS_V2_AUTHOR_COLOR[s.author] || '#888';
+    var color = CARDS_V2_AUTHOR_COLOR[s.author];
+    if (!color) return '<div class="facts-content-segment">' + cardsV2Markdown(s.text) + '</div>';
     var name = CARDS_V2_AUTHOR_NAME[s.author] || s.author;
     return '<div class="facts-content-segment" style="border-left:3px solid ' + color + ';padding-left:10px;margin:8px 0;">'
       + '<div style="font-size:11px;font-weight:600;margin-bottom:2px;color:' + color + ';">' + esc(name) + '</div>'
@@ -8699,11 +8736,30 @@ function renderCardsV2Tags(which){
 function cardsV2RemoveTag(which, i){ (which === 'add' ? cardsV2.addTags : cardsV2.editTags).splice(i, 1); renderCardsV2Tags(which); }
 function onCardsV2TagKeydown(e){ if (e.key === 'Enter') { e.preventDefault(); var v = e.target.value.trim(); if (v) { cardsV2.addTags.push(v); e.target.value = ''; renderCardsV2Tags('add'); } } }
 function onCardsV2EditTagKeydown(e){ if (e.key === 'Enter') { e.preventDefault(); var v = e.target.value.trim(); if (v) { cardsV2.editTags.push(v); e.target.value = ''; renderCardsV2Tags('edit'); } } }
+// Content editor helper (2026-07-17): inserts "一澜：" at the cursor so Yi
+// Lan doesn't have to type the marker by hand (and risk a typo that
+// parse_content_text on the server wouldn't recognize). Ensures a blank
+// line separates it from whatever's around, since that's the paragraph
+// boundary parse_content_text splits on. Everything else in these content
+// textareas is edited exactly like any plain text -- select, retype,
+// delete with the keyboard, no special UI for that.
+function cardsV2InsertMyTag(textareaId){
+  var ta = document.getElementById(textareaId);
+  if (!ta) return;
+  var start = ta.selectionStart, end = ta.selectionEnd;
+  var before = ta.value.slice(0, start), after = ta.value.slice(end);
+  var pad = before.length === 0 ? '' : (before.endsWith('\n\n') ? '' : (before.endsWith('\n') ? '\n' : '\n\n'));
+  var insert = pad + '一澜：';
+  ta.value = before + insert + after;
+  var pos = (before + insert).length;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+}
 async function submitCardsV2Add(){
   var title = document.getElementById('cards-v2-add-title').value.trim();
   var msg = document.getElementById('cards-v2-add-message');
   if (!title) { msg.textContent = '标题必填。'; return; }
-  var body = { title: title, content: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice(), attachments: cardsV2Attach.add.slice() };
+  var body = { title: title, content_text: document.getElementById('cards-v2-add-content').value, tags: cardsV2.addTags.slice(), attachments: cardsV2Attach.add.slice() };
   var validAt = document.getElementById('cards-v2-add-valid-at').value; if (validAt) body.valid_at = validAt;
   var folder = document.getElementById('cards-v2-add-folder').value;
   if (folder) body.folder_ids = [folder];
@@ -8734,8 +8790,10 @@ async function submitCardsV2Edit(force){
   var newContent = document.getElementById('cards-v2-edit-content').value;
   var body = { title: document.getElementById('cards-v2-edit-title').value, tags: cardsV2.editTags.slice(), attachments: cardsV2Attach.edit.slice() };
   // only send content when it actually changed -- untouched content should
-  // never trip the ownership check (e.g. a title-only fix on Lin Zhan's card)
-  if (newContent !== cardsV2.editOrigContent) body.content = newContent;
+  // never trip the ownership check (e.g. a title-only fix on Lin Zhan's card).
+  // content_text is parsed server-side by "作者：" markers back into segments
+  // (see parse_content_text) -- same free-text-editing flow as Create/Revision.
+  if (newContent !== cardsV2.editOrigContent) body.content_text = newContent;
   if (force) body.force = true;
   try {
     var r = await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -8753,6 +8811,7 @@ async function submitCardsV2Edit(force){
 function openCardsV2RevisionModal(){
   var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
   cardsV2.revId = card.id; cardsV2Attach.rev = (cur.attachments || []).slice();
+  cardsV2.revOrigContent = cur.content || '';
   document.getElementById('cards-v2-rev-title').value = cur.title || '';
   document.getElementById('cards-v2-rev-content').value = cur.content || '';
   document.getElementById('cards-v2-rev-valid-at').value = '';
@@ -8763,10 +8822,27 @@ function openCardsV2RevisionModal(){
   document.getElementById('cards-v2-rev-overlay').style.display = '';
 }
 function closeCardsV2RevisionModal(){ document.getElementById('cards-v2-rev-overlay').style.display = 'none'; }
-async function submitCardsV2Revision(){
-  var body = { title: document.getElementById('cards-v2-rev-title').value, content: document.getElementById('cards-v2-rev-content').value, attachments: cardsV2Attach.rev.slice() };
+async function submitCardsV2Revision(force){
+  var msg = document.getElementById('cards-v2-rev-message');
+  var newContent = document.getElementById('cards-v2-rev-content').value;
+  var body = { title: document.getElementById('cards-v2-rev-title').value, attachments: cardsV2Attach.rev.slice() };
+  // 2026-07-17, second pass: New Revision is rule-C gated the same as Edit
+  // now (used to replace freely) -- only send content_text if it actually
+  // changed from what was shown, same reasoning as Edit.
+  if (newContent !== cardsV2.revOrigContent) body.content_text = newContent;
   var v = document.getElementById('cards-v2-rev-valid-at').value; if (v) body.valid_at = v;
-  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.revId + '/revisions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  if (force) body.force = true;
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/' + cardsV2.revId + '/revisions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var d = await r.json().catch(function(){ return {}; });
+    if (r.status === 409 && d.error === 'ownership_conflict') {
+      var name = CARDS_V2_AUTHOR_NAME[d.author] || d.author;
+      var ok = confirm('这段内容是' + name + '写的：\n「' + d.text_preview + '」\n\n新的时间点不保留这段，确定吗？');
+      if (ok) return submitCardsV2Revision(true);
+      return;
+    }
+    if (!r.ok) { if (msg) msg.textContent = '失败：' + (d.error || r.status); return; }
+  } catch(e){ if (msg) msg.textContent = '失败：' + e; return; }
   closeCardsV2RevisionModal(); await openCardsV2Detail(cardsV2.revId); loadCardsV2();
 }
 async function openCardsV2FoldersModal(){
