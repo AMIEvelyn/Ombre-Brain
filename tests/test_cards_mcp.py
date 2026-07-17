@@ -192,7 +192,7 @@ def main():
         ],
     )
     att_hist = _run(card_history(card="附件时间线卡"))
-    assert "📎 附件：1 张图片，2 个文件（v2a.md、v2b.md）（读取用 at=2026-02-01）" in att_hist
+    assert "📎 附件：1 张图片（v2.png），2 个文件（v2a.md、v2b.md）（读取用 at=2026-02-01）" in att_hist
     assert "📎 附件：1 个文件（v1.md）（读取用 at=2026-01-01）" in att_hist
     print("PASS card_history: each timepoint shows its own attachments, with the at= date to read them")
 
@@ -380,9 +380,63 @@ def main():
     assert "没找到日期是" in bad_date
     print("PASS card_attachment_read/view: at= reaches a merged-away card's attachments by date")
 
+    # --- label alone (no at) reaches any timepoint's attachment, unique name = no date needed ---
+    # 2026-07-17, Yi Lan's real follow-up bug: two merged cards' timepoints
+    # landed on the SAME real-world day, so `at=<that day>` only ever hit one
+    # of them and the other's attachment stayed unreachable -- a date isn't
+    # always unique. Fix: label alone searches the whole card's history; a
+    # date is only required when the SAME name resolves to genuinely
+    # different files (dedup by url, not by name).
+    same_day_a = store.create_card(
+        title="sameDayA", content="A", valid_at="2026-07-17",
+        attachments=[{"type": "file", "label": "onlyA.md", "url": "/x/onlyA.md", "_text": "只在A"}],
+    )
+    same_day_b = store.create_card(
+        title="sameDayB", content="B", valid_at="2026-07-17",
+        attachments=[{"type": "file", "label": "onlyB.md", "url": "/x/onlyB.md", "_text": "只在B"}],
+    )
+    store.merge_cards(same_day_b, same_day_a)  # both timepoints land on the identical date
+    by_name_a = _run(card_attachment_read(card=same_day_b, label="onlyA.md"))
+    assert "只在A" in by_name_a  # found without needing at=, even though A's date collides with B's
+    by_name_b = _run(card_attachment_read(card=same_day_b, label="onlyB.md"))
+    assert "只在B" in by_name_b
+    print("PASS card_attachment_read: label alone finds a same-day merged card's attachment, no at= needed")
+
+    # carrying an attachment forward across several revisions (unchanged) must
+    # NOT look like several different same-named files -- dedup by url, not
+    # by how many revisions happen to repeat the same one
+    carried = store.create_card(
+        title="附件不变卡", content="v1", valid_at="2026-01-01",
+        attachments=[{"type": "file", "label": "stable.md", "url": "/x/stable.md", "_text": "稳定内容"}],
+    )
+    store.add_revision(carried, content="v2", valid_at="2026-01-02")  # attachments carried forward, untouched
+    store.add_revision(carried, content="v3", valid_at="2026-01-03")
+    stable_read = _run(card_attachment_read(card="附件不变卡", label="stable.md"))
+    assert "稳定内容" in stable_read and "多个不同的附件" not in stable_read
+    print("PASS card_attachment_read: same attachment carried across several revisions isn't falsely ambiguous")
+
+    # genuine name collision -- two DIFFERENT files that happen to share a
+    # label (e.g. two cards each uploaded their own "封面.png") -- this is
+    # the one case that still needs at=, and the error hands you the dates
+    collide_a = store.create_card(
+        title="collideA", content="A", valid_at="2026-03-01",
+        attachments=[{"type": "file", "label": "dup.md", "url": "/x/dup-from-a.md", "_text": "来自A"}],
+    )
+    collide_b = store.create_card(
+        title="collideB", content="B", valid_at="2026-04-01",
+        attachments=[{"type": "file", "label": "dup.md", "url": "/x/dup-from-b.md", "_text": "来自B"}],
+    )
+    store.merge_cards(collide_b, collide_a)
+    collision = _run(card_attachment_outline(card=collide_b, label="dup.md"))
+    assert "有 2 个不同的附件都叫这个名字" in collision
+    assert "2026-03-01" in collision and "2026-04-01" in collision
+    disambiguated = _run(card_attachment_read(card=collide_b, label="dup.md", at="2026-03-01"))
+    assert "来自A" in disambiguated and "来自B" not in disambiguated  # at= picks the right one of the two
+    print("PASS card_attachment_outline/read: genuine name collision across history asks for at=, listing the dates")
+
     # --- card_lookup now hints at attachments + linked buckets (used to say nothing) ---
     out_doc = _run(card_lookup(query="旅行攻略"))
-    assert "📎 附件：1 张图片，2 个文件（行程.md、船票.doc）" in out_doc
+    assert "📎 附件：1 张图片（封面图.png），2 个文件（行程.md、船票.doc）" in out_doc
     print("PASS card_lookup hints attachment counts + file names")
 
     # --- card_buckets: the other half of card_lookup's "关联了 N 个记忆桶" hint ---

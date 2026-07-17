@@ -57,16 +57,24 @@ FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS = 4000
 
 
 def _fmt_attachments_summary(attachments: list[dict]) -> str:
-    """"N 张图片，M 个文件（名字）" -- shared by _fmt_card (current state)
-    and card_history (2026-07-17: Yi Lan wants every historical timepoint's
-    attachments visible here too, not just current -- matches the
-    Dashboard's timeline expand view, which got the same fix). Empty string
-    (not called) when there are no attachments."""
+    """"N 张图片（名字），M 个文件（名字）" -- shared by _fmt_card (current
+    state) and card_history (2026-07-17: Yi Lan wants every historical
+    timepoint's attachments visible here too, not just current -- matches
+    the Dashboard's timeline expand view, which got the same fix). Empty
+    string (not called) when there are no attachments.
+
+    2026-07-17, second pass: images used to show only a count, no names --
+    but the whole point of naming attachments in this hint is so Lin Zhan
+    can go straight to card_attachment_read/view/outline with just a label
+    (see _find_attachment_across_history), and that only works if he can
+    actually see the name here in the first place. Files already did this;
+    images didn't, which made them a dead end."""
     photos = [a for a in attachments if a.get("type") == "image"]
     files = [a for a in attachments if a.get("type") != "image"]
     parts = []
     if photos:
-        parts.append(f"{len(photos)} 张图片")
+        names = "、".join(str(p.get("label")) for p in photos if p.get("label"))
+        parts.append(f"{len(photos)} 张图片" + (f"（{names}）" if names else ""))
     if files:
         names = "、".join(str(f.get("label")) for f in files if f.get("label"))
         parts.append(f"{len(files)} 个文件" + (f"（{names}）" if names else ""))
@@ -263,6 +271,69 @@ def register_card_tools(
             return None, f"有多个附件匹配：{names}。请用 label 参数说得更具体一点。"
         return candidates[0], ""
 
+    def _find_attachment_across_history(found: dict, label: str, *, image_only: bool | None = None):
+        """Search every revision's attachments for a label match across the
+        WHOLE card's history -- not just current or one pinned timepoint.
+        Used when `at` isn't given but `label` is: 2026-07-17, Yi Lan's call
+        after watching Lin Zhan need a date just to disambiguate two same-day
+        timepoints -- "if I already know the filename, why do I need the
+        date too?" The same physical file commonly repeats across several
+        revisions verbatim (carrying forward unchanged is the default when a
+        revision doesn't touch attachments), so matches are deduped by url
+        before deciding whether the name is ambiguous: a name that only ever
+        points at one real file resolves cleanly no matter how many
+        timepoints repeat it; a name that resolves to genuinely different
+        files (re-upload, or two merged cards' same-named file colliding) is
+        the only case that still needs a date -- and the error here hands
+        you exactly which dates to pick from, not an opaque id (Yi Lan
+        explicitly decided against adding revision/attachment ids).
+
+        Returns (attachment_dict, error_message)."""
+        label_lower = label.strip().lower()
+        by_url: dict[str, dict] = {}
+        dates_by_url: dict[str, list[str]] = {}
+        for rev in found.get("history") or []:
+            date = str(rev.get("valid_at") or "")[:10]
+            for a in rev.get("attachments") or []:
+                if image_only is True and a.get("type") != "image":
+                    continue
+                if image_only is False and a.get("type") == "image":
+                    continue
+                if label_lower not in str(a.get("label", "")).lower():
+                    continue
+                url = str(a.get("url") or "")
+                by_url.setdefault(url, a)
+                dates = dates_by_url.setdefault(url, [])
+                if date not in dates:
+                    dates.append(date)
+        if not by_url:
+            kind = "图片" if image_only is True else "附件"
+            return None, f"没找到匹配的{kind}（label={label!r}）。"
+        if len(by_url) == 1:
+            return next(iter(by_url.values())), ""
+        parts = [f"「{str(a.get('label') or '附件')}」（{'、'.join(dates_by_url[url])}）" for url, a in by_url.items()]
+        return None, f"有 {len(by_url)} 个不同的附件都叫这个名字，分别在：{'；'.join(parts)}。请用 at 参数指定其中一个日期。"
+
+    def _search_attachments_across_history(found: dict, label: str) -> list[dict]:
+        """Substring match by label across every revision's attachments,
+        deduped by url. Backs card_attachment_read's "read every matching
+        text attachment" mode, which is fine returning more than one result
+        (unlike _find_attachment_across_history, which is for callers that
+        need exactly one)."""
+        label_lower = label.strip().lower()
+        seen_urls: set[str] = set()
+        out = []
+        for rev in found.get("history") or []:
+            for a in rev.get("attachments") or []:
+                if label_lower not in str(a.get("label", "")).lower():
+                    continue
+                url = str(a.get("url") or "")
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                out.append(a)
+        return out
+
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
         """只读查询骨架层资料卡（collection/歌单式的新模型，cards.sqlite）。
@@ -354,16 +425,16 @@ def register_card_tools(
         .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
         实验性功能），旧版二进制 .doc 格式也读不了（没有轻量可用的解析库），
         这两种会明确告诉你读不了、不是没找到。
-        card：卡片标题或 id。label：可选，附件文件名（或其中一部分），用来在
-        一张卡有多个附件时指定读哪个。
-        at：可选，YYYY-MM-DD 格式的日期，对应 card_history 显示的某个历史时间点
-        ——不传就是读当前状态的附件（默认行为不变）。**两张卡合并之后，被合并
-        掉那张卡原来的附件不会消失，还完整留在它自己原来的那个时间点上，只是
-        不再是"当前"了**——想读的话先用 card_history 看一眼那个时间点的日期，
-        再把这个日期传给 at。
+        card：卡片标题或 id。label：附件文件名（或其中一部分）——**只要这个名字
+        在整张卡的历史上只对应一个文件，不用管它是当前还是哪个历史时间点上的，
+        直接传名字就行**，不需要额外传 at。
+        at：可选，只有当同一个文件名在不同时间点分别对应不同的文件时才需要
+        （比如合并过的两张卡刚好撞了同名——card_history 每条时间点都会带上
+        它自己的附件信息），用来指定具体是哪一天的那个文件；平时不需要传。
 
         不传 section_id/start/max_chars 时：读这张卡里所有能读的文本附件（多个
-        会一起返回），超长的单个附件会被截断并提示改用下面这两种分段方式。
+        会一起返回，跨所有时间点按名字找，不局限于当前状态），超长的单个附件
+        会被截断并提示改用下面这两种分段方式。
 
         传了 section_id/start/max_chars 中任意一个时：只能针对一个附件操作，
         这时 label 必须能唯一定位到那一个附件（附件不止一个又没传 label 会报错，
@@ -377,13 +448,18 @@ def register_card_tools(
         found, err = _resolve_card(store, card)
         if err:
             return err
-        revision, err = _revision_at(found, at)
-        if err:
-            return err
 
         paginated = bool(section_id) or start > 0 or max_chars > 0
         if paginated:
-            attachment, err = _resolve_single_attachment(revision, label)
+            if at:
+                revision, err = _revision_at(found, at)
+                if err:
+                    return err
+                attachment, err = _resolve_single_attachment(revision, label)
+            elif label:
+                attachment, err = _find_attachment_across_history(found, label, image_only=False)
+            else:
+                attachment, err = _resolve_single_attachment(found.get("current") or {}, label)
             if err:
                 return err
             name = str(attachment.get("label") or "附件")
@@ -420,14 +496,26 @@ def register_card_tools(
 
         if read_attachment_text is None:
             return "这个部署还没接上附件内容读取（read_attachment_text 未配置）。"
-        attachments = (revision or {}).get("attachments") or []
-        if not attachments:
-            return "这张卡在这个时间点没有附件。" if at else "这张卡没有附件。"
-        if label:
-            label_lower = label.strip().lower()
-            attachments = [a for a in attachments if label_lower in str(a.get("label", "")).lower()]
+        if at:
+            revision, err = _revision_at(found, at)
+            if err:
+                return err
+            attachments = (revision or {}).get("attachments") or []
+            if not attachments:
+                return "这张卡在这个时间点没有附件。"
+            if label:
+                label_lower = label.strip().lower()
+                attachments = [a for a in attachments if label_lower in str(a.get("label", "")).lower()]
+                if not attachments:
+                    return f"这张卡在这个时间点的附件里没有文件名包含「{label}」的。"
+        elif label:
+            attachments = _search_attachments_across_history(found, label)
             if not attachments:
                 return f"这张卡的附件里没有文件名包含「{label}」的。"
+        else:
+            attachments = (found.get("current") or {}).get("attachments") or []
+            if not attachments:
+                return "这张卡没有附件。"
         blocks = []
         for a in attachments:
             name = str(a.get("label") or "附件")
@@ -452,19 +540,25 @@ def register_card_tools(
         信息可用），准确度不如前两种。
         **没检测到章节结构是正常结果，不是报错**——原文档确实没有清晰的章节标记
         时就是这样，改用 card_attachment_read 的 start/max_chars 分段读全文。
-        card：卡片标题或 id。label：可选，附件文件名（或其中一部分），多个非
-        图片附件时用来指定解析哪一个。at：可选，跟 card_attachment_read 的 at
-        参数是同一回事——不传就是当前状态，传日期就是那个历史时间点（合并过
-        的卡，另一张卡的附件在它自己原来的时间点上）。"""
+        card：卡片标题或 id。label：附件文件名（或其中一部分）——**只要这个名字
+        在整张卡的历史上只对应一个文件，不用管它是当前还是哪个历史时间点上的，
+        直接传名字就行**，不需要额外传 at。at：可选，只有当同一个文件名在不同
+        时间点分别对应不同的文件时才需要（比如合并过的两张卡刚好撞了同名），
+        用来指定具体是哪一天的那个文件；平时不需要传。"""
         if attachment_outline is None:
             return "这个部署还没接上章节解析（attachment_outline 未配置）。"
         found, err = _resolve_card(store, card)
         if err:
             return err
-        revision, err = _revision_at(found, at)
-        if err:
-            return err
-        attachment, err = _resolve_single_attachment(revision, label)
+        if at:
+            revision, err = _revision_at(found, at)
+            if err:
+                return err
+            attachment, err = _resolve_single_attachment(revision, label)
+        elif label:
+            attachment, err = _find_attachment_across_history(found, label, image_only=False)
+        else:
+            attachment, err = _resolve_single_attachment(found.get("current") or {}, label)
         if err:
             return err
         name = str(attachment.get("label") or "附件")
@@ -492,30 +586,45 @@ def register_card_tools(
         ChatGPT 连接器具体能不能把这种图片内容真的显示给你看，还没有确认过——
         调用后如果你能描述出图片里的内容，说明能看；如果只是报错或者看不出画面，
         说明这条路径在当前的技术条件下暂时不通，不是这张卡或这个附件的问题。
-        card：卡片标题或 id。label：可选，附件文件名（或其中一部分）；留空且只
-        有一张图片时直接发那一张，有多张会列出来请你说得更具体一点。
-        at：可选，跟 card_attachment_read 的 at 参数是同一回事——不传就是当前
-        状态，传日期（YYYY-MM-DD，跟 card_history 显示的一致）就是那个历史
-        时间点（合并过的卡，另一张卡的图片在它自己原来的时间点上）。"""
+        card：卡片标题或 id。label：图片文件名（或其中一部分）——**只要这个名字
+        在整张卡的历史上只对应一张图，不用管它是当前还是哪个历史时间点上的，
+        直接传名字就行**，不需要额外传 at；留空且只有一张图片时直接发那一张，
+        有多张会列出来请你说得更具体一点。
+        at：可选，只有当同一个文件名在不同时间点分别对应不同的图片时才需要
+        （比如合并过的两张卡刚好撞了同名），用来指定具体是哪一天的那张；
+        平时不需要传。"""
         if read_attachment_image is None:
             return "这个部署还没接上图片查看（read_attachment_image 未配置）。"
         found, err = _resolve_card(store, card)
         if err:
             return err
-        revision, err = _revision_at(found, at)
-        if err:
-            return err
-        attachments = (revision or {}).get("attachments") or []
-        photos = [a for a in attachments if a.get("type") == "image"]
-        if label:
-            label_lower = label.strip().lower()
-            photos = [a for a in photos if label_lower in str(a.get("label", "")).lower()]
-        if not photos:
-            return "没找到匹配的图片附件。"
-        if len(photos) > 1:
-            names = "、".join(str(a.get("label") or "") for a in photos)
-            return f"有多张图片匹配：{names}。请用 label 参数说得更具体一点，一次只能看一张。"
-        image = read_attachment_image(photos[0])
+        if at:
+            revision, err = _revision_at(found, at)
+            if err:
+                return err
+            photos = [a for a in (revision or {}).get("attachments") or [] if a.get("type") == "image"]
+            if label:
+                label_lower = label.strip().lower()
+                photos = [a for a in photos if label_lower in str(a.get("label", "")).lower()]
+            if not photos:
+                return "没找到匹配的图片附件。"
+            if len(photos) > 1:
+                names = "、".join(str(a.get("label") or "") for a in photos)
+                return f"有多张图片匹配：{names}。请用 label 参数说得更具体一点，一次只能看一张。"
+            attachment = photos[0]
+        elif label:
+            attachment, err = _find_attachment_across_history(found, label, image_only=True)
+            if err:
+                return err
+        else:
+            photos = [a for a in (found.get("current") or {}).get("attachments") or [] if a.get("type") == "image"]
+            if not photos:
+                return "没找到匹配的图片附件。"
+            if len(photos) > 1:
+                names = "、".join(str(a.get("label") or "") for a in photos)
+                return f"有多张图片匹配：{names}。请用 label 参数说得更具体一点，一次只能看一张。"
+            attachment = photos[0]
+        image = read_attachment_image(attachment)
         if image is None:
             return "这张图片读不到（文件可能已经丢失）。"
         return image
