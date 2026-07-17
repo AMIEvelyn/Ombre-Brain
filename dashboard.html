@@ -5003,7 +5003,7 @@ function renderPortraitScope(scope, scopeState) {
   });
   return '<section class="portrait-scope">' +
     '<h3>' + esc(labels[scope] || scope) + '</h3>' +
-    renderPortraitLayer('stable', stableRows, '还没有 stable portrait。') +
+    renderPortraitStableLayer(scope, scopeState, stableRows) +
     renderPortraitLayer('mid term', midRows, '还没有 mid-term portrait。') +
     renderPortraitLayer('staging pool', stagingRows, 'staging pool 为空。') +
     renderPortraitLayer('recent buffer', recentRows, 'recent buffer 为空。') +
@@ -5015,6 +5015,91 @@ function renderPortraitLayer(title, rows, emptyText) {
     '<div class="portrait-layer-title">' + esc(title) + '</div>' +
     renderPortraitRows(rows, emptyText) +
   '</div>';
+}
+
+function renderPortraitStableLayer(scope, scopeState, stableRows) {
+  var locked = !!scopeState.stable_locked;
+  var revision = Number(scopeState.stable_revision || 0);
+  var specJson = JSON.stringify({ scope: scope, revision: revision, locked: locked, text: scopeState.stable || '' });
+  var specAttr = escAttr(jsString(specJson));
+  var lockChip = locked
+    ? '<span class="profile-chip" style="background:#fdecea;color:#c0392b;">🔒 已锁定，不参与自动更新</span>'
+    : '<span class="profile-chip">🔓 未锁定</span>';
+  return '<div class="portrait-layer">' +
+    '<div class="portrait-layer-title">stable ' + lockChip +
+      ' <button type="button" onclick="editPortraitStable(\'' + specAttr + '\')">✏️ 编辑</button>' +
+      ' <button type="button" onclick="togglePortraitStableLock(\'' + specAttr + '\')">' +
+        (locked ? '解锁' : '🔒 锁定') +
+      '</button>' +
+    '</div>' +
+    renderPortraitRows(stableRows, '还没有 stable portrait。') +
+  '</div>';
+}
+
+async function editPortraitStable(specJson) {
+  var spec;
+  try {
+    spec = JSON.parse(specJson || '{}');
+  } catch (e) {
+    alert('编辑参数错误。');
+    return;
+  }
+  var nextText = prompt('编辑 ' + spec.scope + ' 的 stable 画像（留空取消）：', spec.text || '');
+  if (nextText === null) return;
+  nextText = nextText.trim();
+  if (!nextText) {
+    alert('内容不能为空。');
+    return;
+  }
+  try {
+    var res = await authFetch(BASE + '/api/portrait-state/' + encodeURIComponent(spec.scope) + '/stable', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: nextText, expected_revision: spec.revision })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) {
+      if (data.status === 'conflict') throw new Error('画像已被其它操作更新，请刷新后重试。');
+      throw new Error(data.reason || data.error || '编辑失败');
+    }
+    setPortraitMaintainMessage('已更新 ' + spec.scope + ' 的 stable 画像。', 'ok');
+    await loadPortraitState();
+  } catch (e) {
+    setPortraitMaintainMessage('编辑失败: ' + e.message, 'error');
+  }
+}
+
+async function togglePortraitStableLock(specJson) {
+  var spec;
+  try {
+    spec = JSON.parse(specJson || '{}');
+  } catch (e) {
+    alert('操作参数错误。');
+    return;
+  }
+  var nextLocked = !spec.locked;
+  var confirmText = nextLocked
+    ? '锁定后，夜间自动画像维护不会再改写 ' + spec.scope + ' 的 stable 画像，手动编辑仍然可以。确定锁定？'
+    : '解锁后恢复自动画像维护。确定解锁 ' + spec.scope + '？';
+  if (!confirm(confirmText)) return;
+  try {
+    var res = await authFetch(BASE + '/api/portrait-state/' + encodeURIComponent(spec.scope) + '/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locked: nextLocked, expected_revision: spec.revision })
+    });
+    if (!res) return;
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) {
+      if (data.status === 'conflict') throw new Error('画像已被其它操作更新，请刷新后重试。');
+      throw new Error(data.reason || data.error || '操作失败');
+    }
+    setPortraitMaintainMessage(nextLocked ? '已锁定 ' + spec.scope + '。' : '已解锁 ' + spec.scope + '。', 'ok');
+    await loadPortraitState();
+  } catch (e) {
+    setPortraitMaintainMessage('操作失败: ' + e.message, 'error');
+  }
 }
 
 function renderPortraitRows(rows, emptyText) {

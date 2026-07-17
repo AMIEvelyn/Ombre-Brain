@@ -14,12 +14,12 @@
 
 | # | 帖子说的 | 我们这边现状 | 结论 |
 |---|---|---|---|
-| 1 | 可选开启"主域判断模型" | 实际是 `semantic_rescue`（Gateway 里一个低成本模型二次核验证据的门控），我们没有 | 有价值，但要塞进已分叉很大的 `gateway.py` 检索管线，留到大改动会话 |
-| 2 | 新增 hook 端点，Codex/Claude Code 都测过 | 全新的 `POST /api/hook/recall` 子系统（`gateway.py` 新增约15个辅助方法+卡片渲染），我们只有原来的 `/breath-hook` 等三个 | 工程量大，独立子系统，留到大改动会话（只有真要接 Codex/Claude Code CLI 才值得） |
+| 1 | 可选开启"主域判断模型" | 实际是 `semantic_rescue`（Gateway 里一个低成本模型二次核验证据的门控），我们没有 | **本轮已同步**（见下），默认关闭待验证 |
+| 2 | 新增 hook 端点，Codex/Claude Code 都测过 | 全新的 `POST /api/hook/recall` 子系统（`gateway.py` 新增约15个辅助方法+卡片渲染），我们只有原来的 `/breath-hook` 等三个 | **本轮已同步**（见下），但做了大幅简化，不是照抄 upstream 的大子系统 |
 | 3 | favorite_memory | `favorite_tags.py` 逐字节一致，`gateway.py` 的 `_build_favorite_memory_block` 等也对得上 | **已有，跳过** |
-| 4 | 照顾备忘（留给下个窗口的话） | upstream 新增独立的 `reminder_store.py`（605行，SQLite，支持重复规则/延后/冷却），**明确替代**了 upstream 旧版"从桶的 `### followup`/`### todo` 派生"的机制；我们现在还是用的这套旧机制（`todo_store.py`，195行） | 真缺口，不是重复功能。工程量中大（3个MCP工具+3个REST+gateway.py约44处引用），留到大改动会话 |
+| 4 | 照顾备忘（留给下个窗口的话） | upstream 新增独立的 `reminder_store.py`（605行，SQLite，支持重复规则/延后/冷却），**明确替代**了 upstream 旧版"从桶的 `### followup`/`### todo` 派生"的机制；我们现在还是用的这套旧机制（`todo_store.py`，195行） | **本轮已同步**（见下），作为并行的新功能，没有替换旧机制 |
 | 5 | 日印象改用原文表，0条门槛也能生成 | `reflection_engine.py` 逻辑、参数名（`daily_min_memory_items`、`conversation_turn_store`）都已一致 | **已有，跳过** |
-| 6 | 画像编辑+锁定，后台自动+手动改写并存 | upstream `portrait_engine.py` 有 `edit_stable`/`set_stable_lock`，我们没有这个锁定机制 | 真缺口，有价值。但文件比我们多出近1700行，锁定逻辑穿插在好几个函数里，且要动 `dashboard.html`，留到大改动会话 |
+| 6 | 画像编辑+锁定，后台自动+手动改写并存 | upstream `portrait_engine.py` 有 `edit_stable`/`set_stable_lock`，我们没有这个锁定机制 | **本轮已同步**（见下），做了简化版（没有版本历史/回滚） |
 | 7 | 梦境现在可以直接查看了 | 我们原来 `/api/dreams` 的设计就是"只给元数据，正文永不外泄"（docstring 原话），upstream 新增了单独授权的 `/api/dreams/{id}` 才能看正文 | **本轮已同步**（见下） |
 | 8 | Gateway"共振"（注入后不销毁） | 检查后确认：这就是我们本来就有的 `dream.inject_enabled`/`retain_after_inject` 机制，代码逐字节一致；帖子大概率是把这个和第7项的新 UI 混在一起说 | **已有，跳过** |
 | 9 | Dashboard 支持上游模型热更新，不用手填 config.yaml | 函数名、字段、element id 全部逐字节一致（`_hot_update_gateway_config` 等） | **已有，跳过** |
@@ -55,6 +55,13 @@
 
 至此帖子里的 5 项"小同步"（部署防护、raw API 鉴权、梦境查看、词法缓存、alpha 校准）全部完成。
 
-## 五、留到大改动会话再做的 4 项
+## 五、原计划"留到大改动会话"的 4 项，本轮同步完成
 
-跟 §2 表格标注一致：主域判断模型（语义救援）、hook 端点扩展（Codex/Claude Code）、照顾备忘（`reminder_store.py`）、画像编辑+锁定。这几项都不是"复制粘贴"级别，涉及多文件或者要塞进已经分叉很大的核心链路（尤其 `gateway.py`），需要单独开会话、逐个手动移植评审，不适合夹在这批小同步里做。
+一澜明确要求"剩下的都你做"，这 4 项也在本轮全部完成了。跟小同步不同，这几项都不是"复制粘贴"级别——upstream 的实现依赖大量我们这边没有的内部机制（`recall_policy.py` 的 admission_reason 词汇、`domain_sentinel`、upstream 专属的通用词表等），所以下面每一项都是"读 upstream 代码理解设计意图，再用我们自己已有的构件重新实现"，不是逐行照抄。
+
+6. **主域判断模型 / semantic_rescue**（`gateway.py`）：候选桶有真实语义相似度、但因为缺硬证据（关键词/锚点匹配）被压制时，用一个低成本模型二次核验它的正文是否直接支持当前 query 的某个"激活轴"，命中才放行——而且只认模型指出的原文精确片段，不认标题或分数。我们的 `recall_policy.py` 的 admission_reason 词汇表和 upstream 已经分叉（我们是 `auto_vague_query_without_topic` 这类，upstream 是 `semantic_only`/`no_hard_evidence` 这类），所以 `_semantic_rescue_candidates()` 用的是我们自己重新梳理出的 5 个 reason（`low_recall_evidence`/`query_topic_evidence_missing`/`word_map_topic_evidence_missing`/`non_explicit_query_score_too_low`/`activated_axis_mismatch`——最后一个跟 upstream 逐字一致，确认是共享设计）。**默认关闭**（`semantic_rescue_enabled: false`），等实测过 reason 映射确实可靠再考虑开。挂接点在 `_select_dynamic_buckets`，直接卡片选完之后、还有名额时才触发。
+7. **`POST /api/hook/recall`**（`gateway.py`）：给外部工具（以后如果接 Codex/Claude Code CLI 的 hook）用的轻量记忆查询接口，跟聊天走的鉴权一样（Bearer token）。**主动缩小了范围**：upstream 是个 ~40 方法、fast/full 双模式、绑定 `domain_sentinel` 的大子系统，那些机制我们都没有；这边直接复用已经验证过的 `_select_dynamic_buckets` 召回管线，query 进、卡片（bucket_id/title/content/domain/confidence）出，附带一段可以直接注入的 `additional_context` 纯文本。以后真的要接某个具体的 CLI hook 时，照那个 hook 实际要的格式再扩展会比现在瞎猜 upstream 的形状更靠谱。
+8. **照顾备忘 / `reminder_store.py`**：全新的独立提醒系统（SQLite），支持一次性/每 N 轮/每天/早晚两次等重复规则，跟"从桶的 `### followup`/`### todo` 派生"的旧机制（`todo_store.py`）是两条并行的路，**这次没有替换旧机制**，只是新增。新增 3 个 MCP 工具（`reminder_create`/`reminder_list`/`reminder_update`）+ 3 个 REST 接口（`GET/POST /api/reminders`、`PATCH /api/reminders/{id}`）+ `gateway.py` 里一个新的"照顾备忘"注入段（跟现有 favorite_memory 段结构一样），回合结束后命中的提醒会自动 `mark_reminded()` 推进重复状态。没有改 `hold`/`grow` 的 docstring 去引导模型别写 `### followup`——upstream 那样做了，但那是"彻底废弃旧机制"的更大决定，这次不做。
+9. **画像编辑+锁定**（`portrait_engine.py` + `dashboard.html`）：给 stable 画像段加了 `stable_locked`（bool）和 `stable_revision`（乐观并发用的版本号）。锁定后，夜间 `maintain_daily` 自动改写这个 scope 时会直接跳过（`_apply_patch` 的 `rewrite_stable` 循环里判断），手动编辑（`edit_stable`）不受锁定影响、可以随时改。新增 `edit_stable(scope, text, expected_revision, locked=None)`（改文字+可选顺带切换锁定）和 `set_stable_lock(scope, locked, expected_revision)`（只切换锁定，不动文字）两个方法；`PATCH /api/portrait-state/{scope}/stable` 和 `POST /api/portrait-state/{scope}/lock` 两个 REST 接口；Dashboard 画像页 stable 段现在带"✏️ 编辑"和"🔒 锁定/解锁"按钮。**比 upstream 简单**：没有做 `stable_history`/`rollback_stable`（版本历史+回滚），只做了她明确要的"编辑+锁定"本身；`stable_revision` 只是防冲突用的计数器，不存历史快照。老的 state 文件里没有这两个新字段，加载时会自动按 `False`/`0` 补上（`_merge_state` 已有的合并逻辑），不需要额外迁移脚本。
+
+**部署**：这次动了 `gateway.py`（`ombre-gateway` 容器）、`reminder_store.py`（新文件，`ombre-brain` 容器）、`server.py`、`portrait_engine.py`、`dashboard.html`（`ombre-brain` 容器）。按老规矩 `docker cp` + 对应容器 `docker restart`。`reminder_store.py`/`portrait_engine.py` 都已确认跟真实部署逐字节一致后才动的刀。

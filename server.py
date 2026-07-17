@@ -9763,6 +9763,65 @@ async def api_portrait_state_reset(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@mcp.custom_route("/api/portrait-state/{scope}/stable", methods=["PATCH"])
+async def api_portrait_stable_edit(request):
+    """画像编辑+锁定: manually overwrite a scope's stable summary, optionally
+    locking it in the same call so the next nightly auto-maintenance run
+    doesn't overwrite it. Body: {text, expected_revision, locked?}."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    scope = str(request.path_params.get("scope") or "").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    locked = body.get("locked") if "locked" in body else None
+    result = portrait_engine.edit_stable(
+        scope,
+        str(body.get("text") or ""),
+        body.get("expected_revision"),
+        locked=locked,
+    )
+    status = str(result.get("status") or "")
+    if status in {"updated", "unchanged"}:
+        return JSONResponse(result)
+    if status == "conflict":
+        return JSONResponse(result, status_code=409)
+    return JSONResponse(result, status_code=400)
+
+
+@mcp.custom_route("/api/portrait-state/{scope}/lock", methods=["POST"])
+async def api_portrait_stable_lock(request):
+    """画像编辑+锁定: toggle a scope's lock without touching its stable text.
+    Body: {locked: true/false, expected_revision}."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    scope = str(request.path_params.get("scope") or "").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    result = portrait_engine.set_stable_lock(
+        scope,
+        _bool_value(body.get("locked"), False),
+        body.get("expected_revision"),
+    )
+    status = str(result.get("status") or "")
+    if status in {"updated", "unchanged"}:
+        return JSONResponse(result)
+    if status == "conflict":
+        return JSONResponse(result, status_code=409)
+    return JSONResponse(result, status_code=400)
+
+
 @mcp.custom_route("/api/facts-skeleton", methods=["GET"])
 async def api_facts_skeleton(request):
     """Read the facts/timeline skeleton layer (facts.sqlite) for dashboard display.

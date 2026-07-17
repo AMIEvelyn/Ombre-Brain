@@ -3672,6 +3672,109 @@ async def test_api_portrait_state_item_delete(monkeypatch, tmp_path, test_config
 
 
 @pytest.mark.asyncio
+async def test_api_portrait_stable_edit_updates_text_and_lock(monkeypatch, tmp_path, test_config):
+    import server
+    from portrait_engine import DailyPortraitMaintainer
+
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(tmp_path / "portrait_state.json")},
+        }
+    )
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+    monkeypatch.setattr(server, "portrait_engine", engine)
+
+    response = await server.api_portrait_stable_edit(
+        DummyRequest(
+            body={"text": "一澜手动写的画像。", "expected_revision": 0, "locked": True},
+            path_params={"scope": "user"},
+        )
+    )
+    payload = json.loads(response.body)
+    loaded = engine.load_state()
+
+    assert response.status_code == 200
+    assert payload["status"] == "updated"
+    assert payload["locked"] is True
+    assert loaded["portrait"]["user"]["stable"] == "一澜手动写的画像。"
+    assert loaded["portrait"]["user"]["stable_locked"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_portrait_stable_edit_conflict_returns_409(monkeypatch, tmp_path, test_config):
+    import server
+    from portrait_engine import DailyPortraitMaintainer
+
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(tmp_path / "portrait_state.json")},
+        }
+    )
+    engine.edit_stable("user", "第一版。", 0)
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+    monkeypatch.setattr(server, "portrait_engine", engine)
+
+    response = await server.api_portrait_stable_edit(
+        DummyRequest(
+            body={"text": "基于过期版本号。", "expected_revision": 0},
+            path_params={"scope": "user"},
+        )
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_api_portrait_stable_lock_toggles_without_text_change(monkeypatch, tmp_path, test_config):
+    import server
+    from portrait_engine import DailyPortraitMaintainer
+
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(tmp_path / "portrait_state.json")},
+        }
+    )
+    engine.edit_stable("relationship", "关系画像内容。", 0)
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+    monkeypatch.setattr(server, "portrait_engine", engine)
+
+    response = await server.api_portrait_stable_lock(
+        DummyRequest(body={"locked": True, "expected_revision": 1}, path_params={"scope": "relationship"})
+    )
+    payload = json.loads(response.body)
+    loaded = engine.load_state()
+
+    assert response.status_code == 200
+    assert payload["locked"] is True
+    assert loaded["portrait"]["relationship"]["stable"] == "关系画像内容。"
+    assert loaded["portrait"]["relationship"]["stable_locked"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_portrait_stable_edit_invalid_scope_returns_400(monkeypatch, tmp_path, test_config):
+    import server
+    from portrait_engine import DailyPortraitMaintainer
+
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(tmp_path / "portrait_state.json")},
+        }
+    )
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+    monkeypatch.setattr(server, "portrait_engine", engine)
+
+    response = await server.api_portrait_stable_edit(
+        DummyRequest(body={"text": "内容", "expected_revision": 0}, path_params={"scope": "not_a_scope"})
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_api_portrait_state_reset_clears_state(monkeypatch, tmp_path, test_config):
     import server
     from portrait_engine import DailyPortraitMaintainer

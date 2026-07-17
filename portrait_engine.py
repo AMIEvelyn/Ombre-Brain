@@ -417,6 +417,92 @@ class DailyPortraitMaintainer:
             "text": removed.get("text", "") if isinstance(removed, dict) else "",
         }
 
+    def edit_stable(
+        self,
+        scope: str,
+        text: str,
+        expected_revision: int,
+        locked: bool | None = None,
+    ) -> dict:
+        """画像编辑+锁定: manually overwrite a scope's stable summary, and
+        optionally set its lock state in the same call. expected_revision
+        is an optimistic-concurrency guard -- Dashboard sends back the
+        revision it last saw, and a mismatch (someone/something else wrote
+        in the meantime) returns status=conflict instead of clobbering it."""
+        scope = str(scope or "").strip()
+        if scope not in PORTRAIT_SCOPES:
+            return {"status": "invalid", "reason": "invalid_scope"}
+        state = self.load_state()
+        scope_state = state["portrait"][scope]
+        revision = int(scope_state.get("stable_revision") or 0)
+        try:
+            expected = int(expected_revision)
+        except (TypeError, ValueError):
+            return {"status": "invalid", "reason": "invalid_revision"}
+        if expected != revision:
+            return {"status": "conflict", "reason": "revision_mismatch", "revision": revision}
+        clean_text = str(text or "").strip()
+        if not clean_text:
+            return {"status": "invalid", "reason": "missing_text", "revision": revision}
+
+        changed = clean_text != str(scope_state.get("stable") or "").strip()
+        if changed:
+            # Preserve existing evidence/source_dates: a manual text edit is
+            # usually a tweak to the auto-maintained summary, not a full
+            # rewrite from scratch, so the prior evidence provenance still
+            # applies. Use forget/delete_state_item first if it doesn't.
+            scope_state["stable"] = clean_text
+            scope_state["stable_updated_at"] = self._now_utc()
+            scope_state["stable_revision"] = revision + 1
+
+        lock_changed = False
+        if locked is not None:
+            next_locked = self._bool(locked, bool(scope_state.get("stable_locked")))
+            lock_changed = next_locked != bool(scope_state.get("stable_locked"))
+            scope_state["stable_locked"] = next_locked
+
+        if not changed and not lock_changed:
+            return {
+                "status": "unchanged",
+                "scope": scope,
+                "revision": int(scope_state.get("stable_revision") or 0),
+                "locked": bool(scope_state.get("stable_locked")),
+            }
+        state["updated_at"] = self._now_utc()
+        self.save_state(state)
+        return {
+            "status": "updated",
+            "scope": scope,
+            "revision": int(scope_state.get("stable_revision") or 0),
+            "locked": bool(scope_state.get("stable_locked")),
+        }
+
+    def set_stable_lock(self, scope: str, locked: bool, expected_revision: int) -> dict:
+        """画像编辑+锁定: toggle a scope's lock without touching its text.
+        While locked, maintain_daily's auto-rewrite silently skips this
+        scope (see _apply_patch's rewrite_stable loop) -- manual edits via
+        edit_stable() still work regardless of lock state."""
+        scope = str(scope or "").strip()
+        if scope not in PORTRAIT_SCOPES:
+            return {"status": "invalid", "reason": "invalid_scope"}
+        state = self.load_state()
+        scope_state = state["portrait"][scope]
+        revision = int(scope_state.get("stable_revision") or 0)
+        try:
+            expected = int(expected_revision)
+        except (TypeError, ValueError):
+            return {"status": "invalid", "reason": "invalid_revision"}
+        if expected != revision:
+            return {"status": "conflict", "reason": "revision_mismatch", "revision": revision}
+        next_locked = self._bool(locked, bool(scope_state.get("stable_locked")))
+        if next_locked == bool(scope_state.get("stable_locked")):
+            return {"status": "unchanged", "scope": scope, "revision": revision, "locked": next_locked}
+        scope_state["stable_locked"] = next_locked
+        scope_state["stable_updated_at"] = self._now_utc()
+        state["updated_at"] = scope_state["stable_updated_at"]
+        self.save_state(state)
+        return {"status": "updated", "scope": scope, "revision": revision, "locked": next_locked}
+
     def _find_row_index(self, rows: list, *, index: int | None, text: str) -> int | None:
         if index is not None and 0 <= index < len(rows):
             if not text:
@@ -1233,12 +1319,18 @@ class DailyPortraitMaintainer:
             scope_state["mid_term_updated_at"] = self._now_utc()
         for item in patch.get("rewrite_stable", []):
             scope_state = portrait[item["scope"]]
+            if bool(scope_state.get("stable_locked")):
+                # 画像编辑+锁定: a locked scope's stable summary is only
+                # changed by a manual edit_stable() call, never by the
+                # nightly auto-maintenance patch.
+                continue
             scope_state["stable"] = item["text"]
             scope_state["stable_evidence"] = item["evidence"]
             source_dates = self._merge_source_dates([], item.get("source_dates", []))
             scope_state["stable_source_dates"] = source_dates
             scope_state["stable_source_date"] = source_dates[0] if source_dates else item.get("source_date", "")
             scope_state["stable_updated_at"] = self._now_utc()
+            scope_state["stable_revision"] = int(scope_state.get("stable_revision") or 0) + 1
         for item in patch.get("stable_candidate", []):
             self._upsert_candidate(state["stable_candidates"], item, date_key)
         for item in patch.get("profile_fact_candidate", []):
@@ -2014,6 +2106,8 @@ class DailyPortraitMaintainer:
                     "stable_source_dates": [],
                     "stable_source_date": "",
                     "stable_updated_at": "",
+                    "stable_locked": False,
+                    "stable_revision": 0,
                 }
                 for scope in PORTRAIT_SCOPES
             },

@@ -666,6 +666,186 @@ def test_portrait_rewrite_stable_updates_scope_paragraph_with_source_dates(tmp_p
         {"bucket_id": "fresh-bucket"},
     ]
     assert next_state["portrait"]["user"]["stable_source_dates"] == ["2026-06-10", "2026-06-08"]
+    assert next_state["portrait"]["user"]["stable_revision"] == 1
+
+
+def test_portrait_locked_scope_is_skipped_by_auto_rewrite(tmp_path, test_config):
+    state_path = tmp_path / "state" / "portrait_state.json"
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(state_path)},
+        }
+    )
+    state = engine._empty_state()
+    state["portrait"]["user"]["stable"] = "手动锁定的旧版本。"
+    state["portrait"]["user"]["stable_locked"] = True
+    state["portrait"]["user"]["stable_revision"] = 3
+    materials = {
+        "buckets": [{"bucket_id": "b1", "source_date": "2026-06-10"}],
+        "persona_events": [],
+        "previous_portrait": engine._portrait_snapshot(state),
+    }
+
+    normalized, rejected = engine._normalize_patch(
+        {
+            "rewrite_stable": [
+                {
+                    "scope": "user",
+                    "text": "自动生成的新版本，本应被跳过。",
+                    "evidence": [{"bucket_id": "b1"}],
+                    "confidence": 0.9,
+                },
+            ]
+        },
+        materials,
+    )
+    engine._annotate_patch_source_dates(normalized, materials)
+    next_state = engine._apply_patch(state, normalized, "2026-06-10")
+
+    assert rejected == []
+    assert next_state["portrait"]["user"]["stable"] == "手动锁定的旧版本。"
+    assert next_state["portrait"]["user"]["stable_revision"] == 3
+    assert next_state["portrait"]["user"]["stable_locked"] is True
+
+
+def test_portrait_unlocked_scope_still_auto_rewrites(tmp_path, test_config):
+    state_path = tmp_path / "state" / "portrait_state.json"
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(state_path)},
+        }
+    )
+    state = engine._empty_state()
+    materials = {
+        "buckets": [{"bucket_id": "b1", "source_date": "2026-06-10"}],
+        "persona_events": [],
+        "previous_portrait": engine._portrait_snapshot(state),
+    }
+
+    normalized, _rejected = engine._normalize_patch(
+        {
+            "rewrite_stable": [
+                {
+                    "scope": "user",
+                    "text": "未锁定，正常自动更新。",
+                    "evidence": [{"bucket_id": "b1"}],
+                    "confidence": 0.9,
+                },
+            ]
+        },
+        materials,
+    )
+    engine._annotate_patch_source_dates(normalized, materials)
+    next_state = engine._apply_patch(state, normalized, "2026-06-10")
+
+    assert next_state["portrait"]["user"]["stable"] == "未锁定，正常自动更新。"
+    assert next_state["portrait"]["user"]["stable_revision"] == 1
+
+
+def test_edit_stable_updates_text_and_lock_together(tmp_path, test_config):
+    state_path = tmp_path / "state" / "portrait_state.json"
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(state_path)},
+        }
+    )
+
+    result = engine.edit_stable("user", "一澜手动写的画像。", 0, locked=True)
+
+    assert result == {"status": "updated", "scope": "user", "revision": 1, "locked": True}
+    state = engine.load_state()
+    assert state["portrait"]["user"]["stable"] == "一澜手动写的画像。"
+    assert state["portrait"]["user"]["stable_locked"] is True
+    assert state["portrait"]["user"]["stable_revision"] == 1
+
+
+def test_edit_stable_rejects_stale_revision(tmp_path, test_config):
+    state_path = tmp_path / "state" / "portrait_state.json"
+    engine = DailyPortraitMaintainer(
+        {
+            **test_config,
+            "portrait": {"enabled": True, "state_path": str(state_path)},
+        }
+    )
+    engine.edit_stable("user", "第一版。", 0)
+
+    result = engine.edit_stable("user", "基于过期版本号的编辑。", 0)
+
+    assert result["status"] == "conflict"
+    assert result["revision"] == 1
+    assert engine.load_state()["portrait"]["user"]["stable"] == "第一版。"
+
+
+def test_edit_stable_rejects_invalid_scope(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+
+    result = engine.edit_stable("not_a_scope", "内容", 0)
+
+    assert result == {"status": "invalid", "reason": "invalid_scope"}
+
+
+def test_edit_stable_rejects_empty_text(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+
+    result = engine.edit_stable("user", "   ", 0)
+
+    assert result["status"] == "invalid"
+    assert result["reason"] == "missing_text"
+
+
+def test_edit_stable_returns_unchanged_when_nothing_changes(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+    engine.edit_stable("user", "同一份内容。", 0)
+
+    result = engine.edit_stable("user", "同一份内容。", 1)
+
+    assert result["status"] == "unchanged"
+    assert result["revision"] == 1
+
+
+def test_set_stable_lock_toggles_without_touching_text(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+    engine.edit_stable("relationship", "关系画像内容。", 0)
+
+    locked = engine.set_stable_lock("relationship", True, 1)
+    unlocked = engine.set_stable_lock("relationship", False, 1)
+
+    assert locked == {"status": "updated", "scope": "relationship", "revision": 1, "locked": True}
+    assert unlocked == {"status": "updated", "scope": "relationship", "revision": 1, "locked": False}
+    assert engine.load_state()["portrait"]["relationship"]["stable"] == "关系画像内容。"
+
+
+def test_set_stable_lock_rejects_stale_revision(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+    engine.edit_stable("user", "内容。", 0)
+
+    result = engine.set_stable_lock("user", True, 0)
+
+    assert result["status"] == "conflict"
+    assert result["revision"] == 1
+
+
+def test_set_stable_lock_returns_unchanged_when_already_at_target(tmp_path, test_config):
+    engine = DailyPortraitMaintainer(
+        {**test_config, "portrait": {"enabled": True, "state_path": str(tmp_path / "state" / "portrait_state.json")}}
+    )
+
+    result = engine.set_stable_lock("user", False, 0)
+
+    assert result["status"] == "unchanged"
 
 
 def test_portrait_delete_state_item_removes_rows_and_clears_paragraph(tmp_path, test_config):
