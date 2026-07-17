@@ -74,6 +74,7 @@ from persona_event_selection import (
     select_persona_events,
 )
 from raw_events import RawEventStore, raw_event_text_looks_injected, strip_raw_client_context
+from reminder_store import ReminderStore
 from reranker_engine import RerankerEngine
 from self_anchor import is_self_anchor_bucket, is_self_anchor_metadata
 from source_refs import source_ref_window
@@ -613,6 +614,7 @@ class GatewayService:
             os.path.join(config["buckets_dir"], "gateway_state.db")
         )
         self.raw_event_store = raw_event_store or RawEventStore(config)
+        self.reminder_store = ReminderStore(config)
         self.persona_engine = persona_engine or PersonaStateEngine(config)
         self.dream_engine = dream_engine or DreamEngine(config)
         self.dream_cfg = config.get("dream", {}) if isinstance(config.get("dream", {}), dict) else {}
@@ -740,6 +742,14 @@ class GatewayService:
             self.gateway_tz = ZoneInfo("Asia/Shanghai")
         self.favorite_memory_budget = int(self.gateway_cfg.get("favorite_memory_budget", 180))
         self.favorite_memory_max_cards = max(0, int(self.gateway_cfg.get("favorite_memory_max_cards", 1)))
+        self.active_reminders_enabled = self._bool_config_value(
+            self.gateway_cfg.get("active_reminders_enabled"),
+            True,
+        )
+        self.active_reminder_inject_limit = max(
+            0,
+            min(5, int(self.gateway_cfg.get("active_reminder_inject_limit", 2))),
+        )
         self.related_memory_budget = int(self.gateway_cfg.get("related_memory_budget", 220))
         self.diffusion_options = diffusion_options_from_config(config)
         self.diffusion_inject_max_items = max(
@@ -2224,6 +2234,8 @@ class GatewayService:
         relationship_weather = ""
         favorite_memory = ""
         favorite_ids: list[str] = []
+        active_reminders = ""
+        active_reminder_ids: list[str] = []
         related_memory = ""
         targeted_memory_detail = ""
         targeted_memory_detail_debug: dict[str, Any] = self._targeted_memory_detail_debug_base()
@@ -2322,6 +2334,12 @@ class GatewayService:
             stage_started_at = time.perf_counter()
             context_mode = self._classify_context_mode(current_user_query, persona_state)
             mark_step("context_mode", stage_started_at)
+            stage_started_at = time.perf_counter()
+            active_reminders, active_reminder_ids = self._build_active_reminders_block(
+                session_id,
+                channel="gateway",
+            )
+            mark_step("active_reminders", stage_started_at)
             if not needs_handoff_first and not just_now_context_requested and not date_recall_requested and self._should_inject_interval(
                 session_id,
                 self.core_memory_interval_rounds,
@@ -2592,6 +2610,7 @@ class GatewayService:
             related_memory=related_memory,
             targeted_memory_detail=targeted_memory_detail,
             dream_context=dream_context,
+            active_reminders=active_reminders,
             memory_detail_recall_instruction=memory_detail_recall_instruction,
             handoff_tool_hint=handoff_tool_hint,
             context_mode=context_mode,
@@ -2690,6 +2709,8 @@ class GatewayService:
                 recent_context=recent_context,
                 recent_context_reason=recent_context_reason,
                 favorite_ids=favorite_ids,
+                active_reminders=active_reminders,
+                active_reminder_ids=active_reminder_ids,
                 context_mode=context_mode,
                 diffused_moment_debug=diffused_moment_debug,
                 suppressed_moments=suppressed_moments,
@@ -3230,6 +3251,24 @@ class GatewayService:
                     "Gateway recent context cooldown record failed | session=%s round=%s error=%s",
                     session_id,
                     round_id,
+                    exc,
+                )
+        active_reminder_ids = []
+        if injection_debug:
+            active_reminder_ids = [
+                str(item)
+                for item in injection_debug.get("active_reminder_ids", []) or []
+                if str(item or "").strip()
+            ]
+        for reminder_id in active_reminder_ids:
+            try:
+                self.reminder_store.mark_reminded(reminder_id, round_id=round_id)
+            except Exception as exc:
+                logger.warning(
+                    "Gateway active reminder mark failed | session=%s round=%s reminder=%s error=%s",
+                    session_id,
+                    round_id,
+                    reminder_id,
                     exc,
                 )
         if injection_debug is not None:
@@ -5731,6 +5770,50 @@ class GatewayService:
             return True
         next_round = self.state_store.get_current_round(session_id) + 1
         return next_round == 1 or next_round % interval_rounds == 0
+
+    def _build_active_reminders_block(
+        self,
+        session_id: str,
+        *,
+        channel: str = "gateway",
+    ) -> tuple[str, list[str]]:
+        """照顾备忘: surface due reminders (from reminder_store, not derived
+        from bucket sections) as a quiet context nudge. Each reminder's own
+        repeat_rule/cooldown/daily_limit/interval_rounds decides whether
+        it's due this turn -- see ReminderStore.due()/._row_is_due()."""
+        if not self.active_reminders_enabled or self.active_reminder_inject_limit <= 0:
+            return "", []
+        next_round = self.state_store.get_current_round(session_id) + 1
+        try:
+            due_items = self.reminder_store.due(
+                session_id=session_id,
+                channel=channel,
+                round_id=next_round,
+                now=datetime.now(self.gateway_tz),
+                limit=self.active_reminder_inject_limit,
+            )
+        except Exception as exc:
+            logger.warning("Gateway active reminder lookup failed | session=%s error=%s", session_id, exc)
+            return "", []
+        if not due_items:
+            return "", []
+        lines = [
+            "照顾备忘：只在合适时轻轻带一句，不要机械复述。",
+        ]
+        ids = []
+        for item in due_items:
+            reminder_id = str(item.get("id") or "").strip()
+            title = self._clip_text(item.get("title") or "reminder", 80)
+            content = self._clip_text(item.get("content") or "", 220)
+            if not reminder_id or not content:
+                continue
+            ids.append(reminder_id)
+            due_hint = str(item.get("next_due_at") or item.get("start_at") or "").strip()
+            date_text = due_hint[:10] if due_hint else "未定日期"
+            lines.append(f"- [reminder_id:{reminder_id}] {date_text} {title}: {content}")
+        if len(lines) <= 1:
+            return "", []
+        return "\n".join(lines), ids
 
     def _get_persona_state_for_context_mode(self, session_id: str) -> dict[str, Any]:
         getter = getattr(self.persona_engine, "get_current_state", None)
@@ -13584,6 +13667,7 @@ class GatewayService:
         related_memory: str = "",
         targeted_memory_detail: str = "",
         dream_context: str = "",
+        active_reminders: str = "",
         memory_detail_recall_instruction: str = "",
         handoff_tool_hint: str = "",
         context_mode: str = "",
@@ -13606,6 +13690,7 @@ class GatewayService:
                 memory_detail_recall_instruction,
                 handoff_tool_hint,
                 dream_context,
+                active_reminders,
                 context_mode,
             ]
         )
@@ -13652,6 +13737,7 @@ class GatewayService:
             add_section("Just Now Chat Context", just_now_context)
             add_section("Date Recall", date_recall)
             add_section("Context Mode", f"context_mode: {context_mode}" if context_mode.strip() else "")
+            add_section("照顾备忘", active_reminders)
             add_section("Memory Detail Request", memory_detail_recall_instruction)
             add_section(
                 "Memory Reading Policy",
@@ -14050,6 +14136,8 @@ class GatewayService:
         recent_context: str,
         recent_context_reason: str,
         favorite_ids: list[str],
+        active_reminders: str = "",
+        active_reminder_ids: list[str] | None = None,
         context_mode: str = "",
         diffused_moment_debug: list[dict[str, Any]] | None = None,
         suppressed_moments: list[dict] | None = None,
@@ -14142,6 +14230,8 @@ class GatewayService:
             "date_persona_trace_debug": date_persona_trace_debug or self._date_persona_trace_debug_base(query),
             "dream_context_injected": bool(str(dream_context or "").strip()),
             "dream_context_status": dream_context_status,
+            "active_reminders_injected": bool(str(active_reminders or "").strip()),
+            "active_reminder_ids": list(active_reminder_ids or []),
             "query_planner_debug": query_planner_debug or self._query_planner_debug_base(query),
             "memory_sentinel_debug": memory_sentinel_debug or self._memory_sentinel_debug_base(query),
             "memory_detail_recall_debug": self._memory_detail_recall_debug_base(injected_bucket_ids),
@@ -14194,6 +14284,7 @@ class GatewayService:
             "targeted_memory_detail": targeted_memory_detail,
             "diffused_memory": related_memory,
             "dream_context": dream_context,
+            "active_reminders": active_reminders,
             "stable_context": stable_context,
             "dynamic_context": dynamic_context,
         }

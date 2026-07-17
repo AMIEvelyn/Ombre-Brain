@@ -9276,6 +9276,70 @@ def test_favorite_memory_injects_for_explicit_preference_query(monkeypatch, test
     assert "被认出来" in injected
 
 
+def test_active_reminders_block_injects_due_reminder_and_marks_it_reminded(
+    monkeypatch, test_config, bucket_mgr
+):
+    """照顾备忘: a due reminder should surface in the injected context, and
+    a successful round should mark it reminded (advancing/archiving it per
+    its repeat_rule), ported from Yinglianchun/Ombre-Brain's reminder_store."""
+    app, service, _, captured = _build_service(
+        monkeypatch,
+        _gateway_config(
+            test_config,
+            recent_context_budget=0,
+            recalled_memory_budget=0,
+            related_memory_budget=0,
+            current_inner_state_interval_rounds=0,
+            relationship_weather_interval_rounds=0,
+            favorite_memory_interval_rounds=0,
+            active_reminders_enabled=True,
+            active_reminder_inject_limit=2,
+        ),
+        bucket_mgr,
+    )
+    reminder = service.reminder_store.create(
+        title="喂猫",
+        content="记得晚上喂猫粮",
+        repeat_rule="once",
+        channel="gateway",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer gateway-secret",
+                "X-Ombre-Session-Id": "sess-active-reminder",
+            },
+            json={"messages": [{"role": "user", "content": "今天过得怎么样"}]},
+        )
+
+    assert response.status_code == 200
+    injected = _joined_message_content(captured[0]["json"]["messages"])
+    assert "照顾备忘" in injected
+    assert f"[reminder_id:{reminder['id']}]" in injected
+    assert "喂猫" in injected
+
+    updated = service.reminder_store.get(reminder["id"])
+    assert updated["reminder_count"] == 1
+    # repeat_rule="once" archives itself right after the first reminder.
+    assert updated["status"] == "archived"
+
+
+def test_active_reminders_block_disabled_by_config(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(
+        monkeypatch,
+        _gateway_config(test_config, active_reminders_enabled=False),
+        bucket_mgr,
+    )
+    service.reminder_store.create(title="喂猫", content="记得晚上喂猫粮", repeat_rule="once")
+
+    block, ids = service._build_active_reminders_block("sess-reminder-disabled")
+
+    assert block == ""
+    assert ids == []
+
+
 def test_date_persona_trace_prefers_original_excerpts_and_dedupes(
     monkeypatch, test_config, bucket_mgr
 ):

@@ -127,6 +127,7 @@ from recall_diagnostics import RecallDiagnosticsLogger
 from reranker_engine import RerankerEngine
 from self_anchor import SELF_ANCHOR_TAG, is_self_anchor_bucket, is_self_anchor_metadata
 from scripts.migrate_affect_anchor_sections import plan_bucket_migration
+from reminder_store import ReminderStore
 from source_refs import source_ref_window
 from todo_store import TodoStore
 from word_map import WordMapStore, reflection_identity_terms
@@ -184,6 +185,7 @@ darkroom_store = DarkroomStore(config)                  # Private reflection roo
 gateway_state_store = GatewayStateStore(os.path.join(config["buckets_dir"], "gateway_state.db"))
 raw_event_store = RawEventStore(config)                  # Raw dialogue archive / 原文保险箱
 todo_store = TodoStore(config)                            # Followup/todo derived state / 待办派生状态
+reminder_store = ReminderStore(config)                    # Standalone active reminders / 独立照顾备忘，不派生自桶
 
 # --- Create MCP server instance / 创建 MCP 服务器实例 ---
 # host="0.0.0.0" so Docker container's SSE is externally reachable
@@ -6963,6 +6965,123 @@ def _facts_skeleton_supplement(query: str, at_date: str = "") -> str:
 
 
 # =============================================================
+# 照顾备忘 (independent reminders, separate from memory buckets)
+# 独立照顾备忘 —— 不派生自桶的 ### followup/### todo，不写记忆桶，不触发 embedding
+# =============================================================
+def _reminder_public_payload(item: dict | None) -> dict:
+    if not item:
+        return {}
+    keys = [
+        "id",
+        "title",
+        "content",
+        "status",
+        "source",
+        "channel",
+        "session_id",
+        "start_at",
+        "end_at",
+        "next_due_at",
+        "repeat_rule",
+        "interval_rounds",
+        "cooldown_minutes",
+        "daily_limit",
+        "daily_reminder_date",
+        "daily_reminder_count",
+        "max_injections",
+        "last_reminded_at",
+        "last_reminded_round",
+        "reminder_count",
+        "created_at",
+        "updated_at",
+        "resolved_at",
+    ]
+    return {key: item.get(key) for key in keys}
+
+
+@mcp.tool()
+async def reminder_create(
+    title: str,
+    content: str,
+    next_due_at: str = "",
+    start_at: str = "",
+    end_at: str = "",
+    repeat_rule: str = "every_n_rounds",
+    interval_rounds: int = 6,
+    cooldown_minutes: int = 0,
+    daily_limit: int = -1,
+    max_injections: int = 0,
+    channel: str = "global",
+    session_id: str = "",
+) -> dict:
+    """创建独立照顾备忘；不写记忆桶，不触发 embedding。可设 start_at/end_at 和 daily_limit 控制每天出现次数；morning_evening 未指定时默认每天 2 次。repeat_rule 可用 once/every_n_rounds/daily/morning_evening。"""
+    try:
+        item = reminder_store.create(
+            title=title,
+            content=content,
+            next_due_at=next_due_at,
+            start_at=start_at,
+            end_at=end_at,
+            repeat_rule=repeat_rule,
+            interval_rounds=interval_rounds,
+            cooldown_minutes=cooldown_minutes,
+            daily_limit=daily_limit if daily_limit >= 0 else None,
+            max_injections=max_injections,
+            channel=channel,
+            session_id=session_id,
+            source="mcp",
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"status": "created", "reminder": _reminder_public_payload(item)}
+
+
+@mcp.tool()
+async def reminder_list(status: str = "active", limit: int = 20) -> dict:
+    """列出独立照顾备忘；status 可用 active/done/archived/all。"""
+    try:
+        items = reminder_store.list(status=status, limit=_int_between(limit, 20, 1, 100))
+    except ValueError as exc:
+        return {"error": str(exc), "reminders": []}
+    return {"count": len(items), "reminders": [_reminder_public_payload(item) for item in items]}
+
+
+@mcp.tool()
+async def reminder_update(
+    reminder_id: str,
+    status: str = "",
+    snooze_minutes: int = 0,
+    next_due_at: str = "",
+    title: str = "",
+    content: str = "",
+    daily_limit: int = -1,
+    max_injections: int = -1,
+) -> dict:
+    """更新独立照顾备忘；完成用 status="done"，稍后用 snooze_minutes。"""
+    reminder_id = _coerce_memory_id(reminder_id)
+    if not reminder_id:
+        return {"error": "missing reminder_id"}
+    try:
+        if snooze_minutes:
+            item = reminder_store.snooze(reminder_id, minutes=_int_between(snooze_minutes, 60, 1, 525600))
+        else:
+            item = reminder_store.update(
+                reminder_id,
+                status=status or None,
+                next_due_at=next_due_at if next_due_at != "" else None,
+                title=title if title != "" else None,
+                content=content if content != "" else None,
+                daily_limit=daily_limit if daily_limit >= 0 else None,
+                max_injections=max_injections if max_injections >= 0 else None,
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if not item:
+        return {"error": "not found", "id": reminder_id}
+    return {"status": "updated", "reminder": _reminder_public_payload(item)}
+
+
+# =============================================================
 # Tool 1: breath — Breathe
 # 工具 1：breath — 呼吸
 #
@@ -11211,6 +11330,128 @@ async def api_todo_writeback(request):
     if status == "skipped":
         return JSONResponse(result, status_code=400)
     return JSONResponse(result)
+
+
+@mcp.custom_route("/api/reminders", methods=["GET"])
+async def api_reminders(request):
+    """List standalone care memos (照顾备忘)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        status = str(request.query_params.get("status", "active") or "active").strip().lower()
+        limit = _int_between(request.query_params.get("limit"), 50, 1, 200)
+        items = reminder_store.list(status=status, limit=limit)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"count": len(items), "reminders": [_reminder_public_payload(item) for item in items]})
+
+
+@mcp.custom_route("/api/reminders", methods=["POST"])
+async def api_reminder_create(request):
+    """Create a standalone care memo without touching memory buckets."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    try:
+        item = reminder_store.create(
+            title=str(body.get("title") or ""),
+            content=str(body.get("content") or body.get("text") or ""),
+            next_due_at=str(body.get("next_due_at") or ""),
+            start_at=str(body.get("start_at") or ""),
+            end_at=str(body.get("end_at") or ""),
+            repeat_rule=str(body.get("repeat_rule") or "every_n_rounds"),
+            interval_rounds=_int_between(body.get("interval_rounds"), 6, 0, 100000),
+            cooldown_minutes=_int_between(body.get("cooldown_minutes"), 0, 0, 525600),
+            daily_limit=_int_between(body.get("daily_limit"), 1, 0, 100)
+            if "daily_limit" in body
+            else None,
+            max_injections=_int_between(body.get("max_injections"), 0, 0, 100000),
+            channel=str(body.get("channel") or "global"),
+            session_id=str(body.get("session_id") or ""),
+            source=str(body.get("source") or "dashboard"),
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"status": "created", "reminder": _reminder_public_payload(item)})
+
+
+@mcp.custom_route("/api/reminders/{reminder_id}", methods=["PATCH"])
+async def api_reminder_update(request):
+    """Update one standalone reminder. Snooze keeps it active and moves next_due_at."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    reminder_id = str(request.path_params.get("reminder_id") or "").strip()
+    if not reminder_id:
+        return JSONResponse({"error": "missing reminder_id"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "json body must be an object"}, status_code=400)
+    try:
+        if body.get("mark_reminded"):
+            item = reminder_store.mark_reminded(
+                reminder_id,
+                round_id=_int_between(body.get("round_id"), 0, 0, 100000000),
+            )
+        elif body.get("snooze_minutes"):
+            item = reminder_store.snooze(
+                reminder_id,
+                minutes=_int_between(body.get("snooze_minutes"), 60, 1, 525600),
+            )
+        else:
+            content_value = None
+            if "content" in body:
+                content_value = body.get("content")
+            elif "text" in body:
+                content_value = body.get("text")
+            item = reminder_store.update(
+                reminder_id,
+                title=body.get("title") if "title" in body else None,
+                content=content_value,
+                status=body.get("status") if "status" in body else None,
+                channel=body.get("channel") if "channel" in body else None,
+                session_id=body.get("session_id") if "session_id" in body else None,
+                start_at=body.get("start_at") if "start_at" in body else None,
+                end_at=body.get("end_at") if "end_at" in body else None,
+                next_due_at=body.get("next_due_at") if "next_due_at" in body else None,
+                repeat_rule=body.get("repeat_rule") if "repeat_rule" in body else None,
+                interval_rounds=_int_between(body.get("interval_rounds"), 0, 0, 100000)
+                if "interval_rounds" in body
+                else None,
+                cooldown_minutes=_int_between(body.get("cooldown_minutes"), 0, 0, 525600)
+                if "cooldown_minutes" in body
+                else None,
+                daily_limit=_int_between(body.get("daily_limit"), 1, 0, 100)
+                if "daily_limit" in body
+                else None,
+                max_injections=_int_between(body.get("max_injections"), 0, 0, 100000)
+                if "max_injections" in body
+                else None,
+            )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not item:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"status": "updated", "reminder": _reminder_public_payload(item)})
 
 
 @mcp.custom_route("/api/bucket/{bucket_id}", methods=["PATCH"])
