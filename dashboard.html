@@ -3697,7 +3697,7 @@
   <div class="facts-modal-panel">
     <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2MergeModal()">‹</button><span>合并到另一张卡</span></div>
     <div class="profile-proposal-form">
-      <input type="text" id="cards-v2-merge-search" placeholder="搜另一张卡的标题，回车搜索" onkeydown="cardsV2OnMergeSearchKeydown(event)" style="grid-column:1/-1;width:100%;" />
+      <input type="text" id="cards-v2-merge-search" placeholder="搜另一张卡的标题或事实卡id，回车搜索" onkeydown="cardsV2OnMergeSearchKeydown(event)" style="grid-column:1/-1;width:100%;" />
     </div>
     <div id="cards-v2-merge-body"><div class="loading" style="font-size:12px;">输入完按回车开始搜索…</div></div>
   </div>
@@ -8591,8 +8591,20 @@ function renderCardsV2Detail(){
   if (files.length) h += '<div class="facts-detail-files">' + files.map(function(f){ return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label||'文件') + '</a>'; }).join('') + '</div>';
   var tl = history.map(function(hh){
     var open = !!cardsV2TimelineExpanded[hh.id];
+    var hAtts = hh.attachments || [];
+    var hPhotos = hAtts.filter(function(a){ return a.type === 'image'; });
+    var hFiles = hAtts.filter(function(a){ return a.type !== 'image'; });
+    // 2026-07-17 (merge tool follow-up): older timepoints keep their own
+    // attachments untouched (merge never rewrites a revision), but until now
+    // there was no way to actually see them here -- only the "current"
+    // photo carousel + file chips ever rendered. Read-only thumbnails, no
+    // remove button (this is history, not an edit surface).
+    var hAttHtml = hAtts.length ? '<div class="facts-attachment-thumbs">'
+      + hPhotos.map(function(a){ return '<a class="facts-attachment-thumb" href="' + esc(a.url) + '" target="_blank" rel="noopener"><img src="' + esc(a.url) + '" alt="' + esc(a.label||'') + '"></a>'; }).join('')
+      + hFiles.map(function(a){ return '<a class="facts-attachment-thumb facts-attachment-thumb-file" href="' + esc(a.url) + '" target="_blank" rel="noopener" title="' + esc(a.label||'') + '"><span class="facts-attachment-file-icon">📄</span><span class="facts-attachment-file-name">' + esc(a.label||'文件') + '</span></a>'; }).join('')
+      + '</div>' : '';
     return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(cardsV2Date(hh.valid_at))
-      + '<div class="facts-timeline-entry-detail" style="display:' + (open?'':'none') + ';"><div><b>Name</b> ' + esc(hh.title || '') + '</div><div><b>Content</b> ' + esc(hh.content || '（无）') + '</div></div></div>';
+      + '<div class="facts-timeline-entry-detail" style="display:' + (open?'':'none') + ';"><div><b>Name</b> ' + esc(hh.title || '') + '</div><div><b>Content</b> ' + esc(hh.content || '（无）') + '</div>' + hAttHtml + '</div></div>';
   }).join('');
   h += '<div class="facts-detail-timeline">' + (tl || '<div class="loading">没有时间线记录。</div>') + '</div>';
   h += '</div>';

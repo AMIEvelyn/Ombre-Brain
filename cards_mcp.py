@@ -165,6 +165,10 @@ def _fmt_merge_result(store, result: dict) -> str:
     ]
     if result["tags_after"]:
         lines.append("当前标签（并集）：" + "、".join(result["tags_after"]))
+    lines.append(
+        "被合并那张卡原来的附件都还在，挂在它自己原来的时间点上——"
+        "用 card_history 看日期，传给 card_attachment_read/outline/view 的 at 参数就能读到。"
+    )
     return "\n".join(lines)
 
 
@@ -202,12 +206,43 @@ def register_card_tools(
     cards_api.register_card_routes) -- reused here rather than duplicated,
     powers card_buckets. None disables it with a clear message too."""
 
-    def _resolve_single_attachment(found: dict, label: str):
+    def _revision_at(found: dict, at: str):
+        """Return (revision_dict, error_message). Empty `at` means the
+        current (latest) revision -- unchanged default behavior. A non-empty
+        `at` is a YYYY-MM-DD date, the same format card_history displays per
+        timepoint, matched against each historical revision's valid_at.
+
+        2026-07-17 (merge tool's attachment gap, found by Lin Zhan + Yi Lan
+        testing a real merge): every attachment tool used to only ever look
+        at `current`, so after merging two cards, the losing card's
+        attachments -- still fully intact on its own (now older) timepoint,
+        merge never touches revision content -- became unreachable through
+        any of these tools. `at` is how you reach them. Picking a date
+        (something a human reads straight off card_history) rather than an
+        internal revision id is the same call already made once before, for
+        the same reason: see why segment_id got removed entirely in favor of
+        whole-content editing (§14 item 3, Phase 3e)."""
+        if not at:
+            current = found.get("current")
+            if not current:
+                return None, "这张卡还没有任何时间点记录。"
+            return current, ""
+        at = at.strip()
+        matches = [h for h in (found.get("history") or []) if str(h.get("valid_at") or "")[:10] == at]
+        if not matches:
+            return None, f"没找到日期是 {at} 的时间点，用 card_history 看看这张卡有哪些日期。"
+        matches.sort(key=lambda h: h.get("id", 0), reverse=True)  # same day, several revisions -- newest of that day
+        return matches[0], ""
+
+    def _resolve_single_attachment(revision: dict, label: str):
         """Return (attachment_dict, error_message) for tools that need to
         act on exactly one non-image attachment (outline/paginated read).
         Shared by card_attachment_outline and card_attachment_read's
-        section_id/start/max_chars branch."""
-        attachments = (found.get("current") or {}).get("attachments") or []
+        section_id/start/max_chars branch. Takes the already-resolved
+        revision dict (see _revision_at) rather than the whole card, so it
+        works the same whether that's the current state or a historical
+        timepoint picked via `at`."""
+        attachments = (revision or {}).get("attachments") or []
         candidates = [a for a in attachments if a.get("type") != "image"]
         if label:
             label_lower = label.strip().lower()
@@ -299,7 +334,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_attachment_read(
-        card: str = "", label: str = "", section_id: str = "", start: int = 0, max_chars: int = 0,
+        card: str = "", label: str = "", section_id: str = "", start: int = 0, max_chars: int = 0, at: str = "",
     ) -> str:
         """读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
         .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
@@ -307,6 +342,11 @@ def register_card_tools(
         这两种会明确告诉你读不了、不是没找到。
         card：卡片标题或 id。label：可选，附件文件名（或其中一部分），用来在
         一张卡有多个附件时指定读哪个。
+        at：可选，YYYY-MM-DD 格式的日期，对应 card_history 显示的某个历史时间点
+        ——不传就是读当前状态的附件（默认行为不变）。**两张卡合并之后，被合并
+        掉那张卡原来的附件不会消失，还完整留在它自己原来的那个时间点上，只是
+        不再是"当前"了**——想读的话先用 card_history 看一眼那个时间点的日期，
+        再把这个日期传给 at。
 
         不传 section_id/start/max_chars 时：读这张卡里所有能读的文本附件（多个
         会一起返回），超长的单个附件会被截断并提示改用下面这两种分段方式。
@@ -323,10 +363,13 @@ def register_card_tools(
         found, err = _resolve_card(store, card)
         if err:
             return err
+        revision, err = _revision_at(found, at)
+        if err:
+            return err
 
         paginated = bool(section_id) or start > 0 or max_chars > 0
         if paginated:
-            attachment, err = _resolve_single_attachment(found, label)
+            attachment, err = _resolve_single_attachment(revision, label)
             if err:
                 return err
             name = str(attachment.get("label") or "附件")
@@ -363,9 +406,9 @@ def register_card_tools(
 
         if read_attachment_text is None:
             return "这个部署还没接上附件内容读取（read_attachment_text 未配置）。"
-        attachments = (found.get("current") or {}).get("attachments") or []
+        attachments = (revision or {}).get("attachments") or []
         if not attachments:
-            return "这张卡没有附件。"
+            return "这张卡在这个时间点没有附件。" if at else "这张卡没有附件。"
         if label:
             label_lower = label.strip().lower()
             attachments = [a for a in attachments if label_lower in str(a.get("label", "")).lower()]
@@ -385,7 +428,7 @@ def register_card_tools(
         return "\n\n".join(blocks)
 
     @mcp.tool()
-    async def card_attachment_outline(card: str = "", label: str = "") -> str:
+    async def card_attachment_outline(card: str = "", label: str = "", at: str = "") -> str:
         """解析一张资料卡附件的章节/目录结构（.docx/.pdf/.md），配合
         card_attachment_read 的 section_id 参数分章节读长文档，不用一次性
         读全文再自己找位置。
@@ -396,13 +439,18 @@ def register_card_tools(
         **没检测到章节结构是正常结果，不是报错**——原文档确实没有清晰的章节标记
         时就是这样，改用 card_attachment_read 的 start/max_chars 分段读全文。
         card：卡片标题或 id。label：可选，附件文件名（或其中一部分），多个非
-        图片附件时用来指定解析哪一个。"""
+        图片附件时用来指定解析哪一个。at：可选，跟 card_attachment_read 的 at
+        参数是同一回事——不传就是当前状态，传日期就是那个历史时间点（合并过
+        的卡，另一张卡的附件在它自己原来的时间点上）。"""
         if attachment_outline is None:
             return "这个部署还没接上章节解析（attachment_outline 未配置）。"
         found, err = _resolve_card(store, card)
         if err:
             return err
-        attachment, err = _resolve_single_attachment(found, label)
+        revision, err = _revision_at(found, at)
+        if err:
+            return err
+        attachment, err = _resolve_single_attachment(revision, label)
         if err:
             return err
         name = str(attachment.get("label") or "附件")
@@ -418,7 +466,7 @@ def register_card_tools(
         return "\n".join(lines)
 
     @mcp.tool()
-    async def card_attachment_view(card: str = "", label: str = ""):
+    async def card_attachment_view(card: str = "", label: str = "", at: str = ""):
         # No return-type annotation on purpose: FastMCP builds a pydantic
         # schema from it at registration time, and a Union[str, Image]
         # annotation crashes that (pydantic has no schema for the plain
@@ -431,13 +479,19 @@ def register_card_tools(
         调用后如果你能描述出图片里的内容，说明能看；如果只是报错或者看不出画面，
         说明这条路径在当前的技术条件下暂时不通，不是这张卡或这个附件的问题。
         card：卡片标题或 id。label：可选，附件文件名（或其中一部分）；留空且只
-        有一张图片时直接发那一张，有多张会列出来请你说得更具体一点。"""
+        有一张图片时直接发那一张，有多张会列出来请你说得更具体一点。
+        at：可选，跟 card_attachment_read 的 at 参数是同一回事——不传就是当前
+        状态，传日期（YYYY-MM-DD，跟 card_history 显示的一致）就是那个历史
+        时间点（合并过的卡，另一张卡的图片在它自己原来的时间点上）。"""
         if read_attachment_image is None:
             return "这个部署还没接上图片查看（read_attachment_image 未配置）。"
         found, err = _resolve_card(store, card)
         if err:
             return err
-        attachments = (found.get("current") or {}).get("attachments") or []
+        revision, err = _revision_at(found, at)
+        if err:
+            return err
+        attachments = (revision or {}).get("attachments") or []
         photos = [a for a in attachments if a.get("type") == "image"]
         if label:
             label_lower = label.strip().lower()
@@ -725,7 +779,10 @@ def register_card_write_tools(mcp, store) -> None:
         同一件事，误建成了两张，想合成一张"的情况——先看一眼合并后会是
         什么样子，确认没问题再调 card_merge 真正执行。
         card_a / card_b：两张卡各自的标题或 id，顺序不影响预览内容（真正
-        合并时才需要指定保留哪一张的 id）。"""
+        合并时才需要指定保留哪一张的 id）。
+        注意：这里的"标题或 id"是指现在还活着的卡——**已经被合并掉的旧卡**
+        只能用它完整、精确的旧 id 才能找到（会自动跳到合并后的卡），旧标题
+        和旧 id 的一部分都搜不到，因为旧卡已经从常规列表和搜索里排除了。"""
         found_a, err = _resolve_card(store, card_a)
         if err:
             return f"卡A：{err}"
@@ -746,8 +803,18 @@ def register_card_write_tools(mcp, store) -> None:
         建议先调 card_merge_preview 看一眼再执行。
         card_a / card_b：两张卡各自的标题或 id。
         keep：合并后保留哪一张的标题或 id（必须是 card_a 或 card_b 其中
-        一张）；另一张会变成一个永久指向保留卡的重定向——以后不管谁还拿着
-        旧的标题/id 去查，都会自动跳到合并后的卡，不会丢数据也不会查不到。"""
+        一张）；另一张会变成一个永久指向保留卡的重定向。
+
+        **重定向规则要记清楚**：只有旧卡完整、精确的 id 会被自动跳转到合并
+        后的卡——旧标题不会保留成别名（旧标题搜不到任何东西），旧 id 的
+        部分片段也搜不到，必须是完整 id。以后想再找回这张卡，务必用它的
+        完整 id，别指望凭旧标题还能搜到。
+
+        **附件不会丢，但要按日期去读**：被合并掉那张卡原来的附件（图片/
+        文件）一个都不会少，还完整挂在它自己原来的那个时间点上，只是不再
+        是"当前状态"了，所以 card_attachment_read/outline/view 默认（不传
+        at 参数）读不到——用 card_history 看一眼那个时间点的日期，把日期
+        传给这三个工具的 at 参数，就能读到。"""
         found_a, err = _resolve_card(store, card_a)
         if err:
             return f"卡A：{err}"

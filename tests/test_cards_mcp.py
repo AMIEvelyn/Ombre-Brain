@@ -332,6 +332,33 @@ def main():
     assert isinstance(disabled_view, str) and "还没接上图片查看" in disabled_view
     print("PASS card_attachment_view: disabled cleanly when not wired up")
 
+    # --- at=: reading a merged-away card's attachments off its own (older) timepoint ---
+    # 2026-07-17: real bug Yi Lan + Lin Zhan hit testing a real merge -- merge
+    # never touches a revision's attachments, but every attachment tool used
+    # to only ever look at "current", so the losing card's attachments became
+    # unreachable. `at` (a YYYY-MM-DD date, same as card_history shows) fixes it.
+    merge_a = store.create_card(
+        title="testA", content="A", valid_at="2026-01-01",
+        attachments=[
+            {"type": "file", "label": "testA.md", "url": "/x/testA.md", "_text": "A的内容"},
+            {"type": "image", "label": "snowA.png", "url": "/x/snowA.png"},
+        ],
+    )
+    merge_b = store.create_card(
+        title="testB", content="B", valid_at="2026-02-01",
+        attachments=[{"type": "file", "label": "testB.md", "url": "/x/testB.md", "_text": "B的内容"}],
+    )
+    store.merge_cards(merge_b, merge_a)  # keep B (later date), discard A
+    at_date = "2026-01-01"
+    no_at = _run(card_attachment_read(card=merge_b))
+    assert "testA.md" not in no_at and "B的内容" in no_at  # default (no at) is still just "current" = B
+    with_at = _run(card_attachment_read(card=merge_b, at=at_date))
+    assert "A的内容" in with_at and "testB.md" not in with_at  # at= reaches A's own timepoint instead
+    assert isinstance(_run(card_attachment_view(card=merge_b, at=at_date)), _FakeImage)  # A's image, via at=
+    bad_date = _run(card_attachment_read(card=merge_b, at="1999-01-01"))
+    assert "没找到日期是" in bad_date
+    print("PASS card_attachment_read/view: at= reaches a merged-away card's attachments by date")
+
     # --- card_lookup now hints at attachments + linked buckets (used to say nothing) ---
     out_doc = _run(card_lookup(query="旅行攻略"))
     assert "📎 附件：1 张图片，2 个文件（行程.md、船票.doc）" in out_doc

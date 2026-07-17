@@ -449,7 +449,19 @@ docker exec ombre-brain pip install python-docx pypdf
    - `dashboard.html`：卡片详情"···"菜单新增"🔗 合并到另一张卡"，弹窗内搜另一张卡→选中看预览（交错后条数、并集标签/文件夹/记忆桶数、附件总数）→选保留哪张→确认。
    - 测试：`test_cards_store.py` 新增 10 个 merge 相关用例（交错正确性、并集去重、tags_override 不污染历史、旧 id 透明重定向、墓碑链拍平、拒绝自合并/重复合并、`all_cards()` 不因墓碑重复计数、preview 与实际结果一致）；`test_cards_write_mcp.py`/`test_cards_api.py` 各自新增端到端用例；真实 FastMCP 注册冒烟测试同步更新（19 个工具）。四套测试全绿，`node --check` 通过。
 
-   **部署**：还是原来那 4 个文件（`server.py` 这次没改）—— `cards_store.py`、`cards_api.py`、`cards_mcp.py`、`dashboard.html`，`docker cp` 进容器 + 重启，跟以前流程一样。**没有新增 Python 依赖**（不像上一次附件解析那次还要额外 `pip install`），照常 `docker cp` 换文件就够。部署后建议照旧新建两张测试卡走一遍"合并预览→确认合并→查旧id自动跳转"，确认没问题再回来更新这里的"待部署验证"状态。
+   **部署**：还是原来那 4 个文件（`server.py` 这次没改）—— `cards_store.py`、`cards_api.py`、`cards_mcp.py`、`dashboard.html`，`docker cp` 进容器 + 重启，跟以前流程一样。**没有新增 Python 依赖**（不像上一次附件解析那次还要额外 `pip install`），照常 `docker cp` 换文件就够。
+
+   **✅ 一澜实测部署成功（2026-07-17）**，一轮真实验收（用 `testA`/`testB` 两张带附件的测试卡走完整流程）发现 3 个问题，已全部修复：
+
+   1. **搜索加 id**：合并搜索框（Dashboard 的"合并到另一张卡"+ 林湛的 `card_merge_preview`/`card_merge`）之前只能按标题搜，加了 id 子串匹配——两边共用同一个 `search_cards()`，一处修好两处生效。placeholder 文字也同步改成"搜另一张卡的标题或事实卡id"。
+   2. **"选它"按钮太丑**：换成跟 Add Bucket 那边"+"一样风格的圆形箭头图标"→"。
+   3. **真 bug：附件读取工具只看"当前"，看不到合并前另一张卡的附件**——一澜和林湛联合验收精确复现：`testA` 的 `test-a.docx`/`testA.md` 合并后读不到，卡片摘要只显示 `testB` 自己的 1 张图 2 个文件。**根因排查（写了脚本直接验证）确认：merge 本身完全没丢数据**——`testA` 的附件原封不动躺在它自己那个（现在变成历史的）时间点上，`merge_cards()` 只改 `card_id` 归属，从不碰任何一条 revision 自己的 `attachments` 字段。真正的缺口是**三个附件工具（`card_attachment_read`/`card_attachment_outline`/`card_attachment_view`）和 Dashboard 的时间线展开视图，从来都只读"当前"这一个时间点，压根没有路径能看到历史时间点上的附件**——这个缺口在 merge 出现前不太会被撞见（谁没事去查一张卡的历史附件），merge 第一次让它成了真问题。
+      - **修法**：三个 MCP 工具新增 `at` 参数（可选，`YYYY-MM-DD` 日期，跟 `card_history` 显示的日期一致），不传就是原来的行为（读当前），传了就读那个历史时间点。特意选"日期"不是"revision id"——踩过一次 `segment_id` 暴露给林湛却没人能发现怎么用的坑（§14 第3项 Phase 3e），这次直接避开同一个错误，日期是 `card_history` 输出里本来就有的、人能看懂的东西。
+      - `card_merge`/`card_merge_preview` 的工具说明同步补充两条之前没写清楚、这次验收才发现遗漏的规则：①**旧 id 重定向必须是完整精确的 id，旧标题不保留别名、旧 id 的片段也搜不到**（已用代码验证过：完整旧 id 能跳转，完整旧标题和旧 id 片段都会"没找到"——因为旧卡已经从 `all_cards()`/`search_cards()` 的候选列表里整个排除了，只有 `get_card()` 的精确 id 直查会走重定向解析）；②附件不会丢但要按日期用 `at` 参数读，`card_merge` 执行后的确认消息里也顺手加了这句提醒。
+      - Dashboard 那边同步修：卡片详情页时间线展开某个历史时间点时，现在会一起显示那个时间点自己的图片缩略图和文件卡片（之前展开只有标题和内容，附件完全没渲染），一澜现在能在界面上直接验证"旧时间点附件还在"，不用靠林湛帮忙查。
+      - 新增测试：`test_cards_mcp.py` 补了完整复现场景（合并两张各带附件的卡，不传 `at` 只看到当前卡的附件、传旧日期能读到被合并卡的附件、瞎传日期报错提示用 `card_history` 核对）；`node --check` 确认前端改动没有语法问题。四套测试全部重跑通过，无回归。
+
+   建议下次部署验证时，除了走一遍"合并预览→确认合并→查旧id自动跳转"，再补一次"合并两张都带附件的卡→用 `at` 参数读旧卡附件→Dashboard 展开旧时间点看附件缩略图"，把这次踩过的坑重新走一遍确认真的修好了。
 
 ### 第三优先级——该收尾但不紧急
 
