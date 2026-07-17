@@ -33,6 +33,35 @@ def _gen_id(prefix: str) -> str:
     return prefix + uuid.uuid4().hex[:12]
 
 
+def _gen_segment_id() -> str:
+    return "seg" + uuid.uuid4().hex[:12]
+
+
+# Co-authorship (2026-07-17): both Yi Lan (Dashboard) and Lin Zhan (MCP write
+# tools, once built) can write into a card's content. AUTHOR_* are the only
+# two valid values -- anything else is a bug in the caller, not a real third
+# author, so writes validate against this set rather than accepting any string.
+AUTHOR_YI_LAN = "yi_lan"
+AUTHOR_LIN_ZHAN = "lin_zhan"
+VALID_AUTHORS = {AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN}
+AUTHOR_DISPLAY_NAMES = {AUTHOR_YI_LAN: "一澜", AUTHOR_LIN_ZHAN: "林湛"}
+
+
+class SegmentOwnershipError(Exception):
+    """Raised by edit_content_segment/delete_content_segment when the caller
+    is trying to change or remove a segment someone else wrote, without
+    force=True. Carries enough detail for the caller (Dashboard API / MCP
+    tool) to show a real confirmation prompt instead of a generic error."""
+    def __init__(self, segment_id: str, author: str, text_preview: str):
+        self.segment_id = segment_id
+        self.author = author
+        self.text_preview = text_preview
+        super().__init__(
+            f"segment {segment_id} was written by {author!r}, not the caller -- "
+            f"pass force=True to override (preview: {text_preview[:40]!r})"
+        )
+
+
 class CardStore:
     def __init__(self, config: dict | None = None, *, db_path: str = ""):
         config = config or {}
@@ -108,7 +137,49 @@ class CardStore:
             """
         )
         conn.commit()
+        self._migrate_authorship_columns(conn)
         conn.close()
+
+    def _migrate_authorship_columns(self, conn: sqlite3.Connection) -> None:
+        """Migration-safe ALTER TABLE, same pattern as facts_store.py's --
+        adds title_author/content_segments to an existing card_revisions
+        table without touching any existing row's data. Safe to run on
+        every startup: checks column existence first, so it's a no-op once
+        already applied.
+
+        title_author defaults to 'yi_lan' for every pre-existing row via the
+        column DEFAULT itself (Yi Lan's explicit request: everything written
+        before this feature existed was in fact written by her, so it should
+        say so, not show up unlabeled).
+
+        content_segments can't get its per-row backfill from a column
+        DEFAULT alone (DEFAULT '[]' would make every old card's content
+        look like it has *no* author, not 'written by Yi Lan') -- so after
+        adding the column, a second pass wraps each pre-existing row's plain
+        `content` string into a single yi_lan-authored segment. Only rows
+        still at the untouched default ('[]' with non-empty content) get
+        backfilled, so this is idempotent and never overwrites a real
+        segment list written by the new code."""
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(card_revisions)")}
+        if "title_author" not in existing:
+            conn.execute(
+                f"ALTER TABLE card_revisions ADD COLUMN title_author TEXT NOT NULL DEFAULT '{AUTHOR_YI_LAN}'"
+            )
+        if "content_segments" not in existing:
+            conn.execute("ALTER TABLE card_revisions ADD COLUMN content_segments TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+
+        rows = conn.execute(
+            "SELECT id, content FROM card_revisions WHERE content_segments = '[]' AND content != ''"
+        ).fetchall()
+        for row in rows:
+            segments = [{"id": _gen_segment_id(), "author": AUTHOR_YI_LAN, "text": row["content"]}]
+            conn.execute(
+                "UPDATE card_revisions SET content_segments = ? WHERE id = ?",
+                (json.dumps(segments, ensure_ascii=False), row["id"]),
+            )
+        if rows:
+            conn.commit()
 
     @staticmethod
     def _now_iso() -> str:
@@ -119,9 +190,39 @@ class CardStore:
         return json.dumps(value or [], ensure_ascii=False)
 
     @staticmethod
+    def _check_author(author: str) -> str:
+        author = str(author or "")
+        if author not in VALID_AUTHORS:
+            raise ValueError(f"author must be one of {sorted(VALID_AUTHORS)}, got {author!r}")
+        return author
+
+    @staticmethod
+    def _render_content(segments: list[dict]) -> str:
+        """Flatten authored segments into the plain-text `content` column that
+        every existing reader (search, card_lookup, the old Dashboard render
+        path) already knows how to use, so nothing else in the codebase has
+        to learn about segments to keep working.
+
+        A single segment renders as plain text with no author label -- this
+        is the common case (one person wrote the whole thing) and matches
+        how virtually every card already looks; labeling a single author
+        would just be clutter nobody asked for. Two or more segments each
+        get a "作者：文本" block, in order, blank-line separated -- the same
+        convention Yi Lan was already typing by hand, now generated instead
+        of relying on anyone remembering to type it."""
+        if not segments:
+            return ""
+        if len(segments) == 1:
+            return str(segments[0].get("text", ""))
+        return "\n\n".join(
+            f"{AUTHOR_DISPLAY_NAMES.get(s.get('author'), s.get('author'))}：{s.get('text', '')}"
+            for s in segments
+        )
+
+    @staticmethod
     def _revision_row(row: sqlite3.Row) -> dict:
         item = dict(row)
-        for key in ("tags", "attachments"):
+        for key in ("tags", "attachments", "content_segments"):
             try:
                 item[key] = json.loads(item.get(key) or "[]")
             except (TypeError, ValueError):
@@ -141,23 +242,34 @@ class CardStore:
         valid_at: str | None = None,
         note: str = "",
         folder_ids: list[str] | None = None,
+        author: str = AUTHOR_YI_LAN,
     ) -> str:
         """Create a card and its first revision. Optionally file it into folders
-        right away. Returns the new card id."""
+        right away. Returns the new card id.
+
+        author: who's creating this card -- AUTHOR_YI_LAN (default, matches
+        every existing caller unchanged) or AUTHOR_LIN_ZHAN once his write
+        tools call this. Tags the title and wraps `content` (if any) into a
+        single segment credited to `author` -- the whole card starts out
+        single-authored, which is the overwhelmingly common case."""
+        author = self._check_author(author)
         card_id = _gen_id("F")
         now = self._now_iso()
+        segments = [{"id": _gen_segment_id(), "author": author, "text": str(content)}] if content else []
         conn = self._connect()
         conn.execute("INSERT INTO cards (id, created_at) VALUES (?, ?)", (card_id, now))
         conn.execute(
             """
             INSERT INTO card_revisions
-                (card_id, title, content, tags, attachments, valid_at, created_at, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (card_id, title, content, tags, attachments, valid_at, created_at, note,
+                 title_author, content_segments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                card_id, str(title or ""), str(content or ""),
+                card_id, str(title or ""), self._render_content(segments),
                 self._dump(tags), self._dump(attachments),
                 str(valid_at or now), now, str(note or ""),
+                author, json.dumps(segments, ensure_ascii=False),
             ),
         )
         for folder_id in folder_ids or []:
@@ -172,33 +284,67 @@ class CardStore:
         *,
         title: str | None = None,
         content: str | None = None,
+        content_segments: list[dict] | None = None,
         tags: list[str] | None = None,
         attachments: list[dict] | None = None,
         valid_at: str | None = None,
         note: str = "",
+        author: str = AUTHOR_YI_LAN,
     ) -> int:
         """New Revision: append a new timepoint to a card's timeline. Fields left
         as None are carried over from the current (latest) revision, so a bare
         add_revision snapshots the card forward; typically content is supplied.
-        The new revision becomes the current state (valid_at defaults to now)."""
+        The new revision becomes the current state (valid_at defaults to now).
+
+        author: who's writing this new revision. Only matters for fields
+        actually being changed here -- title_author only updates if `title`
+        is given (unchanged titles keep whoever wrote them before); content
+        authorship only changes if `content`/`content_segments` is given.
+
+        content vs content_segments -- two ways to say the same thing:
+        - content_segments: full control, pass the exact segment list this
+          revision should have (e.g. "keep Yi Lan's segment, add mine").
+        - content: convenience for the common single-author case -- wraps
+          the whole string into one segment credited to `author`, replacing
+          whatever segments existed before. Fine when one person is writing
+          the whole new revision; if you want to preserve someone else's
+          existing segment alongside a new one, use content_segments (see
+          add_content_segment for the even simpler "just add mine" case
+          that doesn't require a new timepoint at all).
+        Passing neither carries the current revision's segments forward
+        unchanged, same as every other field here."""
+        author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
             raise ValueError(f"card not found: {card_id}")
         now = self._now_iso()
-        title = current["title"] if title is None else str(title)
-        content = current["content"] if content is None else str(content)
+        title_author = current.get("title_author", AUTHOR_YI_LAN)
+        if title is None:
+            title = current["title"]
+        else:
+            title = str(title)
+            title_author = author
+        if content_segments is not None:
+            segments = content_segments
+        elif content is not None:
+            segments = [{"id": _gen_segment_id(), "author": author, "text": str(content)}] if content else []
+        else:
+            segments = current.get("content_segments") or []
         tags_val = current["tags"] if tags is None else tags
         attachments_val = current["attachments"] if attachments is None else attachments
         conn = self._connect()
         cursor = conn.execute(
             """
             INSERT INTO card_revisions
-                (card_id, title, content, tags, attachments, valid_at, created_at, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (card_id, title, content, tags, attachments, valid_at, created_at, note,
+                 title_author, content_segments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                card_id, title, content, self._dump(tags_val), self._dump(attachments_val),
+                card_id, title, self._render_content(segments),
+                self._dump(tags_val), self._dump(attachments_val),
                 str(valid_at or now), now, str(note or ""),
+                title_author, json.dumps(segments, ensure_ascii=False),
             ),
         )
         rev_id = cursor.lastrowid
@@ -214,18 +360,46 @@ class CardStore:
         content: str | None = None,
         tags: list[str] | None = None,
         attachments: list[dict] | None = None,
+        author: str = AUTHOR_YI_LAN,
+        force: bool = False,
     ) -> bool:
         """Edit the current (latest) revision in place -- no new timepoint. Title
-        can be changed freely: identity is the card id, so renaming never splits
-        the timeline (that was the old title-as-identity bug)."""
+        can be changed freely by either author (tags title_author to whoever
+        just changed it); identity is the card id, so renaming never splits
+        the timeline (that was the old title-as-identity bug).
+
+        content here is the convenience whole-string replace, for the common
+        single-segment case -- it discards whatever segments existed and
+        replaces them with one new segment credited to `author`.
+
+        Rule C (2026-07-17, Yi Lan's call): freely *adding* content never
+        needs permission, but *replacing or removing* something the other
+        author wrote does. Since this whole-string replace by definition
+        blows away every existing segment, it checks whether any of them
+        were written by someone other than `author`; if so and force isn't
+        True, raises SegmentOwnershipError instead of silently overwriting
+        someone else's words. Use add_content_segment to add your own text
+        without touching what's already there (never needs force). For a
+        multi-segment revision, prefer edit_content_segment/
+        delete_content_segment on the specific segment over this blunt
+        whole-string replace."""
+        author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
             return False
         updates: dict[str, Any] = {}
         if title is not None:
             updates["title"] = str(title)
+            updates["title_author"] = author
         if content is not None:
-            updates["content"] = str(content)
+            existing_segments = current.get("content_segments") or []
+            foreign = [s for s in existing_segments if s.get("author") != author]
+            if foreign and not force:
+                s = foreign[0]
+                raise SegmentOwnershipError(str(s.get("id", "")), str(s.get("author", "")), str(s.get("text", "")))
+            segments = [{"id": _gen_segment_id(), "author": author, "text": content}] if content else []
+            updates["content"] = self._render_content(segments)
+            updates["content_segments"] = json.dumps(segments, ensure_ascii=False)
         if tags is not None:
             updates["tags"] = self._dump(tags)
         if attachments is not None:
@@ -237,6 +411,89 @@ class CardStore:
         conn.execute(
             f"UPDATE card_revisions SET {set_clause} WHERE id = ?",
             (*updates.values(), int(current["id"])),
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def set_title(self, card_id: str, title: str, *, author: str = AUTHOR_YI_LAN) -> bool:
+        """Change just the current revision's title, in place, tagged to
+        whoever changed it -- no ownership check (Yi Lan's call: titles are
+        short and either of you retitling a card doesn't need a confirm
+        prompt the way rewriting someone else's paragraph does)."""
+        return self.edit_current(card_id, title=title, author=author)
+
+    def add_content_segment(self, card_id: str, *, author: str, text: str) -> str:
+        """Append a new segment to the current revision's content, in place --
+        no new timepoint, and never needs force: adding your own words next
+        to what's already there doesn't touch anyone else's. This is the
+        normal way either of you adds to a card's content day-to-day; the
+        whole-string replace in edit_current(content=...) is for the rarer
+        case of actually starting over. Returns the new segment's id."""
+        author = self._check_author(author)
+        current = self.get_current_revision(card_id)
+        if current is None:
+            raise ValueError(f"card not found: {card_id}")
+        segments = list(current.get("content_segments") or [])
+        segment_id = _gen_segment_id()
+        segments.append({"id": segment_id, "author": author, "text": str(text)})
+        conn = self._connect()
+        conn.execute(
+            "UPDATE card_revisions SET content = ?, content_segments = ? WHERE id = ?",
+            (self._render_content(segments), json.dumps(segments, ensure_ascii=False), int(current["id"])),
+        )
+        conn.commit()
+        conn.close()
+        return segment_id
+
+    def edit_content_segment(
+        self, card_id: str, segment_id: str, *, text: str, author: str, force: bool = False,
+    ) -> bool:
+        """Change one existing segment's text in place. Rule C: if that
+        segment wasn't written by `author` and force isn't True, raises
+        SegmentOwnershipError instead of silently rewriting someone else's
+        words -- the caller (Dashboard API / MCP tool) is expected to turn
+        that into a real confirmation prompt, then retry with force=True."""
+        author = self._check_author(author)
+        current = self.get_current_revision(card_id)
+        if current is None:
+            return False
+        segments = list(current.get("content_segments") or [])
+        idx = next((i for i, s in enumerate(segments) if s.get("id") == segment_id), None)
+        if idx is None:
+            return False
+        existing = segments[idx]
+        if existing.get("author") != author and not force:
+            raise SegmentOwnershipError(segment_id, str(existing.get("author", "")), str(existing.get("text", "")))
+        segments[idx] = {"id": segment_id, "author": existing.get("author"), "text": str(text)}
+        conn = self._connect()
+        conn.execute(
+            "UPDATE card_revisions SET content = ?, content_segments = ? WHERE id = ?",
+            (self._render_content(segments), json.dumps(segments, ensure_ascii=False), int(current["id"])),
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def delete_content_segment(self, card_id: str, segment_id: str, *, author: str, force: bool = False) -> bool:
+        """Remove one segment from the current revision. Same rule C check as
+        edit_content_segment: deleting someone else's segment needs force=True."""
+        author = self._check_author(author)
+        current = self.get_current_revision(card_id)
+        if current is None:
+            return False
+        segments = list(current.get("content_segments") or [])
+        idx = next((i for i, s in enumerate(segments) if s.get("id") == segment_id), None)
+        if idx is None:
+            return False
+        existing = segments[idx]
+        if existing.get("author") != author and not force:
+            raise SegmentOwnershipError(segment_id, str(existing.get("author", "")), str(existing.get("text", "")))
+        del segments[idx]
+        conn = self._connect()
+        conn.execute(
+            "UPDATE card_revisions SET content = ?, content_segments = ? WHERE id = ?",
+            (self._render_content(segments), json.dumps(segments, ensure_ascii=False), int(current["id"])),
         )
         conn.commit()
         conn.close()
