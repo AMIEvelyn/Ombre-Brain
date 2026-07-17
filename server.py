@@ -13159,6 +13159,7 @@ cards_mcp.register_card_tools(
     attachment_outline=_facts_attachment_outline,
     bucket_summary=_bucket_link_summary,
 )
+cards_mcp.register_card_write_tools(mcp, card_store)
 
 
 # --- Entry point / 启动入口 ---

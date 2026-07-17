@@ -25,9 +25,19 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
                      attachment (see 慁 truncation problem, 2026-07-16),
                      pairs with card_attachment_read's section_id/start/
                      max_chars pagination params for reading long documents.
+
+register_card_write_tools(mcp, store) is the separate write surface (2026-07-17,
+docs/facts-model-v2-collection-redesign.md §14 item 3): card_create,
+card_create_folder, card_add_to_folder, card_remove_from_folder,
+card_edit_title, card_edit_tags, card_add_content, card_edit_content,
+card_delete_content, card_new_revision, card_link_bucket, card_unlink_bucket.
+No card_delete (Yi Lan wants a recycle-bin review step first, not built yet)
+and no attachment upload (no binary-file channel through an MCP tool call).
 """
 
 from __future__ import annotations
+
+from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
 
 # Default page size for card_attachment_read's start/max_chars pagination
 # when max_chars isn't given -- same as server.py's whole-file truncation
@@ -429,3 +439,239 @@ def register_card_tools(
             body = f"：{preview}" if preview else ""
             lines.append(f"- [{rel}] {date} 【{name}】(id: {link['bucket_id']}){body}")
         return "\n".join(lines)
+
+
+def register_card_write_tools(mcp, store) -> None:
+    """Lin Zhan's write access to cards.sqlite (see docs/facts-model-v2-
+    collection-redesign.md §14 item 3): new/edit/new-revision, folder
+    management, bucket linking -- matching what Yi Lan can already do from
+    the Dashboard, field for field, per her explicit request.
+
+    Deliberately does NOT include:
+    - Whole-card deletion. Yi Lan's call (2026-07-17): she wants a recycle-
+      bin/review step before anything he deletes is gone for good, bundled
+      with a future memory-bucket deletion project -- not built yet. Until
+      then, deleting a whole card stays a Dashboard-only (her) action.
+    - Attachment upload. He has no channel to send actual file bytes through
+      an MCP tool call -- only the Dashboard can receive a real upload.
+
+    Every write here is tagged AUTHOR_LIN_ZHAN in cards_store's authorship
+    model (see cards_store.py's module docstring / SegmentOwnershipError).
+    Content changes that would touch a segment Yi Lan wrote raise
+    SegmentOwnershipError; caught here and turned into a plain-text
+    confirmation prompt (Yi Lan's rule C) instead of an error -- call once
+    to see whose text it is, call again with force=True to actually do it."""
+
+    def _card_result(card_id: str) -> str:
+        card = store.get_card(card_id)
+        cur = (card or {}).get("current") or {}
+        return f"【{cur.get('title') or '(无标题)'}】（id: {card_id}）"
+
+    @mcp.tool()
+    async def card_create(
+        title: str = "", content: str = "", tags: list[str] | None = None,
+        valid_at: str = "", folder: str = "", bucket_ids: list[str] | None = None,
+    ) -> str:
+        """新建一张资料卡，字段跟一澜在Dashboard上新建时一样：标题、内容、标签、
+        日期（valid_at，不传默认今天）、归入哪个文件夹（可选，传文件夹名或id，
+        文件夹必须已经存在——想建一个还不存在的新文件夹，先调 card_create_folder）、
+        要关联哪些记忆桶（bucket_ids，可选）。
+        标题和内容至少要给一个。内容如果写了，会记为你写的一段。"""
+        title = str(title or "").strip()
+        content = str(content or "")
+        if not title and not content:
+            return "标题和内容至少要给一个。"
+        folder_ids: list[str] = []
+        if folder:
+            folder_id, err = _resolve_folder(store, folder)
+            if err:
+                return err
+            folder_ids = [folder_id]
+        try:
+            card_id = store.create_card(
+                title=title, content=content, tags=tags or [],
+                valid_at=(valid_at.strip() or None), folder_ids=folder_ids,
+                author=AUTHOR_LIN_ZHAN,
+            )
+        except Exception as e:
+            return f"新建失败：{e}"
+        failed_buckets = []
+        for bucket_id in bucket_ids or []:
+            try:
+                store.add_bucket_link(card_id, bucket_id)
+            except ValueError:
+                failed_buckets.append(bucket_id)
+        note = f"（{len(failed_buckets)} 个记忆桶关联失败：{', '.join(failed_buckets)}）" if failed_buckets else ""
+        return f"已新建 {_card_result(card_id)}{note}"
+
+    @mcp.tool()
+    async def card_create_folder(name: str = "", parent: str = "") -> str:
+        """新建一个文件夹（馆），可选归到某个已有文件夹底下。
+        name：新文件夹的名字。parent：可选，父文件夹名或id，不传就是顶层新馆。"""
+        name = str(name or "").strip()
+        if not name:
+            return "请给文件夹起个名字。"
+        parent_id = ""
+        if parent:
+            parent_id, err = _resolve_folder(store, parent)
+            if err:
+                return err
+        folder_id = store.create_folder(name, parent_id=parent_id)
+        return f"已新建文件夹「{store.folder_path(folder_id)}」（id: {folder_id}）"
+
+    @mcp.tool()
+    async def card_add_to_folder(card: str = "", folder: str = "") -> str:
+        """把一张卡加进某个文件夹——不影响它已经在的其它文件夹，一张卡本来就
+        能同时归进好几个文件夹。card：卡片标题或id。folder：文件夹名或id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        folder_id, err = _resolve_folder(store, folder)
+        if err:
+            return err
+        added = store.add_card_to_folder(found["id"], folder_id)
+        return "已加入。" if added else "已经在这个文件夹里了。"
+
+    @mcp.tool()
+    async def card_remove_from_folder(card: str = "", folder: str = "") -> str:
+        """把一张卡从某个文件夹移出——只是取消归类，卡本身不会被删，也不影响
+        它在其它文件夹里的归属。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        folder_id, err = _resolve_folder(store, folder)
+        if err:
+            return err
+        removed = store.remove_card_from_folder(found["id"], folder_id)
+        return "已移出。" if removed else "这张卡本来就不在这个文件夹里。"
+
+    @mcp.tool()
+    async def card_edit_title(card: str = "", title: str = "") -> str:
+        """修改一张卡当前时间点的标题（原地修改，不产生新的时间点）。改了之后
+        这个标题会记为你写的（不会在标题文字里加"湛："这种前缀，纯粹是后台
+        记录，一澜的界面上会用颜色区分）。card：卡片标题或id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        title = str(title or "").strip()
+        if not title:
+            return "标题不能是空的。"
+        store.set_title(found["id"], title, author=AUTHOR_LIN_ZHAN)
+        return f"标题已改成「{title}」。"
+
+    @mcp.tool()
+    async def card_edit_tags(card: str = "", tags: list[str] | None = None) -> str:
+        """整体替换一张卡当前时间点的标签列表——是替换成你传的这一份，不是追加。
+        card：卡片标题或id。tags：新的标签列表，传空列表就是清空标签。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        if tags is None:
+            return "请给一个标签列表（传空列表 [] 就是清空标签）。"
+        store.edit_current(found["id"], tags=tags, author=AUTHOR_LIN_ZHAN)
+        return f"标签已更新为：{'、'.join(tags) if tags else '（空）'}"
+
+    @mcp.tool()
+    async def card_add_content(card: str = "", text: str = "") -> str:
+        """给一张卡的内容追加一段你写的文字——是在已有内容后面加一段，不是替换，
+        不产生新的时间点。**永远不需要确认**：加东西不会碰到一澜写的部分，
+        这是你日常给卡片补充想法最正常的用法。
+        card：卡片标题或id。text：你要写的内容。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        text = str(text or "")
+        if not text.strip():
+            return "内容不能是空的。"
+        store.add_content_segment(found["id"], author=AUTHOR_LIN_ZHAN, text=text)
+        return "已添加。"
+
+    @mcp.tool()
+    async def card_edit_content(card: str = "", segment_id: str = "", text: str = "", force: bool = False) -> str:
+        """修改内容里的某一段。改自己写的那段不需要确认；改一澜写的那段，第一次
+        调用（不传 force）会告诉你那段是谁写的、写了什么，不会真的改——确认要
+        改的话，带上 force=true 再调用一次才会真的执行。
+        segment_id：card_lookup/card_history 或上一次操作的结果里能看到每段
+        内容自己的 id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        if not segment_id:
+            return "请给要修改的那一段的 segment_id。"
+        try:
+            ok = store.edit_content_segment(
+                found["id"], segment_id, text=text, author=AUTHOR_LIN_ZHAN, force=force,
+            )
+        except SegmentOwnershipError as e:
+            return f"这段是一澜写的：「{e.text_preview}」。确定要改的话，带上 force=true 再调用一次。"
+        return "已修改。" if ok else f"没找到 segment_id={segment_id!r}。"
+
+    @mcp.tool()
+    async def card_delete_content(card: str = "", segment_id: str = "", force: bool = False) -> str:
+        """删除内容里的某一段。规则跟 card_edit_content 一样：删自己写的不用
+        确认；删一澜写的那段，第一次调用会先告诉你是谁写的、写了什么，带
+        force=true 再调用一次才会真的删。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        if not segment_id:
+            return "请给要删除的那一段的 segment_id。"
+        try:
+            ok = store.delete_content_segment(found["id"], segment_id, author=AUTHOR_LIN_ZHAN, force=force)
+        except SegmentOwnershipError as e:
+            return f"这段是一澜写的：「{e.text_preview}」。确定要删的话，带上 force=true 再调用一次。"
+        return "已删除。" if ok else f"没找到 segment_id={segment_id!r}。"
+
+    @mcp.tool()
+    async def card_new_revision(
+        card: str = "", title: str = "", content: str = "", tags: list[str] | None = None, valid_at: str = "",
+    ) -> str:
+        """给一张卡加一个新的时间点（真正留档，不是原地改）。不传的字段会照抄
+        上一个时间点；传了 content 会**整体替换**这个新时间点的内容（不会自动
+        带上上一个时间点里一澜写的部分——旧内容还完整留在历史记录里，没丢，
+        只是不出现在这个新时间点上，想看回去用 card_history）。
+        想在保留原内容基础上加东西、又不想产生新时间点，用 card_add_content。
+        valid_at：这个时间点对应的真实日期，不传默认现在。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        kwargs: dict = {"author": AUTHOR_LIN_ZHAN}
+        if title:
+            kwargs["title"] = title
+        if content:
+            kwargs["content"] = content
+        if tags is not None:
+            kwargs["tags"] = tags
+        if valid_at:
+            kwargs["valid_at"] = valid_at
+        try:
+            store.add_revision(found["id"], **kwargs)
+        except ValueError as e:
+            return str(e)
+        return f"已加新时间点：{_card_result(found['id'])}"
+
+    @mcp.tool()
+    async def card_link_bucket(card: str = "", bucket_id: str = "", relation_type: str = "evidence") -> str:
+        """把一个记忆桶关联到一张卡上，作为这张卡内容的证据来源。
+        relation_type：关系类型，默认 evidence（证据），也可以传 origin/related。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        if not bucket_id:
+            return "请给要关联的记忆桶 id。"
+        try:
+            added = store.add_bucket_link(found["id"], bucket_id, relation_type=relation_type or "evidence")
+        except ValueError as e:
+            return str(e)
+        return "已关联。" if added else "已经关联过了。"
+
+    @mcp.tool()
+    async def card_unlink_bucket(card: str = "", bucket_id: str = "") -> str:
+        """取消一张卡跟某个记忆桶的关联（不会删记忆桶本身）。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        if not bucket_id:
+            return "请给要取消关联的记忆桶 id。"
+        removed = store.remove_bucket_link(found["id"], bucket_id)
+        return "已取消关联。" if removed else "这张卡本来就没关联这个记忆桶。"
