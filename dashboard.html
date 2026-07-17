@@ -2490,6 +2490,16 @@
     padding: 4px 2px;
     margin-left: 2px;
   }
+  .facts-md-h1 { font-size: 17px; font-weight: 700; margin: 10px 0 4px; }
+  .facts-md-h2 { font-size: 15px; font-weight: 700; margin: 8px 0 4px; }
+  .facts-md-h3 { font-size: 14px; font-weight: 600; margin: 6px 0 4px; opacity: .85; }
+  .facts-detail-content code {
+    background: var(--surface-solid);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 13px;
+  }
+  .facts-content-segment:first-child { margin-top: 0; }
   .facts-detail-timeline { border-top: 1px solid var(--border); padding-top: 10px; }
   .facts-timeline-row {
     font-size: 13px;
@@ -8421,12 +8431,79 @@ function cardsV2RenderPhotos(photos){
 function cardsV2SetPhoto(i){ cardsV2PhotoIdx = i; renderCardsV2Detail(); }
 function cardsV2PhotoTouchStart(e){ var t = e.touches[0]; if (t) cardsV2Touch = { x: t.clientX, y: t.clientY }; }
 function cardsV2PhotoTouchEnd(e, count){ var s = cardsV2Touch; cardsV2Touch = null; if (!s || count < 2) return; var t = e.changedTouches[0]; if (!t) return; var dx = t.clientX - s.x, dy = t.clientY - s.y; if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return; cardsV2PhotoIdx = dx < 0 ? Math.min(cardsV2PhotoIdx+1, count-1) : Math.max(cardsV2PhotoIdx-1, 0); renderCardsV2Detail(); }
+// 2026-07-17: co-authorship colors, Yi Lan's own pick (real "day color"
+// swatches she sent, not arbitrary): 一澜 = Pull Cyan Blue, 林湛 = Cypress Green.
+var CARDS_V2_AUTHOR_COLOR = { yi_lan: '#044d78', lin_zhan: '#264939' };
+var CARDS_V2_AUTHOR_NAME = { yi_lan: '一澜', lin_zhan: '林湛' };
+
+// Small markdown subset -- bold/italic/code/headers/lists -- not a full
+// CommonMark implementation, just what Yi Lan actually asked to see
+// rendered instead of shown as raw **/#/`` symbols. Escapes first (reuses
+// the existing esc()), then applies substitutions on the already-escaped
+// text -- markdown syntax chars (*, #, `) don't collide with what esc()
+// touches (<, >, &, "), so this is safe against the text containing HTML.
+function cardsV2Markdown(text){
+  var t = esc(String(text || ''));
+  t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<i>$2</i>');
+  t = t.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<i>$2</i>');
+  var lines = t.split('\n'); var out = []; var inList = false;
+  lines.forEach(function(line){
+    var li = line.match(/^[-*]\s+(.*)$/);
+    if (li) { if (!inList) { out.push('<ul>'); inList = true; } out.push('<li>' + li[1] + '</li>'); return; }
+    if (inList) { out.push('</ul>'); inList = false; }
+    var h3 = line.match(/^###\s+(.*)$/), h2 = line.match(/^##\s+(.*)$/), h1 = line.match(/^#\s+(.*)$/);
+    if (h3) out.push('<div class="facts-md-h3">' + h3[1] + '</div>');
+    else if (h2) out.push('<div class="facts-md-h2">' + h2[1] + '</div>');
+    else if (h1) out.push('<div class="facts-md-h1">' + h1[1] + '</div>');
+    else if (line.trim() === '') out.push('<br>');
+    else out.push(line + '<br>');
+  });
+  if (inList) out.push('</ul>');
+  return out.join('');
+}
+
 function cardsV2RenderContent(content){
   content = String(content || ''); if (!content) return '';
   var over = content.length > FACTS_CONTENT_COLLAPSE_CHARS;
   var shown = (cardsV2ContentExpanded || !over) ? content : content.slice(0, FACTS_CONTENT_COLLAPSE_CHARS) + '…';
   var toggle = over ? '<span class="facts-detail-content-toggle" onclick="cardsV2ToggleContent()">' + (cardsV2ContentExpanded ? '收起' : '展开') + '</span>' : '';
-  return '<div class="facts-detail-content">' + esc(shown) + toggle + '</div>';
+  return '<div class="facts-detail-content">' + cardsV2Markdown(shown) + toggle + '</div>';
+}
+
+// content_segments-aware rendering: a single segment (the common case) looks
+// exactly like before (no author clutter); two or more segments each get a
+// colored left border + small author label, matching the "one color per
+// author" scheme -- falls back to the old flat-content path for any legacy
+// card somehow still without segments.
+function cardsV2RenderContentSegments(cur){
+  var segments = cur.content_segments || [];
+  if (segments.length < 2) return cardsV2RenderContent(cur.content);
+  var over = (cur.content || '').length > FACTS_CONTENT_COLLAPSE_CHARS;
+  var toggle = over ? '<span class="facts-detail-content-toggle" onclick="cardsV2ToggleContent()">' + (cardsV2ContentExpanded ? '收起' : '展开') + '</span>' : '';
+  var body = segments.map(function(s){
+    var color = CARDS_V2_AUTHOR_COLOR[s.author] || '#888';
+    var name = CARDS_V2_AUTHOR_NAME[s.author] || s.author;
+    return '<div class="facts-content-segment" style="border-left:3px solid ' + color + ';padding-left:10px;margin:8px 0;">'
+      + '<div style="font-size:11px;font-weight:600;margin-bottom:2px;color:' + color + ';">' + esc(name) + '</div>'
+      + cardsV2Markdown(s.text)
+      + '</div>';
+  }).join('');
+  if (!cardsV2ContentExpanded && over) body = body.slice(0, FACTS_CONTENT_COLLAPSE_CHARS * 3); // rough cap, refined once Yi Lan sees it
+  return '<div class="facts-detail-content">' + body + toggle + '</div>';
+}
+
+async function cardsV2QuickAddContent(){
+  var card = cardsV2.detail; if (!card) return;
+  var text = prompt('给这张卡加一段你的想法：');
+  if (!text || !text.trim()) return;
+  try {
+    await fetch('/api/cards-skeleton/cards/' + card.id + '/content-segments', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({text: text}),
+    });
+  } catch(e){}
+  await openCardsV2Detail(card.id); loadCardsV2();
 }
 function cardsV2ToggleContent(){ cardsV2ContentExpanded = !cardsV2ContentExpanded; renderCardsV2Detail(); }
 function cardsV2ToggleTimelineEntry(id){ cardsV2TimelineExpanded[id] = !cardsV2TimelineExpanded[id]; renderCardsV2Detail(); }
@@ -8446,14 +8523,16 @@ function renderCardsV2Detail(){
     + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
     + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
     + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
+    + '<div onclick="cardsV2QuickAddContent()">✚ 添加想法</div>'
     + '<div onclick="openCardsV2BucketsModal()">🫙 View Bucket' + (buckets.length ? '（' + buckets.length + '）' : '') + '</div>'
     + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
     + '</div></div>';
-  h += '<div class="facts-detail-title">' + esc(cur.title || '(无标题)') + '</div>';
+  var titleColor = CARDS_V2_AUTHOR_COLOR[cur.title_author] || '';
+  h += '<div class="facts-detail-title"' + (titleColor ? ' style="color:' + titleColor + ';"' : '') + '>' + esc(cur.title || '(无标题)') + '</div>';
   h += '<div class="facts-detail-breadcrumb" style="margin:-6px 0 12px;">id：' + esc(card.id) + '</div>';
   h += cardsV2RenderPhotos(photos);
-  h += cardsV2RenderContent(cur.content);
+  h += cardsV2RenderContentSegments(cur);
   if (tags.length) h += '<div class="facts-detail-tags">' + tags.map(function(t){ return '<span class="facts-detail-tag">#' + esc(t) + '</span>'; }).join('') + '</div>';
   if (files.length) h += '<div class="facts-detail-files">' + files.map(function(f){ return '<a class="facts-detail-file-chip" href="' + esc(f.url) + '" target="_blank" rel="noopener">📎 ' + esc(f.label||'文件') + '</a>'; }).join('') + '</div>';
   var tl = history.map(function(hh){
@@ -8640,6 +8719,7 @@ function openCardsV2EditModal(){
   var card = cardsV2.detail; if (!card) return; var cur = card.current || {};
   cardsV2.editId = card.id; cardsV2.editTags = (cur.tags || []).slice();
   cardsV2Attach.edit = (cur.attachments || []).slice();
+  cardsV2.editOrigContent = cur.content || '';
   document.getElementById('cards-v2-edit-title').value = cur.title || '';
   document.getElementById('cards-v2-edit-content').value = cur.content || '';
   document.getElementById('cards-v2-edit-message').textContent = '';
@@ -8649,9 +8729,25 @@ function openCardsV2EditModal(){
   document.getElementById('cards-v2-edit-overlay').style.display = '';
 }
 function closeCardsV2EditModal(){ document.getElementById('cards-v2-edit-overlay').style.display = 'none'; }
-async function submitCardsV2Edit(){
-  var body = { title: document.getElementById('cards-v2-edit-title').value, content: document.getElementById('cards-v2-edit-content').value, tags: cardsV2.editTags.slice(), attachments: cardsV2Attach.edit.slice() };
-  try { await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+async function submitCardsV2Edit(force){
+  var msg = document.getElementById('cards-v2-edit-message');
+  var newContent = document.getElementById('cards-v2-edit-content').value;
+  var body = { title: document.getElementById('cards-v2-edit-title').value, tags: cardsV2.editTags.slice(), attachments: cardsV2Attach.edit.slice() };
+  // only send content when it actually changed -- untouched content should
+  // never trip the ownership check (e.g. a title-only fix on Lin Zhan's card)
+  if (newContent !== cardsV2.editOrigContent) body.content = newContent;
+  if (force) body.force = true;
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var d = await r.json().catch(function(){ return {}; });
+    if (r.status === 409 && d.error === 'ownership_conflict') {
+      var name = CARDS_V2_AUTHOR_NAME[d.author] || d.author;
+      var ok = confirm('这段内容是' + name + '写的：\n「' + d.text_preview + '」\n\n确定要整段覆盖吗？');
+      if (ok) return submitCardsV2Edit(true);
+      return;
+    }
+    if (!r.ok) { if (msg) msg.textContent = '失败：' + (d.error || r.status); return; }
+  } catch(e){ if (msg) msg.textContent = '失败：' + e; return; }
   closeCardsV2EditModal(); await openCardsV2Detail(cardsV2.editId); loadCardsV2();
 }
 function openCardsV2RevisionModal(){
