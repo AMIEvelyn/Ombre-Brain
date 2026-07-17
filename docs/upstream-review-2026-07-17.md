@@ -44,14 +44,16 @@
 
 **部署**：这次动了 `server.py`、`dream_engine.py`、`dashboard.html`（`ombre-brain` 容器）+ 4 个 `scripts/` 脚本（宿主机，不用 docker cp，直接更新仓库文件）。`scripts/` 那几个不需要重启容器，`server.py`/`dream_engine.py`/`dashboard.html` 需要照常 `docker cp` + `docker restart`。
 
-## 四、待办：还差 2 项小的，卡在需要真实文件
+## 四、本轮同步的第 4、5 项（第10项，动态 alpha 校准 + 召回缓存）
 
-**动态 alpha 校准 + 召回缓存**（第10项）——已确认改动精确、风险低，但 `gateway.py` 跑在独立的 `ombre-gateway` 容器里、`bucket_manager.py` 也没跟她的真实部署核对过，这次一直没碰。按老规矩，需要一澜导出这两个文件：
-```
-docker cp ombre-brain:/app/bucket_manager.py /tmp/bucket_manager_live.py
-docker cp ombre-gateway:/app/gateway.py /tmp/gateway_live.py
-```
-拿到之后再继续这两项。
+一澜导出了真实部署的 `bucket_manager.py`（`ombre-brain` 容器）和 `gateway.py`（`ombre-gateway` 容器），逐字节核对后确认跟仓库一致，在此基础上完成了这两项：
+
+4. **词法评分缓存**（`bucket_manager.py`）：新增 `_lexical_profile_cache`（按 bucket id 缓存分词结果，签名不匹配时自动失效重算，容量上限 4096 条防止无界增长），`_bucket_lexical_profile()`/`_lexical_phrase_boost()` 都改成共用新的 `_bucket_lexical_cache_entry()`，新增 `warm_lexical_profiles(buckets)` 可以在 `list_all()` 之后批量预热，避免冷启动第一次搜索现算分词。**纯性能优化，不改变任何评分结果**——新增 5 个测试验证缓存命中/失效/预热行为 + 短语加权分值不变。upstream 的 `gateway.py`（`warm_recall_runtime`/`_list_gateway_buckets`）和 `memory_relevance.py`/`recall_policy.py` 部分没有对应移植目标或文件未核对，跳过。
+5. **动态 alpha 置信度校准**（`gateway.py` 的 `_dynamic_alpha_debug`）：① confidence 公式从"语义分量*0.7 + margin分量*0.3"改成两者相乘（乘积对"语义分数中等但候选间区分度低"的场景更保守，避免虚高 alpha）；② margin 从"top1 - top2"改成"top1 - avg(top2..top6)"（用更多候选做参照，减少单条候选分数抖动的影响）；③ `conf_lo`/`conf_hi`/`margin_ref`/`alpha_min`/`alpha_max` 全部改成可以从 `recall_thresholds` 里配置覆盖（`dynamic_alpha_conf_lo` 等 5 个新 key），不配置时行为等同于原来的硬编码默认值。`config.example.yaml` 加了这 5 个 key 的注释说明（默认注释掉，不生效），如果实测 alpha 摆动感觉不对可以照着 upstream 给的 Qwen 起始值解注调参。新增 2 个测试锁定新公式的精确数值 + 覆盖行为；已有的 3 个 `dynamic_alpha` 行为测试全部保持通过。
+
+**部署**：这次动了 `bucket_manager.py`（`ombre-brain` 容器）、`gateway.py`（`ombre-gateway` 容器）、`config.example.yaml`（仓库文件，不影响已部署的 `config.yaml`，只是给以后想调参时看的参考）。按老规矩 `docker cp` + 对应容器 `docker restart`。
+
+至此帖子里的 5 项"小同步"（部署防护、raw API 鉴权、梦境查看、词法缓存、alpha 校准）全部完成。
 
 ## 五、留到大改动会话再做的 4 项
 

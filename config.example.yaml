@@ -257,6 +257,18 @@ recall_thresholds:
   explicit_admission_semantic_score: 0.72
   explicit_admission_rerank_score: 0.65
   vague_top_k: 50
+  # Dynamic-alpha confidence calibration (used only by _dynamic_alpha_debug's
+  # semantic/lexical blend weight) is embedding-model-specific and is
+  # intentionally separate from the admission thresholds above. Leave these
+  # commented to keep the previous defaults (conf_lo falls back to
+  # vector_min_score, conf_hi falls back to high_confidence_semantic_score,
+  # margin_ref/alpha_min/alpha_max as below); uncomment and tune per your
+  # embedding model if `alpha` swings feel off in practice.
+  # dynamic_alpha_conf_lo: 0.45
+  # dynamic_alpha_conf_hi: 0.65
+  # dynamic_alpha_margin_ref: 0.10
+  # dynamic_alpha_min: 0.35
+  # dynamic_alpha_max: 0.85
 
 # --- Recall behavior / 召回行为 ---
 recall:

@@ -181,6 +181,18 @@ class BucketManager:
         self.content_weight = scoring.get("content_weight", 1.0)  # Added to allow better content-based matching during merge
         self.lexical_stop_terms = self._build_lexical_stop_terms(config)
 
+        # --- Lexical scoring cache (2026-07-17, ported from upstream's
+        # "Cache recall scoring inputs") -- calc_topic_scores() re-tokenizes
+        # every candidate bucket's name/domain/tags/content on every search
+        # call; this caches that per-bucket profile keyed by a content
+        # signature, so an unchanged bucket's tokens/phrase fields are
+        # computed once and reused across searches instead of every call.
+        # Bounded (clears at 4096 entries) so it can't grow unboundedly.
+        self._lexical_profile_cache: dict[
+            str,
+            tuple[tuple, Counter[str], float, tuple[str, str, str, str]],
+        ] = {}
+
         # --- In-memory cache for list_all() / list_all() 内存缓存 ---
         # Avoids re-walking + re-parsing every .md bucket file on every search
         # (was O(n) disk+CPU per call, unusable at 7000+ buckets -- see docs
@@ -1144,12 +1156,42 @@ class BucketManager:
         return bucket_content_for_recall(bucket)[:1000]
 
     def _bucket_lexical_profile(self, bucket: dict) -> tuple[Counter[str], float]:
+        _signature, term_frequency, weighted_length, _phrase_fields = self._bucket_lexical_cache_entry(bucket)
+        return term_frequency, weighted_length
+
+    def warm_lexical_profiles(self, buckets: list[dict]) -> int:
+        """Pre-populate the lexical cache for a batch of buckets (e.g. right
+        after list_all()), so the first search after a cold start doesn't
+        pay the tokenization cost inline. Returns how many were warmed."""
+        warmed = 0
+        for bucket in buckets or []:
+            if not isinstance(bucket, dict) or not bucket.get("id"):
+                continue
+            self._bucket_lexical_cache_entry(bucket)
+            warmed += 1
+        return warmed
+
+    def _bucket_lexical_cache_entry(
+        self,
+        bucket: dict,
+    ) -> tuple[tuple, Counter[str], float, tuple[str, str, str, str]]:
         meta = bucket.get("metadata", {}) if isinstance(bucket.get("metadata"), dict) else {}
+        bucket_id = str(bucket.get("id") or meta.get("id") or "")
+        name = str(meta.get("name") or "")
+        domain = " ".join(str(item) for item in meta.get("domain", []) or [])
+        tags = " ".join(str(item) for item in meta.get("tags", []) or [])
+        content = self._bucket_searchable_content(bucket)
+        content_weight = float(self.content_weight or 1.0)
+        signature = (bucket_id, name, domain, tags, content, content_weight)
+        cache_key = bucket_id or f"anonymous:{hash(signature)}"
+        cached = self._lexical_profile_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return cached
         fields = (
-            ("name", str(meta.get("name") or ""), 3.0),
-            ("domain", " ".join(str(item) for item in meta.get("domain", []) or []), 2.5),
-            ("tags", " ".join(str(item) for item in meta.get("tags", []) or []), 2.0),
-            ("content", self._bucket_searchable_content(bucket), float(self.content_weight or 1.0)),
+            ("name", name, 3.0),
+            ("domain", domain, 2.5),
+            ("tags", tags, 2.0),
+            ("content", content, content_weight),
         )
         term_frequency: Counter[str] = Counter()
         weighted_length = 0.0
@@ -1162,7 +1204,16 @@ class BucketManager:
             for token in tokens:
                 term_frequency[token] += weight
             weighted_length += max(1, len(tokens)) * weight if tokens else 0.0
-        return term_frequency, max(weighted_length, 1.0)
+        value = (
+            signature,
+            term_frequency,
+            max(weighted_length, 1.0),
+            tuple(self._compact_lexical_phrase(text) for _field, text, _weight in fields),
+        )
+        if len(self._lexical_profile_cache) >= 4096:
+            self._lexical_profile_cache.clear()
+        self._lexical_profile_cache[cache_key] = value
+        return value
 
     def _lexical_query_terms(self, query: str) -> list[str]:
         terms = self._lexical_tokens(query)
@@ -1187,16 +1238,10 @@ class BucketManager:
     def _lexical_phrase_boost(self, bucket: dict, query_phrase: str) -> float:
         if not query_phrase or len(query_phrase) < 3:
             return 0.0
-        meta = bucket.get("metadata", {}) if isinstance(bucket.get("metadata"), dict) else {}
-        checks = (
-            (meta.get("name"), 0.95),
-            (" ".join(str(item) for item in meta.get("domain", []) or []), 0.56),
-            (" ".join(str(item) for item in meta.get("tags", []) or []), 0.54),
-            (self._bucket_searchable_content(bucket), 0.48),
-        )
+        _signature, _term_frequency, _weighted_length, phrase_fields = self._bucket_lexical_cache_entry(bucket)
+        checks = zip(phrase_fields, (0.95, 0.56, 0.54, 0.48))
         best = 0.0
-        for value, score in checks:
-            compact = self._compact_lexical_phrase(value)
+        for compact, score in checks:
             if compact and query_phrase in compact:
                 best = max(best, score)
         return best

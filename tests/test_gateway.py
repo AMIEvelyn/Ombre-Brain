@@ -9636,6 +9636,69 @@ def test_dynamic_alpha_metadata_adjustment_does_not_reverse_clear_fusion_gap(
     assert selected[0]["score"] > selected[1]["score"]
 
 
+def test_dynamic_alpha_debug_uses_product_confidence_and_avg_top2_to_6_margin(
+    monkeypatch, test_config, bucket_mgr
+):
+    """Ported from upstream's "Calibrate dynamic recall confidence for Qwen":
+    confidence is now confidence_component * margin_component (was a 0.7/0.3
+    weighted sum), and margin is top1 - avg(top2..top6) (was top1 - top2)."""
+    _, service, _, _ = _build_service(monkeypatch, test_config, bucket_mgr)
+
+    semantic_scores = {
+        "a": 0.90,
+        "b": 0.60,
+        "c": 0.55,
+        "d": 0.50,
+        "e": 0.45,
+        "f": 0.40,
+        "g": 0.10,  # beyond top6, must not affect the reference average
+    }
+    debug = service._dynamic_alpha_debug(semantic_scores)
+
+    conf_lo = 0.50  # falls back to recall_thresholds.vector_min_score
+    conf_hi = service._clamp(service.high_confidence_semantic_score)
+    top1 = 0.90
+    reference_scores = [0.60, 0.55, 0.50, 0.45, 0.40]
+    reference_score = sum(reference_scores) / len(reference_scores)
+    margin = top1 - reference_score
+    confidence_component = service._clamp((top1 - conf_lo) / (conf_hi - conf_lo))
+    margin_component = service._clamp(margin / 0.08)
+    expected_confidence = service._clamp(confidence_component * margin_component)
+    expected_alpha = round(0.35 + (0.85 - 0.35) * expected_confidence, 4)
+
+    assert debug["reference_score"] == pytest.approx(round(reference_score, 4))
+    assert debug["reference_count"] == 5
+    assert debug["margin"] == pytest.approx(round(margin, 4))
+    assert debug["confidence"] == pytest.approx(round(expected_confidence, 4))
+    assert debug["alpha"] == pytest.approx(expected_alpha)
+
+
+def test_dynamic_alpha_debug_honors_recall_thresholds_overrides(
+    monkeypatch, test_config, bucket_mgr
+):
+    cfg = _gateway_config(test_config)
+    cfg["recall_thresholds"] = dict(cfg.get("recall_thresholds", {}))
+    cfg["recall_thresholds"].update(
+        {
+            "dynamic_alpha_conf_lo": 0.45,
+            "dynamic_alpha_conf_hi": 0.65,
+            "dynamic_alpha_margin_ref": 0.10,
+            "dynamic_alpha_min": 0.20,
+            "dynamic_alpha_max": 0.90,
+        }
+    )
+    _, service, _, _ = _build_service(monkeypatch, cfg, bucket_mgr)
+
+    debug = service._dynamic_alpha_debug({"a": 0.80, "b": 0.40})
+
+    assert debug["conf_lo"] == pytest.approx(0.45)
+    assert debug["conf_hi"] == pytest.approx(0.65)
+    assert debug["margin_ref"] == pytest.approx(0.10)
+    assert debug["alpha_min"] == pytest.approx(0.20)
+    assert debug["alpha_max"] == pytest.approx(0.90)
+    assert 0.20 <= debug["alpha"] <= 0.90
+
+
 def test_recent_round_skip_prefers_unseen_candidate(monkeypatch, test_config, bucket_mgr):
     cfg = _gateway_config(
         test_config,
