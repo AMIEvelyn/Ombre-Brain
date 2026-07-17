@@ -23,6 +23,8 @@ from typing import Any
 
 from starlette.responses import JSONResponse
 
+from cards_store import AUTHOR_YI_LAN, SegmentOwnershipError
+
 # 2026-07-16: raised from the frontend's old combined-5 cap to a per-type
 # cap of 10 (Yi Lan wants up to 10 photos AND up to 10 files on one card).
 # Enforced here (not just dashboard.html) so any future caller has to go
@@ -42,6 +44,23 @@ def _validate_attachment_count(attachments) -> str | None:
     if files > FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE:
         return f"文件附件最多 {FACTS_CARD_MAX_ATTACHMENTS_PER_TYPE} 个，现在有 {files} 个。"
     return None
+
+
+def _ownership_conflict_response(e: SegmentOwnershipError) -> JSONResponse:
+    """2026-07-17: structured 409 for rule C (Yi Lan's decision) -- the
+    frontend needs the real author + a text preview to build an actual
+    confirmation dialog ("this was written by Lin Zhan: '...' -- overwrite
+    anyway?"), not a generic 500 with just an exception message."""
+    return JSONResponse(
+        {
+            "error": "ownership_conflict",
+            "segment_id": e.segment_id,
+            "author": e.author,
+            "text_preview": e.text_preview,
+            "message": f"这段是 {e.author} 写的，需要 force=true 才能覆盖/删除。",
+        },
+        status_code=409,
+    )
 
 
 def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
@@ -87,6 +106,7 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
                 valid_at=(str(body.get("valid_at")).strip() or None) if body.get("valid_at") else None,
                 note=str(body.get("note") or ""),
                 folder_ids=[str(f) for f in (body.get("folder_ids") or [])],
+                author=AUTHOR_YI_LAN,
             )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
@@ -120,8 +140,14 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             count_err = _validate_attachment_count(kwargs["attachments"])
             if count_err:
                 return JSONResponse({"error": count_err}, status_code=400)
+        # 2026-07-17: whole-string content replace discards every existing
+        # segment, so it's rule-C gated same as deleting one -- force=true
+        # in the body is required to overwrite a segment Lin Zhan wrote.
+        force = bool(body.get("force"))
         try:
-            store.edit_current(card_id, **kwargs)
+            store.edit_current(card_id, author=AUTHOR_YI_LAN, force=force, **kwargs)
+        except SegmentOwnershipError as e:
+            return _ownership_conflict_response(e)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"status": "edited", "card": store.get_card(card_id)})
@@ -146,7 +172,7 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             if count_err:
                 return JSONResponse({"error": count_err}, status_code=400)
         try:
-            rev_id = store.add_revision(card_id, **kwargs)
+            rev_id = store.add_revision(card_id, author=AUTHOR_YI_LAN, **kwargs)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         except Exception as e:
@@ -170,6 +196,59 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         if not store.delete_card(card_id):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"status": "deleted", "card_id": card_id})
+
+    # ---- content segments (2026-07-17, co-authorship / rule C) -------
+    # The UI's per-author color-coding reads content_segments directly (see
+    # docs/facts-model-v2-collection-redesign.md §14 item 3) -- these three
+    # endpoints are the fine-grained counterpart to edit_card's whole-string
+    # content replace, mirroring Lin Zhan's card_add_content/card_edit_content/
+    # card_delete_content MCP tools so both sides go through the same
+    # cards_store rules, not two different implementations of rule C.
+    async def add_content_segment(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        if not store.get_card(card_id):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        body = await _body(request)
+        text = str(body.get("text") or "")
+        if not text.strip():
+            return JSONResponse({"error": "text required"}, status_code=400)
+        segment_id = store.add_content_segment(card_id, author=AUTHOR_YI_LAN, text=text)
+        return JSONResponse({"status": "added", "segment_id": segment_id, "card": store.get_card(card_id)})
+
+    async def edit_content_segment(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        segment_id = str(request.path_params["segment_id"])
+        body = await _body(request)
+        text = str(body.get("text") or "")
+        force = bool(body.get("force"))
+        try:
+            ok = store.edit_content_segment(card_id, segment_id, text=text, author=AUTHOR_YI_LAN, force=force)
+        except SegmentOwnershipError as e:
+            return _ownership_conflict_response(e)
+        if not ok:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"status": "edited", "card": store.get_card(card_id)})
+
+    async def delete_content_segment(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        segment_id = str(request.path_params["segment_id"])
+        force = _truthy(request.query_params.get("force"))
+        try:
+            ok = store.delete_content_segment(card_id, segment_id, author=AUTHOR_YI_LAN, force=force)
+        except SegmentOwnershipError as e:
+            return _ownership_conflict_response(e)
+        if not ok:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"status": "deleted", "card": store.get_card(card_id)})
 
     # ---- folders -----------------------------------------------------
     async def create_folder(request):
@@ -333,6 +412,9 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         ("/api/cards-skeleton/cards/{card_id}", ["DELETE"], delete_card),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["POST"], add_revision),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["GET"], list_revisions),
+        ("/api/cards-skeleton/cards/{card_id}/content-segments", ["POST"], add_content_segment),
+        ("/api/cards-skeleton/cards/{card_id}/content-segments/{segment_id}", ["PATCH"], edit_content_segment),
+        ("/api/cards-skeleton/cards/{card_id}/content-segments/{segment_id}", ["DELETE"], delete_content_segment),
         ("/api/cards-skeleton/cards/{card_id}/folders", ["GET"], card_folders),
         ("/api/cards-skeleton/cards/{card_id}/folders", ["POST"], add_card_folder),
         ("/api/cards-skeleton/cards/{card_id}/folders/{folder_id}", ["DELETE"], remove_card_folder),

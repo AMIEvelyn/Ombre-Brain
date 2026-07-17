@@ -13,7 +13,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cards_store import CardStore  # noqa: E402
+from cards_store import CardStore, AUTHOR_LIN_ZHAN  # noqa: E402
 import cards_api  # noqa: E402
 
 
@@ -136,6 +136,54 @@ def main():
     st, r = _call(mcp, "GET", C + "/{card_id}/revisions", path_params={"card_id": cid})
     assert len(r["revisions"]) == 2
     print("PASS new revision + list")
+
+    # --- content segments: add always works, edit/delete gated by rule C ---
+    st, r = _call(mcp, "POST", C + "/{card_id}/content-segments", path_params={"card_id": cid}, body={"text": ""})
+    assert st == 400, r  # empty text rejected
+    st, r = _call(mcp, "POST", C + "/{card_id}/content-segments", path_params={"card_id": cid},
+                  body={"text": "一澜补充的一段"})
+    assert st == 200, r
+    yl_seg_id = r["segment_id"]
+    assert r["card"]["current"]["content_segments"][-1]["text"] == "一澜补充的一段"
+    print("PASS add_content_segment: always allowed, no auth conflict")
+
+    # simulate Lin Zhan having added his own segment via his MCP tools (this
+    # HTTP API is Dashboard-only/Yi-Lan-only, so injecting directly through
+    # the store is the realistic way to set up a real cross-author card)
+    lz_seg_id = store.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的段落")
+
+    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
+                  path_params={"card_id": cid, "segment_id": lz_seg_id}, body={"text": "被一澜改了"})
+    assert st == 409, r
+    assert r["error"] == "ownership_conflict" and r["author"] == AUTHOR_LIN_ZHAN and "林湛写的段落" in r["text_preview"]
+    print("PASS edit_content_segment: touching Lin Zhan's segment returns structured 409, not a generic error")
+
+    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
+                  path_params={"card_id": cid, "segment_id": lz_seg_id}, body={"text": "被一澜改了", "force": True})
+    assert st == 200, r
+    print("PASS edit_content_segment: force=true actually applies it")
+
+    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
+                  path_params={"card_id": cid, "segment_id": yl_seg_id}, body={"text": "一澜改了自己写的"})
+    assert st == 200, r  # own segment never needs force
+    print("PASS edit_content_segment: editing your own segment never needs force")
+
+    st, r = _call(mcp, "DELETE", C + "/{card_id}/content-segments/{segment_id}",
+                  path_params={"card_id": cid, "segment_id": lz_seg_id})
+    assert st == 409 and r["error"] == "ownership_conflict", r
+    st, r = _call(mcp, "DELETE", C + "/{card_id}/content-segments/{segment_id}",
+                  path_params={"card_id": cid, "segment_id": lz_seg_id}, query={"force": "1"})
+    assert st == 200, r
+    print("PASS delete_content_segment: same 409-then-force pattern as edit")
+
+    # --- whole-string edit_card(content=...) is rule-C gated too (it wipes every segment) ---
+    store.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="又一段林湛写的")
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid}, body={"content": "整段重写"})
+    assert st == 409 and r["error"] == "ownership_conflict", r
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content": "整段重写", "force": True})
+    assert st == 200 and r["card"]["current"]["content"] == "整段重写", r
+    print("PASS edit_card(content=...): same rule-C gate as delete, force overrides")
 
     # --- membership: card is in hk + fav ---
     st, r = _call(mcp, "GET", C + "/{card_id}/folders", path_params={"card_id": cid})
