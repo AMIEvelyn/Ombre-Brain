@@ -244,5 +244,31 @@ def main():
     print("\nAll cards_mcp tool tests passed.")
 
 
+def real_fastmcp_registration_smoke_test():
+    """FakeMCP above only stores functions in a dict -- it can't catch
+    FastMCP's own schema generation blowing up at registration time, which
+    is exactly what happened in production 2026-07-16: a `-> Union[str,
+    Image]` return annotation on card_attachment_view crashed pydantic
+    schema generation and took the whole server down on restart (FakeMCP-
+    based tests all still passed). This registers against a real FastMCP
+    instance and lists the tools, which is what actually caught it. Keep
+    this whenever a tool's return type touches anything beyond plain
+    str/bool/int/float/dict-of-those."""
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("test_cards_mcp_smoke")
+    tmp = tempfile.mkdtemp()
+    store = CardStore(db_path=os.path.join(tmp, "cards.sqlite"))
+    cards_mcp.register_card_tools(mcp, store)
+    tools = _run(mcp.list_tools())
+    names = {t.name for t in tools}
+    assert names == {
+        "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
+        "card_attachment_view", "card_buckets",
+    }, names
+    print(f"PASS real FastMCP registration smoke test ({len(tools)} tools, no schema errors)")
+
+
 if __name__ == "__main__":
     main()
+    real_fastmcp_registration_smoke_test()

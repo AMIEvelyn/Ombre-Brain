@@ -25,10 +25,6 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
 
 from __future__ import annotations
 
-from typing import Union
-
-from mcp.server.fastmcp import Image
-
 
 def _fmt_card(store, card: dict) -> str:
     cur = card.get("current") or {}
@@ -244,7 +240,13 @@ def register_card_tools(
         return "\n\n".join(blocks)
 
     @mcp.tool()
-    async def card_attachment_view(card: str = "", label: str = "") -> Union[str, Image]:
+    async def card_attachment_view(card: str = "", label: str = ""):
+        # No return-type annotation on purpose: FastMCP builds a pydantic
+        # schema from it at registration time, and a Union[str, Image]
+        # annotation crashes that (pydantic has no schema for the plain
+        # Image class) -- confirmed by reproducing it directly against
+        # FastMCP.list_tools(). Runtime behavior (sometimes str, sometimes
+        # Image) is unaffected; only the type hint had to go.
         """把一张资料卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
         它存在。**这是实验性功能（2026-07-16）**：MCP 协议支持这样返回图片，但
         ChatGPT 连接器具体能不能把这种图片内容真的显示给你看，还没有确认过——
