@@ -1052,6 +1052,225 @@ def test_gateway_query_planner_defaults_to_dehydration_model(monkeypatch, test_c
     assert captured == []
 
 
+class SemanticRescueDehydrator(DummyDehydrator):
+    """Ported alongside gateway.py's semantic_rescue (主域判断模型):
+    returns a controllable rescue verdict instead of a real model call."""
+
+    def __init__(self, model: str = "rescue-mini", response: dict | None = None):
+        self.model = model
+        self.calls = []
+        self._response = response or {
+            "selected_bucket_id": "",
+            "direct_evidence_span": "",
+            "matched_axis": "",
+        }
+        self.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=self._create_completion),
+            ),
+        )
+
+    def _completion_options(self, *, max_tokens: int, temperature: float) -> dict:
+        return {"max_tokens": max_tokens, "temperature": temperature}
+
+    async def _create_completion(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=json.dumps(self._response, ensure_ascii=False))),
+            ],
+        )
+
+
+def _fake_query_plan(axis_groups: list[list[str]]):
+    return SimpleNamespace(
+        activated_axis_groups=tuple(tuple(group) for group in axis_groups),
+        skip_long_term_recall=False,
+    )
+
+
+def test_matched_query_term_is_specific_filters_pronouns_and_stopwords(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    assert service._matched_query_term_is_specific("猫粮") is True
+    assert service._matched_query_term_is_specific("我们") is False
+    assert service._matched_query_term_is_specific("在") is False
+    assert service._matched_query_term_is_specific("") is False
+    assert service._matched_query_term_is_specific("a") is False
+
+
+def test_query_is_category_overview_detects_markers(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    assert service._query_is_category_overview("你都有哪些爱好") is True
+    assert service._query_is_category_overview("猫粮买了吗") is False
+
+
+def test_parse_semantic_rescue_response_extracts_json_from_code_fence(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    parsed = service._parse_semantic_rescue_response(
+        '```json\n{"selected_bucket_id": "b1", "direct_evidence_span": "喂猫粮", "matched_axis": "axis_0"}\n```'
+    )
+
+    assert parsed == {
+        "selected_bucket_id": "b1",
+        "direct_evidence_span": "喂猫粮",
+        "matched_axis": "axis_0",
+    }
+
+
+def test_parse_semantic_rescue_response_rejects_invalid_json(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+
+    with pytest.raises(ValueError):
+        service._parse_semantic_rescue_response("not json at all")
+
+
+def test_semantic_rescue_candidates_filters_by_reason_and_semantic_score(monkeypatch, test_config, bucket_mgr):
+    _, service, _, _ = _build_service(monkeypatch, _gateway_config(test_config), bucket_mgr)
+    eligible = {
+        "bucket": {"id": "eligible"},
+        "semantic_score": 0.6,
+        "admission_reason": "low_recall_evidence",
+    }
+    wrong_reason = {
+        "bucket": {"id": "wrong_reason"},
+        "semantic_score": 0.6,
+        "admission_reason": "session_hard_exclude",
+    }
+    zero_score = {
+        "bucket": {"id": "zero_score"},
+        "semantic_score": 0.0,
+        "admission_reason": "low_recall_evidence",
+    }
+    has_hard_match = {
+        "bucket": {"id": "has_hard_match"},
+        "semantic_score": 0.6,
+        "admission_reason": "low_recall_evidence",
+        "exact_anchor_match": True,
+    }
+
+    candidates = service._semantic_rescue_candidates(
+        [eligible, wrong_reason, zero_score, has_hard_match]
+    )
+
+    assert [item["bucket"]["id"] for item in candidates] == ["eligible"]
+
+
+def test_try_semantic_rescue_disabled_by_default_returns_none(monkeypatch, test_config, bucket_mgr):
+    dehydrator = SemanticRescueDehydrator()
+    _, service, _, _ = _build_service(
+        monkeypatch,
+        _gateway_config(test_config, semantic_rescue_enabled=False),
+        bucket_mgr,
+        dehydrator=dehydrator,
+    )
+
+    debug: dict = {}
+    result = _run(service._try_semantic_rescue("猫粮吃完了吗", [], debug))
+
+    assert result is None
+    assert debug["skip_reason"] == "disabled"
+    assert dehydrator.calls == []
+
+
+def test_try_semantic_rescue_rescues_candidate_with_direct_evidence(monkeypatch, test_config, bucket_mgr):
+    bucket_id = _create_bucket(
+        bucket_mgr,
+        content="今天早上喂猫粮的时候发现袋子空了，得补货。",
+        name="猫粮记录",
+        hours_ago=5,
+    )
+    bucket = _run(bucket_mgr.get(bucket_id))
+    dehydrator = SemanticRescueDehydrator(
+        response={
+            "selected_bucket_id": bucket_id,
+            "direct_evidence_span": "喂猫粮的时候发现袋子空了",
+            "matched_axis": "axis_0",
+        }
+    )
+    _, service, _, _ = _build_service(
+        monkeypatch,
+        _gateway_config(test_config, semantic_rescue_enabled=True),
+        bucket_mgr,
+        dehydrator=dehydrator,
+    )
+    monkeypatch.setattr(service, "_recall_query_plan", lambda query, **kw: _fake_query_plan([["猫粮"]]))
+    monkeypatch.setattr(service, "_admit_bucket_for_recall", lambda query, item: True)
+    suppressed_items = [
+        {
+            "bucket": bucket,
+            "semantic_score": 0.6,
+            "admission_reason": "low_recall_evidence",
+        }
+    ]
+
+    debug: dict = {}
+    result = _run(service._try_semantic_rescue("猫粮还有吗", suppressed_items, debug))
+
+    assert result is not None
+    assert result["admission_reason"] == "semantic_rescue_direct_evidence"
+    assert result["semantic_rescue_matched_axis"] == "axis_0"
+    assert debug["selected_bucket_id"] == bucket_id
+    assert dehydrator.calls[0]["model"] == "rescue-mini"
+
+
+def test_try_semantic_rescue_rejects_span_not_actually_in_document(monkeypatch, test_config, bucket_mgr):
+    bucket_id = _create_bucket(
+        bucket_mgr,
+        content="今天早上喂猫粮的时候发现袋子空了，得补货。",
+        name="猫粮记录",
+        hours_ago=5,
+    )
+    bucket = _run(bucket_mgr.get(bucket_id))
+    dehydrator = SemanticRescueDehydrator(
+        response={
+            "selected_bucket_id": bucket_id,
+            "direct_evidence_span": "这句话根本不在原文里",
+            "matched_axis": "axis_0",
+        }
+    )
+    _, service, _, _ = _build_service(
+        monkeypatch,
+        _gateway_config(test_config, semantic_rescue_enabled=True),
+        bucket_mgr,
+        dehydrator=dehydrator,
+    )
+    monkeypatch.setattr(service, "_recall_query_plan", lambda query, **kw: _fake_query_plan([["猫粮"]]))
+    suppressed_items = [
+        {
+            "bucket": bucket,
+            "semantic_score": 0.6,
+            "admission_reason": "low_recall_evidence",
+        }
+    ]
+
+    debug: dict = {}
+    result = _run(service._try_semantic_rescue("猫粮还有吗", suppressed_items, debug))
+
+    assert result is None
+    assert debug["skip_reason"] == "invalid_evidence_span"
+
+
+def test_try_semantic_rescue_skips_when_no_specific_axis(monkeypatch, test_config, bucket_mgr):
+    dehydrator = SemanticRescueDehydrator()
+    _, service, _, _ = _build_service(
+        monkeypatch,
+        _gateway_config(test_config, semantic_rescue_enabled=True),
+        bucket_mgr,
+        dehydrator=dehydrator,
+    )
+    monkeypatch.setattr(service, "_recall_query_plan", lambda query, **kw: _fake_query_plan([["我们"]]))
+
+    debug: dict = {}
+    result = _run(service._try_semantic_rescue("我们怎么样", [], debug))
+
+    assert result is None
+    assert debug["skip_reason"] == "no_specific_axis"
+    assert dehydrator.calls == []
+
+
 def test_gateway_memory_sentinel_llm_defaults_off(monkeypatch, test_config, bucket_mgr):
     _, service, _, _ = _build_service(
         monkeypatch,
