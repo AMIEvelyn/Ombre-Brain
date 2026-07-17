@@ -124,7 +124,7 @@ def main():
     # --- card_lookup output: leads with CURRENT state, hints history, shows star ---
     out = _run(card_lookup(query="酸辣粉"))
     assert "【酸辣粉】" in out
-    assert "现在：不爱吃了" in out            # current = latest revision, not "爱吃"
+    assert "现在：一澜：不爱吃了" in out       # current = latest revision, not "爱吃"; labeled (2026-07-17)
     assert "有 2 条历史" in out               # history folded behind a hint
     assert "⭐" in out and "林湛收藏" in out   # favorite membership surfaced
     print("PASS card_lookup current-state + history hint + star")

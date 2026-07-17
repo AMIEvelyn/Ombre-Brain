@@ -625,17 +625,21 @@ def register_card_write_tools(mcp, store) -> None:
     @mcp.tool()
     async def card_new_revision(
         card: str = "", title: str = "", content: str = "", tags: list[str] | None = None, valid_at: str = "",
+        force: bool = False,
     ) -> str:
         """给一张卡加一个新的时间点（真正留档，不是原地改）。不传的字段会照抄
         上一个时间点；传了 content 会**整体替换**这个新时间点的内容（不会自动
         带上上一个时间点里一澜写的部分——旧内容还完整留在历史记录里，没丢，
         只是不出现在这个新时间点上，想看回去用 card_history）。
         想在保留原内容基础上加东西、又不想产生新时间点，用 card_add_content。
-        valid_at：这个时间点对应的真实日期，不传默认现在。"""
+        valid_at：这个时间点对应的真实日期，不传默认现在。
+        如果传的 content 会导致一澜写的某一段彻底消失（新内容里找不到那段
+        原文），第一次调用（不传 force）会告诉你那段是什么、不会真的执行；
+        确认要这样做的话，带上 force=true 再调用一次。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
-        kwargs: dict = {"author": AUTHOR_LIN_ZHAN}
+        kwargs: dict = {"author": AUTHOR_LIN_ZHAN, "force": force}
         if title:
             kwargs["title"] = title
         if content:
@@ -646,6 +650,8 @@ def register_card_write_tools(mcp, store) -> None:
             kwargs["valid_at"] = valid_at
         try:
             store.add_revision(found["id"], **kwargs)
+        except SegmentOwnershipError as e:
+            return f"这段是一澜写的：「{e.text_preview}」。确定新版本里不保留这段的话，带上 force=true 再调用一次。"
         except ValueError as e:
             return str(e)
         return f"已加新时间点：{_card_result(found['id'])}"

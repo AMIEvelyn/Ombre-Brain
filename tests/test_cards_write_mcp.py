@@ -152,24 +152,29 @@ def main():
     assert "没找到" in missing_seg
     print("PASS card_edit_content: unknown segment_id handled cleanly")
 
-    # --- card_new_revision: content REPLACES, per Yi Lan's explicit confirmation ---
+    # --- card_new_revision: content REPLACES, rule-C gated (2026-07-17, second pass) ---
     novel_card = store.create_card(title="慁", content="第一版内容", author=AUTHOR_YI_LAN)
-    rev_out = _run(card_new_revision(card="慁", content="林湛的全新第二版", title="慁（终稿）"))
+    blocked_rev = _run(card_new_revision(card="慁", content="林湛的全新第二版", title="慁（终稿）"))
+    assert "这段是一澜写的" in blocked_rev and "第一版内容" in blocked_rev
+    assert len(store.list_revisions(novel_card)) == 1  # unforced attempt didn't create a revision
+    print("PASS card_new_revision: replacing content that would lose Yi Lan's segment is blocked with a preview")
+
+    rev_out = _run(card_new_revision(card="慁", content="林湛的全新第二版", title="慁（终稿）", force=True))
     assert "已加新时间点" in rev_out
     history = store.list_revisions(novel_card)
     assert len(history) == 2
-    assert history[0]["content"] == "林湛的全新第二版"  # new revision: replaced, not appended
+    assert history[0]["content"] == "林湛：林湛的全新第二版"  # new revision: replaced, not appended
     assert history[0]["content_segments"][0]["author"] == AUTHOR_LIN_ZHAN
     assert history[0]["title"] == "慁（终稿）" and history[0]["title_author"] == AUTHOR_LIN_ZHAN
-    assert history[1]["content"] == "第一版内容"  # old revision untouched in history
+    assert history[1]["content"] == "一澜：第一版内容"  # old revision untouched in history
     assert history[1]["content_segments"][0]["author"] == AUTHOR_YI_LAN
-    print("PASS card_new_revision: content replaces (not merges) the new timepoint; old one intact in history")
+    print("PASS card_new_revision: force=True replaces (not merges) the new timepoint; old one intact in history")
 
     no_change_out = _run(card_new_revision(card="慁"))
     assert "已加新时间点" in no_change_out
     cur = store.get_current_revision(novel_card)
-    assert cur["content"] == "林湛的全新第二版"  # carried forward unchanged when nothing passed
-    print("PASS card_new_revision: omitted fields carry forward from the previous revision")
+    assert cur["content"] == "林湛：林湛的全新第二版"  # carried forward unchanged when nothing passed
+    print("PASS card_new_revision: omitted fields carry forward from the previous revision, no force needed")
 
     # --- card_link_bucket / card_unlink_bucket ---
     link_out = _run(card_link_bucket(card="慁", bucket_id="b_evidence_1"))

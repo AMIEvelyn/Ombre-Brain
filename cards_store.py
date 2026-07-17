@@ -45,6 +45,10 @@ AUTHOR_YI_LAN = "yi_lan"
 AUTHOR_LIN_ZHAN = "lin_zhan"
 VALID_AUTHORS = {AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN}
 AUTHOR_DISPLAY_NAMES = {AUTHOR_YI_LAN: "一澜", AUTHOR_LIN_ZHAN: "林湛"}
+# Inverse of AUTHOR_DISPLAY_NAMES, for parse_content_text (2026-07-17, second
+# pass): recognizes the exact "一澜："/"林湛：" prefix _render_content already
+# generates, so a save-then-reload of hand-edited text round-trips cleanly.
+_AUTHOR_PREFIX_TO_CODE = {f"{name}：": code for code, name in AUTHOR_DISPLAY_NAMES.items()}
 
 
 class SegmentOwnershipError(Exception):
@@ -181,6 +185,25 @@ class CardStore:
         if rows:
             conn.commit()
 
+        # 2026-07-17 (second pass, Yi Lan's call): _render_content now labels
+        # every segment with a real author, not just cards with 2+ segments
+        # -- so a single-author card written before this change looks the
+        # same as one written after it. Rows migrated under the OLD rule (or
+        # written by the old code before this pass existed) still have the
+        # un-labeled flat `content` from back then; resync it from
+        # content_segments on every startup. Cheap (small table) and
+        # idempotent: only rewrites rows where the derived text actually
+        # differs from what's stored.
+        for row in conn.execute("SELECT id, content, content_segments FROM card_revisions"):
+            try:
+                segments = json.loads(row["content_segments"] or "[]")
+            except (TypeError, ValueError):
+                continue
+            rendered = self._render_content(segments)
+            if rendered != row["content"]:
+                conn.execute("UPDATE card_revisions SET content = ? WHERE id = ?", (rendered, row["id"]))
+        conn.commit()
+
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -203,21 +226,74 @@ class CardStore:
         path) already knows how to use, so nothing else in the codebase has
         to learn about segments to keep working.
 
-        A single segment renders as plain text with no author label -- this
-        is the common case (one person wrote the whole thing) and matches
-        how virtually every card already looks; labeling a single author
-        would just be clutter nobody asked for. Two or more segments each
-        get a "作者：文本" block, in order, blank-line separated -- the same
-        convention Yi Lan was already typing by hand, now generated instead
-        of relying on anyone remembering to type it."""
-        if not segments:
-            return ""
-        if len(segments) == 1:
-            return str(segments[0].get("text", ""))
-        return "\n\n".join(
-            f"{AUTHOR_DISPLAY_NAMES.get(s.get('author'), s.get('author'))}：{s.get('text', '')}"
-            for s in segments
-        )
+        2026-07-17 (Yi Lan, second pass): labeling isn't about segment count
+        anymore -- every segment with a real author (yi_lan/lin_zhan) gets
+        its "作者：文本" block, even when it's the only segment on the card,
+        so Lin Zhan can tell at a glance who wrote something even when only
+        one of them did. A segment with no recognized author (author=None --
+        see parse_content_text, for text typed without tagging it) renders
+        as plain text with no label, on purpose: forgetting to tag something
+        just leaves it looking like ordinary prose. Blocks are blank-line
+        separated, the same convention Yi Lan was already typing by hand,
+        now generated instead of relying on anyone remembering to type it."""
+        parts = []
+        for s in segments:
+            name = AUTHOR_DISPLAY_NAMES.get(s.get("author"))
+            text = str(s.get("text", ""))
+            parts.append(f"{name}：{text}" if name else text)
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _first_lost_foreign_segment(old_segments: list[dict], new_segments: list[dict], author: str) -> dict | None:
+        """Rule C for whole-content replaces (content editor modal, New
+        Revision): find the first segment in `old_segments` that was written
+        by someone other than `author` whose exact text is no longer present
+        among `new_segments`' segments for that same author. Segments with no
+        real author (untagged text) protect nothing -- there's no one to ask
+        permission from. Returns None if every foreign segment survived
+        (whether untouched, reordered, or sitting alongside brand-new text),
+        meaning the replace can proceed without a confirm prompt."""
+        remaining: dict[str, list[str]] = {}
+        for s in new_segments:
+            remaining.setdefault(s.get("author"), []).append(s.get("text"))
+        for s in old_segments:
+            seg_author = s.get("author")
+            if seg_author == author or seg_author not in VALID_AUTHORS:
+                continue
+            bucket = remaining.get(seg_author, [])
+            text = s.get("text")
+            if text in bucket:
+                bucket.remove(text)
+            else:
+                return s
+        return None
+
+    @staticmethod
+    def parse_content_text(text: str) -> list[dict]:
+        """Inverse of _render_content: turns free-form edited text (as shown
+        and typed in the Dashboard's content editor -- the same "作者：..."
+        labels _render_content produces) back into structured segments.
+
+        A paragraph (blank-line-separated block) that starts with a
+        recognized "一澜：" or "林湛：" prefix becomes a segment credited to
+        that author, prefix stripped. Any other paragraph becomes an
+        untagged segment (author=None) that renders as plain text -- Yi
+        Lan's rule: if you forget to tag something, it just looks like
+        ordinary text, it doesn't silently get attributed to whoever's
+        editing. Blank paragraphs are dropped, so a save-then-reload
+        round-trips cleanly through _render_content."""
+        blocks = [b for b in str(text or "").split("\n\n") if b.strip()]
+        segments = []
+        for block in blocks:
+            author = None
+            body = block
+            for prefix, code in _AUTHOR_PREFIX_TO_CODE.items():
+                if block.startswith(prefix):
+                    author = code
+                    body = block[len(prefix):]
+                    break
+            segments.append({"id": _gen_segment_id(), "author": author, "text": body})
+        return segments
 
     @staticmethod
     def _revision_row(row: sqlite3.Row) -> dict:
@@ -237,6 +313,7 @@ class CardStore:
         *,
         title: str = "",
         content: str = "",
+        content_segments: list[dict] | None = None,
         tags: list[str] | None = None,
         attachments: list[dict] | None = None,
         valid_at: str | None = None,
@@ -251,11 +328,18 @@ class CardStore:
         every existing caller unchanged) or AUTHOR_LIN_ZHAN once his write
         tools call this. Tags the title and wraps `content` (if any) into a
         single segment credited to `author` -- the whole card starts out
-        single-authored, which is the overwhelmingly common case."""
+        single-authored, which is the overwhelmingly common case.
+
+        content_segments: full control (e.g. from parse_content_text, for
+        the Dashboard's free-text content editor), overrides `content`.
+        No ownership check here -- it's a brand new card, nothing to lose."""
         author = self._check_author(author)
         card_id = _gen_id("F")
         now = self._now_iso()
-        segments = [{"id": _gen_segment_id(), "author": author, "text": str(content)}] if content else []
+        if content_segments is not None:
+            segments = content_segments
+        else:
+            segments = [{"id": _gen_segment_id(), "author": author, "text": str(content)}] if content else []
         conn = self._connect()
         conn.execute("INSERT INTO cards (id, created_at) VALUES (?, ?)", (card_id, now))
         conn.execute(
@@ -290,6 +374,7 @@ class CardStore:
         valid_at: str | None = None,
         note: str = "",
         author: str = AUTHOR_YI_LAN,
+        force: bool = False,
     ) -> int:
         """New Revision: append a new timepoint to a card's timeline. Fields left
         as None are carried over from the current (latest) revision, so a bare
@@ -298,8 +383,10 @@ class CardStore:
 
         author: who's writing this new revision. Only matters for fields
         actually being changed here -- title_author only updates if `title`
-        is given (unchanged titles keep whoever wrote them before); content
-        authorship only changes if `content`/`content_segments` is given.
+        is given AND actually differs from the current title text (a title
+        passed unchanged never steals credit from whoever titled it before);
+        content authorship only changes if `content`/`content_segments` is
+        given.
 
         content vs content_segments -- two ways to say the same thing:
         - content_segments: full control, pass the exact segment list this
@@ -312,7 +399,15 @@ class CardStore:
           add_content_segment for the even simpler "just add mine" case
           that doesn't require a new timepoint at all).
         Passing neither carries the current revision's segments forward
-        unchanged, same as every other field here."""
+        unchanged, same as every other field here.
+
+        Rule C (2026-07-17, second pass -- Yi Lan's call): New Revision is
+        no longer a free pass just because the old revision stays visible in
+        history. If replacing `content`/`content_segments` here would lose
+        the exact text of a segment someone else wrote (not present anywhere
+        in the new segment list), raises SegmentOwnershipError unless
+        force=True -- same rule, same exception shape, as edit_current's
+        whole-content replace."""
         author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
@@ -322,14 +417,20 @@ class CardStore:
         if title is None:
             title = current["title"]
         else:
-            title = str(title)
-            title_author = author
+            new_title = str(title)
+            if new_title != current.get("title", ""):
+                title_author = author
+            title = new_title
         if content_segments is not None:
             segments = content_segments
         elif content is not None:
             segments = [{"id": _gen_segment_id(), "author": author, "text": str(content)}] if content else []
         else:
             segments = current.get("content_segments") or []
+        if content is not None or content_segments is not None:
+            lost = self._first_lost_foreign_segment(current.get("content_segments") or [], segments, author)
+            if lost and not force:
+                raise SegmentOwnershipError(str(lost.get("id", "")), str(lost.get("author", "")), str(lost.get("text", "")))
         tags_val = current["tags"] if tags is None else tags
         attachments_val = current["attachments"] if attachments is None else attachments
         conn = self._connect()
@@ -358,6 +459,7 @@ class CardStore:
         *,
         title: str | None = None,
         content: str | None = None,
+        content_segments: list[dict] | None = None,
         tags: list[str] | None = None,
         attachments: list[dict] | None = None,
         author: str = AUTHOR_YI_LAN,
@@ -365,39 +467,44 @@ class CardStore:
     ) -> bool:
         """Edit the current (latest) revision in place -- no new timepoint. Title
         can be changed freely by either author (tags title_author to whoever
-        just changed it); identity is the card id, so renaming never splits
-        the timeline (that was the old title-as-identity bug).
+        just changed it, but only if the title text actually differs from
+        what's there now -- an unchanged title passed along for the ride
+        never steals credit); identity is the card id, so renaming never
+        splits the timeline (that was the old title-as-identity bug).
 
-        content here is the convenience whole-string replace, for the common
-        single-segment case -- it discards whatever segments existed and
-        replaces them with one new segment credited to `author`.
+        content vs content_segments -- same two ways to say it as
+        add_revision: `content` is the convenience whole-string replace
+        (wraps into one segment credited to `author`); content_segments is
+        full control (e.g. from parse_content_text, for the Dashboard's
+        free-text content editor -- lets several segments, including ones
+        written by the other author, survive the same replace call).
 
-        Rule C (2026-07-17, Yi Lan's call): freely *adding* content never
-        needs permission, but *replacing or removing* something the other
-        author wrote does. Since this whole-string replace by definition
-        blows away every existing segment, it checks whether any of them
-        were written by someone other than `author`; if so and force isn't
-        True, raises SegmentOwnershipError instead of silently overwriting
-        someone else's words. Use add_content_segment to add your own text
-        without touching what's already there (never needs force). For a
-        multi-segment revision, prefer edit_content_segment/
-        delete_content_segment on the specific segment over this blunt
-        whole-string replace."""
+        Rule C (2026-07-17, second pass): freely *adding* content never
+        needs permission, but *losing* text the other author wrote does.
+        Checks whether the new segment list still contains every existing
+        foreign segment's exact text; if not and force isn't True, raises
+        SegmentOwnershipError instead of silently overwriting someone
+        else's words. Use add_content_segment to add your own text without
+        touching what's already there (never needs force)."""
         author = self._check_author(author)
         current = self.get_current_revision(card_id)
         if current is None:
             return False
         updates: dict[str, Any] = {}
         if title is not None:
-            updates["title"] = str(title)
-            updates["title_author"] = author
-        if content is not None:
+            new_title = str(title)
+            if new_title != current.get("title", ""):
+                updates["title"] = new_title
+                updates["title_author"] = author
+        if content is not None or content_segments is not None:
             existing_segments = current.get("content_segments") or []
-            foreign = [s for s in existing_segments if s.get("author") != author]
-            if foreign and not force:
-                s = foreign[0]
-                raise SegmentOwnershipError(str(s.get("id", "")), str(s.get("author", "")), str(s.get("text", "")))
-            segments = [{"id": _gen_segment_id(), "author": author, "text": content}] if content else []
+            if content_segments is not None:
+                segments = content_segments
+            else:
+                segments = [{"id": _gen_segment_id(), "author": author, "text": content}] if content else []
+            lost = self._first_lost_foreign_segment(existing_segments, segments, author)
+            if lost and not force:
+                raise SegmentOwnershipError(str(lost.get("id", "")), str(lost.get("author", "")), str(lost.get("text", "")))
             updates["content"] = self._render_content(segments)
             updates["content_segments"] = json.dumps(segments, ensure_ascii=False)
         if tags is not None:

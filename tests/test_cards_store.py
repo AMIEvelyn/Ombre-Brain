@@ -25,10 +25,10 @@ def test_create_card_and_current():
     cid = s.create_card(title="身高", content="170cm", tags=["体征"], valid_at="2026-01-01")
     assert cid.startswith("F")
     cur = s.get_current_revision(cid)
-    assert cur["title"] == "身高" and cur["content"] == "170cm"
+    assert cur["title"] == "身高" and cur["content"] == "一澜：170cm"
     assert cur["tags"] == ["体征"]
     card = s.get_card(cid)
-    assert card["current"]["content"] == "170cm"
+    assert card["current"]["content"] == "一澜：170cm"
     assert len(card["history"]) == 1
 
 
@@ -38,18 +38,18 @@ def test_new_revision_latest_wins_and_carries_title():
     # New Revision only supplies content + a newer date; title carries over.
     s.add_revision(cid, content="175cm", valid_at="2026-06-01")
     cur = s.get_current_revision(cid)
-    assert cur["content"] == "175cm"       # latest valid_at wins
+    assert cur["content"] == "一澜：175cm"       # latest valid_at wins
     assert cur["title"] == "身高"           # title carried from previous revision
     hist = s.list_revisions(cid)
     assert len(hist) == 2
-    assert [h["content"] for h in hist] == ["175cm", "170cm"]  # newest first
+    assert [h["content"] for h in hist] == ["一澜：175cm", "一澜：170cm"]  # newest first
 
 
 def test_backdated_revision_is_not_current():
     s = _store()
     cid = s.create_card(title="体重", content="100斤", valid_at="2026-06-01")
     s.add_revision(cid, content="98斤", valid_at="2026-03-01")  # older event date
-    assert s.get_current_revision(cid)["content"] == "100斤"     # newest date still current
+    assert s.get_current_revision(cid)["content"] == "一澜：100斤"     # newest date still current
 
 
 def test_edit_current_in_place_no_new_timepoint():
@@ -59,7 +59,7 @@ def test_edit_current_in_place_no_new_timepoint():
     assert ok
     assert len(s.list_revisions(cid)) == 1            # still ONE revision
     cur = s.get_current_revision(cid)
-    assert cur["title"] == "酸辣粉（重庆）" and cur["content"] == "超爱吃"
+    assert cur["title"] == "酸辣粉（重庆）" and cur["content"] == "一澜：超爱吃"
 
 
 def test_rename_does_not_split_timeline():
@@ -169,22 +169,38 @@ def test_folder_timeline_one_dot_per_card_sorted():
     assert len(tl) == 2                                        # one entry per card, not per timepoint
     hk_entry = tl[0]
     assert hk_entry["date"] == "2026-03-05"                    # positioned at its current date
-    assert hk_entry["content"] == "回家"
+    assert hk_entry["content"] == "一澜：回家"
     assert hk_entry["revision_count"] == 2                     # but knows it has history
 
 
-def test_single_author_content_has_no_label_clutter():
-    # The overwhelmingly common case (one person wrote the whole thing) must
-    # look exactly like it always has -- no "一澜：" clutter just because the
-    # data model now tracks authorship under the hood.
+def test_single_author_content_still_gets_labeled():
+    # 2026-07-17 (Yi Lan, second pass): labeling isn't about segment count --
+    # every segment with a real author renders with its label, even when
+    # it's the only segment on the card, so Lin Zhan can tell at a glance
+    # who wrote something even when only one of them did.
     s = _store()
     cid = s.create_card(title="身高", content="170cm", author=AUTHOR_YI_LAN)
     cur = s.get_current_revision(cid)
-    assert cur["content"] == "170cm"
+    assert cur["content"] == "一澜：170cm"
     assert cur["title_author"] == AUTHOR_YI_LAN
     assert cur["content_segments"] == [
         {"id": cur["content_segments"][0]["id"], "author": AUTHOR_YI_LAN, "text": "170cm"}
     ]
+
+
+def test_untagged_segment_renders_plain_and_is_unprotected():
+    # parse_content_text produces author=None segments for text that wasn't
+    # tagged -- these render as plain text (no label) and don't block a
+    # future replace the way a real foreign segment would (there's no one
+    # to ask permission from).
+    s = _store()
+    cid = s.create_card(title="卡", content_segments=[
+        {"id": "seg1", "author": None, "text": "没标签的一段普通文字"},
+    ])
+    cur = s.get_current_revision(cid)
+    assert cur["content"] == "没标签的一段普通文字"  # no label, no colon
+    # replacing it entirely never needs force -- untagged text protects nothing
+    assert s.edit_current(cid, content="全新内容", author=AUTHOR_YI_LAN)
 
 
 def test_add_content_segment_never_needs_force():
@@ -249,12 +265,36 @@ def test_edit_current_whole_string_replace_checks_ownership_too():
         pass
     assert s.edit_current(cid, content="整段重写", author=AUTHOR_YI_LAN, force=True)
     cur = s.get_current_revision(cid)
-    assert cur["content"] == "整段重写"
+    assert cur["content"] == "一澜：整段重写"
     assert cur["content_segments"] == [
         {"id": cur["content_segments"][0]["id"], "author": AUTHOR_YI_LAN, "text": "整段重写"}
     ]
     # single-author card: replacing your own sole segment never needs force
     assert s.edit_current(cid, content="一澜自己又改了一次", author=AUTHOR_YI_LAN)
+
+
+def test_edit_current_content_segments_preserving_foreign_text_needs_no_force():
+    # 2026-07-17, second pass: the ownership check is now about whether the
+    # foreign segment's exact text survives, not "did content= get called at
+    # all" -- so passing a full content_segments list that keeps Lin Zhan's
+    # segment untouched and just adds Yi Lan's own new one never needs force,
+    # even though it goes through the same whole-list-replace code path.
+    s = _store()
+    cid = s.create_card(title="卡", content="一澜写的", author=AUTHOR_YI_LAN)
+    s.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的")
+    cur = s.get_current_revision(cid)
+    new_segments = cur["content_segments"] + [{"id": "seg_new", "author": AUTHOR_YI_LAN, "text": "一澜又加的"}]
+    assert s.edit_current(cid, content_segments=new_segments, author=AUTHOR_YI_LAN)  # no force needed
+    cur2 = s.get_current_revision(cid)
+    assert [s2["text"] for s2 in cur2["content_segments"]] == ["一澜写的", "林湛写的", "一澜又加的"]
+    # now actually drop the foreign segment's text -- this DOES need force
+    dropped = [s2 for s2 in cur2["content_segments"] if s2["author"] != AUTHOR_LIN_ZHAN]
+    try:
+        s.edit_current(cid, content_segments=dropped, author=AUTHOR_YI_LAN)
+        assert False, "should have raised SegmentOwnershipError"
+    except SegmentOwnershipError as e:
+        assert e.author == AUTHOR_LIN_ZHAN and "林湛写的" in e.text_preview
+    assert s.edit_current(cid, content_segments=dropped, author=AUTHOR_YI_LAN, force=True)
 
 
 def test_title_author_tracked_per_revision_no_text_prefix():
@@ -269,8 +309,40 @@ def test_title_author_tracked_per_revision_no_text_prefix():
     assert history[1]["title"] == "慁" and history[1]["title_author"] == AUTHOR_YI_LAN
     assert "湛：" not in history[0]["title"] and "澜：" not in history[1]["title"]
     # a revision that DOESN'T change the title carries the old title_author forward
-    s.add_revision(cid, content="新内容", author=AUTHOR_LIN_ZHAN)
+    # (force=True: this content= replace crosses authors too, unrelated to
+    # what this test checks -- title_author)
+    s.add_revision(cid, content="新内容", author=AUTHOR_LIN_ZHAN, force=True)
     assert s.get_current_revision(cid)["title_author"] == AUTHOR_LIN_ZHAN  # unchanged from previous rev
+
+
+def test_title_author_not_reassigned_when_title_text_unchanged():
+    # Real bug found 2026-07-17: the Dashboard's Edit form always sends the
+    # title field back (pre-filled, even when Yi Lan only meant to touch
+    # content), so title_author must only move to the caller when the title
+    # TEXT actually changes -- passing the same string along for the ride
+    # must not silently steal a title that was Lin Zhan's.
+    s = _store()
+    cid = s.create_card(title="慁", content="第一版", author=AUTHOR_LIN_ZHAN)
+    assert s.get_current_revision(cid)["title_author"] == AUTHOR_LIN_ZHAN
+    # edit_current: same title string, different author calling -- must NOT flip
+    # (force=True: this content= replace also crosses authors, which is a
+    # separate concern from what this test is checking -- title_author)
+    s.edit_current(cid, title="慁", content="改了内容", author=AUTHOR_YI_LAN, force=True)
+    cur = s.get_current_revision(cid)
+    assert cur["title_author"] == AUTHOR_LIN_ZHAN  # untouched
+    assert cur["content"] == "一澜：改了内容"
+    # actually changing the title text DOES reassign it
+    s.edit_current(cid, title="慁（改名）", author=AUTHOR_YI_LAN)
+    assert s.get_current_revision(cid)["title_author"] == AUTHOR_YI_LAN
+    # same story for add_revision (New Revision) -- force=True throughout
+    # since these calls also replace content across authors and this test
+    # only cares about the title_author side effect, not content ownership
+    # (that's covered by test_new_revision_requires_force_to_lose_foreign_segment)
+    cid2 = s.create_card(title="卡", content="v1", author=AUTHOR_LIN_ZHAN)
+    s.add_revision(cid2, title="卡", content="v2", author=AUTHOR_YI_LAN, force=True)
+    assert s.get_current_revision(cid2)["title_author"] == AUTHOR_LIN_ZHAN  # unchanged text, unchanged author
+    s.add_revision(cid2, title="卡（新）", content="v3", author=AUTHOR_YI_LAN, force=True)
+    assert s.get_current_revision(cid2)["title_author"] == AUTHOR_YI_LAN  # text changed, author moves
 
 
 def test_add_revision_content_replaces_segments_carry_forward_when_omitted():
@@ -279,16 +351,39 @@ def test_add_revision_content_replaces_segments_carry_forward_when_omitted():
     # New Revision with no content specified carries the segments forward untouched
     s.add_revision(cid, title="改了标题", author=AUTHOR_LIN_ZHAN)
     cur = s.get_current_revision(cid)
-    assert cur["content"] == "第一版"
+    assert cur["content"] == "一澜：第一版"
     assert cur["content_segments"][0]["author"] == AUTHOR_YI_LAN
-    # New Revision WITH content replaces the segment set for that new timepoint
-    # (older revision in history keeps its own original segments/authorship)
-    s.add_revision(cid, content="第二版全新内容", author=AUTHOR_LIN_ZHAN)
+    # New Revision WITH content that would lose Yi Lan's segment needs force
+    # now (2026-07-17, second pass -- New Revision is rule-C gated like Edit)
+    try:
+        s.add_revision(cid, content="第二版全新内容", author=AUTHOR_LIN_ZHAN)
+        assert False, "should have raised SegmentOwnershipError"
+    except SegmentOwnershipError as e:
+        assert e.author == AUTHOR_YI_LAN and "第一版" in e.text_preview
+    s.add_revision(cid, content="第二版全新内容", author=AUTHOR_LIN_ZHAN, force=True)
     cur2 = s.get_current_revision(cid)
-    assert cur2["content"] == "第二版全新内容"
+    assert cur2["content"] == "林湛：第二版全新内容"
     assert cur2["content_segments"][0]["author"] == AUTHOR_LIN_ZHAN
     history = s.list_revisions(cid)
     assert history[-1]["content_segments"][0]["author"] == AUTHOR_YI_LAN  # original untouched in history
+
+
+def test_new_revision_requires_force_to_lose_foreign_segment():
+    # 2026-07-17, second pass (Yi Lan's updated call): New Revision used to
+    # replace content freely with no confirmation, on the theory that the
+    # old revision stays visible in history either way. Now that the content
+    # editor makes it obvious whose text is where, New Revision is gated the
+    # same as Edit -- adding your own new revision content that doesn't
+    # touch the other author's segment never needs force; losing it does.
+    s = _store()
+    cid = s.create_card(title="卡", content="一澜写的", author=AUTHOR_YI_LAN)
+    s.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的")
+    current_segments = s.get_current_revision(cid)["content_segments"]
+    # adding a new revision that keeps both existing segments and adds a
+    # third (via content_segments) never needs force
+    kept_plus_new = current_segments + [{"id": "seg_new", "author": AUTHOR_YI_LAN, "text": "一澜新加的"}]
+    s.add_revision(cid, content_segments=kept_plus_new, author=AUTHOR_YI_LAN)
+    assert [seg["text"] for seg in s.get_current_revision(cid)["content_segments"]] == ["一澜写的", "林湛写的", "一澜新加的"]
 
 
 def test_add_revision_explicit_content_segments_full_control():
@@ -342,13 +437,58 @@ def test_migration_backfills_preexisting_rows_as_yi_lan():
     store = CardStore(db_path=db_path)  # opens the OLD db -- must migrate on init
     card = store.get_card("F_old")
     assert card["current"]["title_author"] == AUTHOR_YI_LAN
-    assert card["current"]["content"] == "一澜很久以前写的"  # unchanged, single segment renders plain
+    # 2026-07-17, second pass: the flat `content` column is resynced from
+    # content_segments on every startup, so a migrated old card gets the
+    # same "一澜：" label a freshly-created single-segment card would.
+    assert card["current"]["content"] == "一澜：一澜很久以前写的"
     assert card["current"]["content_segments"] == [
         {"id": card["current"]["content_segments"][0]["id"], "author": AUTHOR_YI_LAN, "text": "一澜很久以前写的"}
     ]
     # re-opening (simulating a second restart) must not double-wrap
     store2 = CardStore(db_path=db_path)
     assert len(store2.get_card("F_old")["current"]["content_segments"]) == 1
+
+
+def test_parse_content_text_round_trips_with_render_content():
+    s = _store()
+    original = "一澜：第一段\n\n没打标签的一段\n\n林湛：第三段"
+    parsed = s.parse_content_text(original)
+    assert [(p["author"], p["text"]) for p in parsed] == [
+        (AUTHOR_YI_LAN, "第一段"), (None, "没打标签的一段"), (AUTHOR_LIN_ZHAN, "第三段"),
+    ]
+    # feeding it straight back through _render_content reproduces the same text
+    assert CardStore._render_content(parsed) == original
+
+
+def test_parse_content_text_blank_paragraphs_dropped():
+    s = _store()
+    parsed = s.parse_content_text("一澜：有内容\n\n\n\n   \n\n林湛：也有内容")
+    assert [p["text"] for p in parsed] == ["有内容", "也有内容"]
+
+
+def test_content_editor_save_flow_via_parse_content_text():
+    # This is the actual flow the Dashboard's content editor modal drives:
+    # show the flattened text, let Yi Lan free-edit it (including inserting
+    # her own tag via a button), parse back on save, force-gated the same
+    # as any other whole-content replace.
+    s = _store()
+    cid = s.create_card(title="卡", content="一澜写的", author=AUTHOR_YI_LAN)
+    s.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的")
+    shown = s.get_current_revision(cid)["content"]
+    assert shown == "一澜：一澜写的\n\n林湛：林湛写的"
+    # she edits her own paragraph and adds a new untagged note, leaving his intact
+    edited = "一澜：一澜改过的\n\n林湛：林湛写的\n\n随手写的一句备注"
+    segments = s.parse_content_text(edited)
+    assert s.edit_current(cid, content_segments=segments, author=AUTHOR_YI_LAN)  # no force needed
+    cur = s.get_current_revision(cid)
+    assert cur["content"] == edited
+    # now she deletes his paragraph entirely -- this needs force
+    edited_dropping_his = "一澜：一澜改过的\n\n随手写的一句备注"
+    try:
+        s.edit_current(cid, content_segments=s.parse_content_text(edited_dropping_his), author=AUTHOR_YI_LAN)
+        assert False, "should have raised SegmentOwnershipError"
+    except SegmentOwnershipError as e:
+        assert e.author == AUTHOR_LIN_ZHAN and "林湛写的" in e.text_preview
 
 
 def _run_all():

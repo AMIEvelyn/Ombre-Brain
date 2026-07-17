@@ -92,7 +92,11 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         body = await _body(request)
         title = str(body.get("title") or "").strip()
         content = str(body.get("content") or "")
-        if not title and not content:
+        content_segments = None
+        if "content_text" in body:
+            content_segments = store.parse_content_text(str(body.get("content_text") or ""))
+            content = ""  # content_segments takes over; avoid double-wrapping
+        if not title and not content and not content_segments:
             return JSONResponse({"error": "title or content required"}, status_code=400)
         count_err = _validate_attachment_count(body.get("attachments") or [])
         if count_err:
@@ -101,6 +105,7 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             card_id = store.create_card(
                 title=title,
                 content=content,
+                content_segments=content_segments,
                 tags=body.get("tags") or [],
                 attachments=body.get("attachments") or [],
                 valid_at=(str(body.get("valid_at")).strip() or None) if body.get("valid_at") else None,
@@ -134,15 +139,21 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         for key in ("title", "content", "tags", "attachments"):
             if key in body:
                 kwargs[key] = body[key]
+        if "content_text" in body:
+            # content editor modal (2026-07-17, second pass): the Dashboard
+            # sends back the whole edited "作者：..." text, parsed here into
+            # segments -- overrides a plain `content` if both were somehow sent.
+            kwargs.pop("content", None)
+            kwargs["content_segments"] = store.parse_content_text(str(body.get("content_text") or ""))
         if not kwargs:
             return JSONResponse({"error": "nothing to edit"}, status_code=400)
         if "attachments" in kwargs:
             count_err = _validate_attachment_count(kwargs["attachments"])
             if count_err:
                 return JSONResponse({"error": count_err}, status_code=400)
-        # 2026-07-17: whole-string content replace discards every existing
-        # segment, so it's rule-C gated same as deleting one -- force=true
-        # in the body is required to overwrite a segment Lin Zhan wrote.
+        # 2026-07-17: whole-content replace can lose a segment someone else
+        # wrote, so it's rule-C gated -- force=true in the body is required
+        # to go through with overwriting/losing a segment Lin Zhan wrote.
         force = bool(body.get("force"))
         try:
             store.edit_current(card_id, author=AUTHOR_YI_LAN, force=force, **kwargs)
@@ -164,6 +175,9 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         for key in ("title", "content", "tags", "attachments"):
             if key in body:
                 kwargs[key] = body[key]
+        if "content_text" in body:
+            kwargs.pop("content", None)
+            kwargs["content_segments"] = store.parse_content_text(str(body.get("content_text") or ""))
         if body.get("valid_at"):
             kwargs["valid_at"] = str(body["valid_at"]).strip()
         kwargs["note"] = str(body.get("note") or "")
@@ -171,8 +185,15 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
             count_err = _validate_attachment_count(kwargs["attachments"])
             if count_err:
                 return JSONResponse({"error": count_err}, status_code=400)
+        # 2026-07-17, second pass: New Revision used to replace content freely
+        # (the old revision stays in history either way); Yi Lan's updated
+        # call is that it should be rule-C gated the same as Edit now that
+        # the content editor shows exactly whose text is where.
+        force = bool(body.get("force"))
         try:
-            rev_id = store.add_revision(card_id, author=AUTHOR_YI_LAN, **kwargs)
+            rev_id = store.add_revision(card_id, author=AUTHOR_YI_LAN, force=force, **kwargs)
+        except SegmentOwnershipError as e:
+            return _ownership_conflict_response(e)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         except Exception as e:

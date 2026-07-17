@@ -13,7 +13,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cards_store import CardStore, AUTHOR_LIN_ZHAN  # noqa: E402
+from cards_store import CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN  # noqa: E402
 import cards_api  # noqa: E402
 
 
@@ -83,7 +83,7 @@ def main():
     assert st == 200, r
     cid = r["card"]["id"]
     assert cid.startswith("F")
-    assert r["card"]["current"]["content"] == "出发"
+    assert r["card"]["current"]["content"] == "一澜：出发"  # 2026-07-17: every segment gets labeled now
     # empty card rejected
     st, r = _call(mcp, "POST", C, body={})
     assert st == 400, r
@@ -131,7 +131,7 @@ def main():
     # --- new revision (latest wins) ---
     st, r = _call(mcp, "POST", C + "/{card_id}/revisions", path_params={"card_id": cid},
                   body={"content": "回家", "valid_at": "2026-03-05"})
-    assert st == 200 and r["card"]["current"]["content"] == "回家"
+    assert st == 200 and r["card"]["current"]["content"] == "一澜：回家"
     assert r["card"]["current"]["title"] == "香港迪士尼乐园"  # title carried
     st, r = _call(mcp, "GET", C + "/{card_id}/revisions", path_params={"card_id": cid})
     assert len(r["revisions"]) == 2
@@ -182,7 +182,7 @@ def main():
     assert st == 409 and r["error"] == "ownership_conflict", r
     st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
                   body={"content": "整段重写", "force": True})
-    assert st == 200 and r["card"]["current"]["content"] == "整段重写", r
+    assert st == 200 and r["card"]["current"]["content"] == "一澜：整段重写", r
     print("PASS edit_card(content=...): same rule-C gate as delete, force overrides")
 
     # --- membership: card is in hk + fav ---
@@ -226,6 +226,61 @@ def main():
     st, r = _call(mcp, "DELETE", C + "/{card_id}", path_params={"card_id": cid})
     assert st == 404  # already gone
     print("PASS delete card + 404")
+
+    # --- content editor modal flow: content_text is parsed server-side (2026-07-17) ---
+    st, r = _call(mcp, "POST", C, body={"title": "编辑器测试", "content_text": "一澜：我写的\n\n没打标签的一句"})
+    assert st == 200, r
+    editor_cid = r["card"]["id"]
+    assert r["card"]["current"]["content"] == "一澜：我写的\n\n没打标签的一句"
+    assert [s["author"] for s in r["card"]["current"]["content_segments"]] == [AUTHOR_YI_LAN, None]
+    print("PASS create_card: content_text parsed into segments (tagged + untagged)")
+
+    # add Lin Zhan's segment directly (his MCP tools are the real path), then
+    # edit via content_text preserving his paragraph -- no force needed
+    store.add_content_segment(editor_cid, author=AUTHOR_LIN_ZHAN, text="林湛写的")
+    shown = store.get_current_revision(editor_cid)["content"]
+    assert shown == "一澜：我写的\n\n没打标签的一句\n\n林湛：林湛写的"
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": editor_cid},
+                  body={"content_text": shown.replace("我写的", "我改过的")})
+    assert st == 200, r  # his paragraph's text is still present verbatim -> no conflict
+    assert r["card"]["current"]["content"] == "一澜：我改过的\n\n没打标签的一句\n\n林湛：林湛写的"
+    print("PASS edit_card: content_text editing only Yi Lan's own paragraph needs no force")
+
+    # now drop his paragraph entirely via content_text -- needs force, same 409 shape
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": editor_cid},
+                  body={"content_text": "一澜：我改过的\n\n没打标签的一句"})
+    assert st == 409 and r["error"] == "ownership_conflict" and r["author"] == AUTHOR_LIN_ZHAN, r
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": editor_cid},
+                  body={"content_text": "一澜：我改过的\n\n没打标签的一句", "force": True})
+    assert st == 200 and "林湛" not in r["card"]["current"]["content"], r
+    print("PASS edit_card: content_text dropping Lin Zhan's paragraph is rule-C gated, force overrides")
+
+    # --- New Revision is now rule-C gated too (2026-07-17, second pass) ---
+    store.add_content_segment(editor_cid, author=AUTHOR_LIN_ZHAN, text="林湛又写的")
+    cur_content = store.get_current_revision(editor_cid)["content"]
+    st, r = _call(mcp, "POST", C + "/{card_id}/revisions", path_params={"card_id": editor_cid},
+                  body={"content": "整体换成新版本"})
+    assert st == 409 and r["error"] == "ownership_conflict", r
+    assert store.get_current_revision(editor_cid)["content"] == cur_content  # unforced attempt didn't create a revision
+    st, r = _call(mcp, "POST", C + "/{card_id}/revisions", path_params={"card_id": editor_cid},
+                  body={"content": "整体换成新版本", "force": True})
+    assert st == 200 and r["card"]["current"]["content"] == "一澜：整体换成新版本", r
+    print("PASS add_revision: losing Lin Zhan's segment needs force, same 409 shape as edit_card")
+
+    # --- title bug fix: unchanged title text must not steal title_author (2026-07-17) ---
+    store.set_title(editor_cid, "林湛起的标题", author=AUTHOR_LIN_ZHAN)
+    assert store.get_current_revision(editor_cid)["title_author"] == AUTHOR_LIN_ZHAN
+    # Dashboard's Edit form always sends the title field back, even unchanged --
+    # this must not silently reassign it to Yi Lan just because she edited content
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": editor_cid},
+                  body={"title": "林湛起的标题", "content": "一澜改的内容", "force": True})
+    assert st == 200, r
+    assert r["card"]["current"]["title_author"] == AUTHOR_LIN_ZHAN  # untouched, title text didn't change
+    assert r["card"]["current"]["title"] == "林湛起的标题"
+    # actually changing the title text DOES reassign it (Dashboard is Yi-Lan-only)
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": editor_cid}, body={"title": "一澜改的标题"})
+    assert st == 200 and r["card"]["current"]["title_author"] == AUTHOR_YI_LAN, r
+    print("PASS edit_card: title_author only reassigned when the title text actually changes")
 
     print(f"\nAll cards_api endpoint tests passed. ({len(mcp.routes)} routes registered)")
 
