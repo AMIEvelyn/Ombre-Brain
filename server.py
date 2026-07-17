@@ -972,6 +972,16 @@ def _require_dashboard_auth(request):
     )
 
 
+def _require_raw_api_auth(request):
+    """Same as _require_dashboard_auth, but also accepts the service token
+    (_authorized_memory_write) -- for /api/ingest-raw and /api/search-raw,
+    which a trusted service (e.g. Gateway ingesting raw turns) needs to call
+    without a browser dashboard session, not just Yi Lan's own dashboard."""
+    if _dashboard_authenticated(request) or _authorized_memory_write(request):
+        return None
+    return _require_dashboard_auth(request)
+
+
 def _dashboard_login_response():
     from starlette.responses import JSONResponse
     token = _create_dashboard_session()
@@ -11350,7 +11360,7 @@ def _raw_ingest_events_from_body(body: dict) -> list[dict]:
 async def api_ingest_raw(request):
     """Ingest user/assistant raw dialogue events. Does not accept tools, system prompts, or memory injections."""
     from starlette.responses import JSONResponse
-    err = _require_dashboard_auth(request)
+    err = _require_raw_api_auth(request)
     if err:
         return err
     try:
@@ -11376,7 +11386,7 @@ async def api_ingest_raw(request):
 async def api_search_raw(request):
     """Search raw dialogue events as a fallback archive. Returns only stored user/assistant originals."""
     from starlette.responses import JSONResponse
-    err = _require_dashboard_auth(request)
+    err = _require_raw_api_auth(request)
     if err:
         return err
 
@@ -11793,6 +11803,23 @@ async def api_dreams(request):
         return JSONResponse(dream_engine.dashboard_payload(limit=max(1, min(100, limit))))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/dreams/{dream_id}", methods=["GET"])
+async def api_dream_detail(request):
+    """Return one retained dream's full body, for the Dashboard's click-to-
+    expand view (2026-07-17, ported from upstream). Unlike /api/dreams
+    (metadata only, by design), this does expose body text -- gated the same
+    as everything else in the dashboard behind _require_dashboard_auth, so
+    only Yi Lan's own authenticated session can read it."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    record = dream_engine.dashboard_record(request.path_params.get("dream_id", ""))
+    if not record:
+        return JSONResponse({"error": "dream body unavailable"}, status_code=404)
+    return JSONResponse(record)
 
 
 @mcp.custom_route("/api/config", methods=["GET"])

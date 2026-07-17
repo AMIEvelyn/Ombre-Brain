@@ -1919,18 +1919,45 @@
     gap: 10px;
   }
   .dream-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 18px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 16px;
     box-shadow: 4px 4px 12px var(--shadow-dark-subtle), -4px -4px 12px var(--shadow-light);
+    overflow: hidden;
+  }
+  .dream-row-toggle,
+  .dream-row-static {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+  }
+  .dream-row-toggle {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .dream-row-toggle:hover { background: rgba(47, 79, 79, 0.045); }
+  .dream-row-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .dream-row-title { color: var(--text); font-size: 14px; }
   .dream-row-status { color: var(--text-light); font-size: 12px; white-space: nowrap; }
+  .dream-body {
+    padding: 16px 18px 18px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface-solid) 74%, transparent);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+  }
 
   .profile-shell { max-width: 1040px; margin: 0 auto; }
   .profile-toolbar {
@@ -4735,13 +4762,56 @@ async function loadDreams() {
     }
     content.innerHTML = '<div class="dream-list">' + records.map(function(record) {
       var aiName = record.ai_name || dashboardAiAuthor || 'Haven';
-      return '<div class="dream-row">' +
-        '<div class="dream-row-title">' + formatDreamDate(record) + ' ' + esc(aiName) + ' 做了一个梦</div>' +
-        '<div class="dream-row-status">' + dreamStatusLabel(record.status) + '</div>' +
+      var title = formatDreamDate(record) + ' ' + esc(aiName) + ' 做了一个梦';
+      if (!record.has_body) {
+        return '<div class="dream-row"><div class="dream-row-static">' +
+          '<div class="dream-row-title">' + title + '</div>' +
+          '<div class="dream-row-status">' + dreamStatusLabel(record.status) + '</div>' +
+        '</div></div>';
+      }
+      return '<div class="dream-row" data-dream-id="' + escAttr(record.dream_id) + '">' +
+        '<button type="button" class="dream-row-toggle" aria-expanded="false" onclick="toggleDreamPeek(this)">' +
+          '<span class="dream-row-title">' + title + '</span>' +
+          '<span class="dream-row-status">' + dreamStatusLabel(record.status) + '</span>' +
+        '</button>' +
+        '<div class="dream-body" hidden></div>' +
       '</div>';
     }).join('') + '</div>';
   } catch (e) {
     content.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+// 2026-07-17: click-to-expand a dream's full body (ported from upstream's
+// "dream peek"). /api/dreams (the list) deliberately never includes body
+// text -- this fetches one dream's body lazily, only when Yi Lan actually
+// opens that row, and only once per row (cached via dataset.dreamLoaded).
+async function toggleDreamPeek(button) {
+  var row = button.closest('.dream-row');
+  var body = row ? row.querySelector('.dream-body') : null;
+  if (!row || !body) return;
+  var expanded = button.getAttribute('aria-expanded') === 'true';
+  if (expanded) {
+    button.setAttribute('aria-expanded', 'false');
+    row.classList.remove('is-open');
+    body.hidden = true;
+    return;
+  }
+  button.setAttribute('aria-expanded', 'true');
+  row.classList.add('is-open');
+  body.hidden = false;
+  if (row.dataset.dreamLoaded === 'true') return;
+  body.textContent = '正在翻开…';
+  try {
+    var dreamId = row.getAttribute('data-dream-id') || '';
+    var response = await authFetch(BASE + '/api/dreams/' + encodeURIComponent(dreamId));
+    if (!response) return;
+    if (!response.ok) throw new Error('暂时打不开');
+    var data = await response.json();
+    body.textContent = data.body || '暂时打不开';
+    row.dataset.dreamLoaded = 'true';
+  } catch (e) {
+    body.textContent = '暂时打不开';
   }
 }
 

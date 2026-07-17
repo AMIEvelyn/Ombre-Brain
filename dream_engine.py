@@ -873,6 +873,7 @@ class DreamEngine:
                     "local_date": event.get("local_date", ""),
                     "ai_name": event.get("ai_name") or self.identity.get("ai_name") or "AI",
                     "status": "latent",
+                    "has_body": False,
                 },
             )
             if event.get("event") == "surfaced":
@@ -886,11 +887,36 @@ class DreamEngine:
                 "generated_at": meta.get("generated_at", ""),
                 "local_date": meta.get("local_date", ""),
                 "ai_name": meta.get("ai_name") or self.identity.get("ai_name") or "AI",
-                "status": "latent",
+                "status": "surfaced" if record.surfaced else "latent",
+                "has_body": True,
             }
         result = list(entries.values())
         result.sort(key=lambda item: item.get("generated_at") or "", reverse=True)
         return result[:limit]
+
+    def dashboard_record(self, dream_id: str) -> dict | None:
+        """One dream's full body, for the Dashboard's click-to-expand view
+        (2026-07-17, ported from upstream's "dream peek" feature). Only
+        records still on disk (has_body=True in dashboard_records) have a
+        body to return -- a surfaced-and-destroyed dream (retain_after_inject
+        was off when it surfaced) only has its event-log entry left, which
+        carries no body text."""
+        target_id = str(dream_id or "").strip()
+        if not target_id:
+            return None
+        for record in self.list_records():
+            if record.dream_id != target_id:
+                continue
+            meta = record.metadata
+            return {
+                "dream_id": record.dream_id,
+                "generated_at": meta.get("generated_at", ""),
+                "local_date": meta.get("local_date", ""),
+                "ai_name": meta.get("ai_name") or self.identity.get("ai_name") or "AI",
+                "status": "surfaced" if record.surfaced else "latent",
+                "body": record.body,
+            }
+        return None
 
     def dashboard_payload(self, limit: int = 30) -> dict:
         return {

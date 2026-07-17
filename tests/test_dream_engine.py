@@ -467,3 +467,54 @@ async def test_surface_can_retain_record_after_gateway_injection(test_config):
     assert retained.metadata["surfaced_at"]
     assert "右手食指指尖有湿气" in retained.body
     assert second == {"status": "skipped", "reason": "no_pending_dream"}
+
+
+def test_dashboard_record_returns_body_for_dashboard_dream_peek(test_config):
+    """2026-07-17, ported from upstream's "dream peek": the Dashboard's
+    click-to-expand view needs one dream's full body on demand -- unlike
+    dashboard_payload()/dashboard_records(), which deliberately never
+    include body text (see test_dashboard_payload_hides_body below)."""
+    cfg = _dream_config(test_config)
+    engine = DreamEngine(cfg)
+    generated_at = datetime(2026, 5, 25, 3, 30, tzinfo=ZoneInfo("Asia/Shanghai")).astimezone(ZoneInfo("UTC"))
+    engine._write_record(
+        {
+            "dream_id": "dream_peek",
+            "generated_at": generated_at.isoformat(timespec="seconds"),
+            "local_date": "2026-05-25",
+            "ai_name": "Haven",
+            "surfaced": False,
+            "surfaced_at": None,
+        },
+        "梦里下着一场没有声音的雨。",
+    )
+
+    record = engine.dashboard_record("dream_peek")
+    assert record is not None
+    assert record["body"] == "梦里下着一场没有声音的雨。"
+    assert record["status"] == "latent"
+    assert engine.dashboard_record("does_not_exist") is None
+    assert engine.dashboard_record("") is None
+
+
+def test_dashboard_payload_hides_body_but_flags_has_body(test_config):
+    cfg = _dream_config(test_config)
+    engine = DreamEngine(cfg)
+    generated_at = datetime(2026, 5, 25, 3, 30, tzinfo=ZoneInfo("Asia/Shanghai")).astimezone(ZoneInfo("UTC"))
+    engine._write_record(
+        {
+            "dream_id": "dream_peek2",
+            "generated_at": generated_at.isoformat(timespec="seconds"),
+            "local_date": "2026-05-25",
+            "ai_name": "Haven",
+            "surfaced": False,
+            "surfaced_at": None,
+        },
+        "藏起来的正文不应该出现在列表里。",
+    )
+
+    payload = engine.dashboard_payload()
+    assert "藏起来的正文不应该出现在列表里" not in str(payload)
+    record = next(r for r in payload["records"] if r["dream_id"] == "dream_peek2")
+    assert record["has_body"] is True
+    assert record["status"] == "latent"
