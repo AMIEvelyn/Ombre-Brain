@@ -2145,6 +2145,8 @@
     cursor: pointer;
   }
   .facts-tag-insert-btn:hover { background: var(--border); }
+  .facts-content-editor-btn-row { display: flex; gap: 8px; }
+  .facts-content-preview-body { min-height: 80px; }
   .cards-v2-select {
     width: 100%;
     cursor: pointer;
@@ -3555,7 +3557,10 @@
     <div class="profile-proposal-form">
       <div class="facts-content-editor-row">
         <textarea id="cards-v2-add-content" class="facts-content-editor" placeholder="内容（可选）——就是一段普通文字，想标出这是自己写的就点下面的按钮"></textarea>
-        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-add-content')">+ 标记为我写的</button>
+        <div class="facts-content-editor-btn-row">
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-add-content')">+ 标记为我写的</button>
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2PreviewContent('cards-v2-add-content')">预览</button>
+        </div>
       </div>
     </div>
     <div class="facts-tags-row" id="cards-v2-add-tags"></div>
@@ -3598,7 +3603,10 @@
     <div class="profile-proposal-form">
       <div class="facts-content-editor-row">
         <textarea id="cards-v2-edit-content" class="facts-content-editor" placeholder="内容"></textarea>
-        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-edit-content')">+ 标记为我写的</button>
+        <div class="facts-content-editor-btn-row">
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-edit-content')">+ 标记为我写的</button>
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2PreviewContent('cards-v2-edit-content')">预览</button>
+        </div>
       </div>
     </div>
     <div class="facts-tags-row" id="cards-v2-edit-tags"></div>
@@ -3625,7 +3633,10 @@
     <div class="profile-proposal-form">
       <div class="facts-content-editor-row">
         <textarea id="cards-v2-rev-content" class="facts-content-editor" placeholder="这个新时间点的内容"></textarea>
-        <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-rev-content')">+ 标记为我写的</button>
+        <div class="facts-content-editor-btn-row">
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-rev-content')">+ 标记为我写的</button>
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2PreviewContent('cards-v2-rev-content')">预览</button>
+        </div>
       </div>
     </div>
     <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-valid-at" /><span></span><span></span></div>
@@ -3641,6 +3652,13 @@
     <input type="file" id="cards-v2-rev-file-input" accept=".pdf,.doc,.docx,.txt,.md,.json,.py" multiple style="display:none" onchange="cardsV2OnFileChosen('rev', this)" />
     <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Revision()">Save</button></div>
     <div class="profile-proposal-message" id="cards-v2-rev-message"></div>
+  </div>
+</div>
+
+<div id="cards-v2-content-preview-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2ContentPreview()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2ContentPreview()">‹</button><span>预览</span></div>
+    <div class="facts-content-preview-body" id="cards-v2-content-preview-body"></div>
   </div>
 </div>
 
@@ -8755,6 +8773,42 @@ function cardsV2InsertMyTag(textareaId){
   ta.focus();
   ta.setSelectionRange(pos, pos);
 }
+
+// Preview (2026-07-17): not live -- Yi Lan explicitly asked for an on-demand
+// button rather than a side-by-side live preview, click it, look, close it,
+// keep editing. This is a lightweight mirror of cards_store.py's
+// parse_content_text, JS-side only, purely for this preview -- the actual
+// save still goes through the real server-side parser, this never writes
+// anything.
+function cardsV2ParseContentTextPreview(text){
+  var blocks = String(text || '').split('\n\n').filter(function(b){ return b.trim(); });
+  return blocks.map(function(block){
+    if (block.indexOf('一澜：') === 0) return { author: 'yi_lan', text: block.slice(3) };
+    if (block.indexOf('林湛：') === 0) return { author: 'lin_zhan', text: block.slice(3) };
+    return { author: null, text: block };
+  });
+}
+function cardsV2RenderPreviewSegments(segments){
+  if (!segments.length) return '<div class="loading">还没有内容。</div>';
+  return segments.map(function(s){
+    var color = CARDS_V2_AUTHOR_COLOR[s.author];
+    if (!color) return '<div class="facts-content-segment">' + cardsV2Markdown(s.text) + '</div>';
+    var name = CARDS_V2_AUTHOR_NAME[s.author] || s.author;
+    return '<div class="facts-content-segment" style="border-left:3px solid ' + color + ';padding-left:10px;margin:8px 0;">'
+      + '<div style="font-size:11px;font-weight:600;margin-bottom:2px;color:' + color + ';">' + esc(name) + '</div>'
+      + cardsV2Markdown(s.text)
+      + '</div>';
+  }).join('');
+}
+function cardsV2PreviewContent(textareaId){
+  var ta = document.getElementById(textareaId);
+  if (!ta) return;
+  var segments = cardsV2ParseContentTextPreview(ta.value);
+  document.getElementById('cards-v2-content-preview-body').innerHTML = cardsV2RenderPreviewSegments(segments);
+  document.getElementById('cards-v2-content-preview-overlay').style.display = '';
+}
+function closeCardsV2ContentPreview(){ document.getElementById('cards-v2-content-preview-overlay').style.display = 'none'; }
+
 async function submitCardsV2Add(){
   var title = document.getElementById('cards-v2-add-title').value.trim();
   var msg = document.getElementById('cards-v2-add-message');
@@ -8800,7 +8854,7 @@ async function submitCardsV2Edit(force){
     var d = await r.json().catch(function(){ return {}; });
     if (r.status === 409 && d.error === 'ownership_conflict') {
       var name = CARDS_V2_AUTHOR_NAME[d.author] || d.author;
-      var ok = confirm('这段内容是' + name + '写的：\n「' + d.text_preview + '」\n\n确定要整段覆盖吗？');
+      var ok = confirm('你修改了' + name + '的内容：\n「' + d.text_preview + '」\n\n确定保存吗？');
       if (ok) return submitCardsV2Edit(true);
       return;
     }
@@ -8837,7 +8891,7 @@ async function submitCardsV2Revision(force){
     var d = await r.json().catch(function(){ return {}; });
     if (r.status === 409 && d.error === 'ownership_conflict') {
       var name = CARDS_V2_AUTHOR_NAME[d.author] || d.author;
-      var ok = confirm('这段内容是' + name + '写的：\n「' + d.text_preview + '」\n\n新的时间点不保留这段，确定吗？');
+      var ok = confirm('你修改了' + name + '的内容：\n「' + d.text_preview + '」\n\n确定保存吗？');
       if (ok) return submitCardsV2Revision(true);
       return;
     }

@@ -127,7 +127,7 @@ def main():
     lz_seg_id = cur["content_segments"][1]["id"]
 
     blocked = _run(card_edit_content(card="沟通方式", segment_id=yl_seg_id, text="被改了"))
-    assert "这段是一澜写的" in blocked and "我希望吵架后能先冷静半小时" in blocked
+    assert "你修改了一澜的内容" in blocked and "我希望吵架后能先冷静半小时" in blocked
     unchanged = store.get_current_revision(yl_card)["content_segments"][0]["text"]
     assert unchanged == "我希望吵架后能先冷静半小时"  # unforced attempt didn't mutate
     print("PASS card_edit_content: touching Yi Lan's segment blocked with a real preview, not mutated")
@@ -141,7 +141,7 @@ def main():
     print("PASS card_edit_content: editing your own segment never needs force")
 
     blocked_delete = _run(card_delete_content(card="沟通方式", segment_id=yl_seg_id))
-    assert "这段是一澜写的" in blocked_delete
+    assert "你删除了一澜的内容" in blocked_delete
     assert len(store.get_current_revision(yl_card)["content_segments"]) == 2  # untouched
     forced_delete = _run(card_delete_content(card="沟通方式", segment_id=yl_seg_id, force=True))
     assert "已删除" in forced_delete
@@ -155,7 +155,7 @@ def main():
     # --- card_new_revision: content REPLACES, rule-C gated (2026-07-17, second pass) ---
     novel_card = store.create_card(title="慁", content="第一版内容", author=AUTHOR_YI_LAN)
     blocked_rev = _run(card_new_revision(card="慁", content="林湛的全新第二版", title="慁（终稿）"))
-    assert "这段是一澜写的" in blocked_rev and "第一版内容" in blocked_rev
+    assert "你修改了一澜的内容" in blocked_rev and "第一版内容" in blocked_rev
     assert len(store.list_revisions(novel_card)) == 1  # unforced attempt didn't create a revision
     print("PASS card_new_revision: replacing content that would lose Yi Lan's segment is blocked with a preview")
 
@@ -175,6 +175,30 @@ def main():
     cur = store.get_current_revision(novel_card)
     assert cur["content"] == "林湛：林湛的全新第二版"  # carried forward unchanged when nothing passed
     print("PASS card_new_revision: omitted fields carry forward from the previous revision, no force needed")
+
+    # --- real bug found 2026-07-17 (Lin Zhan's own testing): passing back a
+    # multi-author card's full visible text must be parsed per-paragraph,
+    # not blanket-attributed to whoever called the tool ---
+    mixed_card = store.create_card(title="混合卡", content="一澜的第一段", author=AUTHOR_YI_LAN)
+    store.add_content_segment(mixed_card, author=AUTHOR_LIN_ZHAN, text="林湛的第二段")
+    visible_text = store.get_current_revision(mixed_card)["content"]
+    assert visible_text == "一澜：一澜的第一段\n\n林湛：林湛的第二段"
+    # Lin Zhan reads it (e.g. via card_lookup), tweaks his own part, saves it back whole
+    edited_back = "一澜：一澜的第一段\n\n林湛：林湛改过的第二段"
+    out_roundtrip = _run(card_new_revision(card="混合卡", content=edited_back))
+    assert "已加新时间点" in out_roundtrip  # no force needed -- Yi Lan's paragraph text is untouched
+    cur = store.get_current_revision(mixed_card)
+    assert [s["author"] for s in cur["content_segments"]] == [AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN]
+    assert cur["content_segments"][0]["text"] == "一澜的第一段"  # NOT silently reassigned to lin_zhan
+    assert cur["content_segments"][1]["text"] == "林湛改过的第二段"
+    print("PASS card_new_revision: content with 作者： labels is parsed per-paragraph, not blanket-attributed")
+
+    # a plain unlabeled string still defaults to him (the common case: he's
+    # just writing something new, not round-tripping an existing card)
+    plain_card = store.create_card(title="纯文字卡", content="占位", author=AUTHOR_YI_LAN)
+    _run(card_new_revision(card="纯文字卡", content="没有标签的新内容", force=True))
+    assert store.get_current_revision(plain_card)["content_segments"][0]["author"] == AUTHOR_LIN_ZHAN
+    print("PASS card_new_revision: plain unlabeled content still defaults to Lin Zhan")
 
     # --- card_link_bucket / card_unlink_bucket ---
     link_out = _run(card_link_bucket(card="慁", bucket_id="b_evidence_1"))

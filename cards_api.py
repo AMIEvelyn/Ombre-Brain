@@ -23,7 +23,7 @@ from typing import Any
 
 from starlette.responses import JSONResponse
 
-from cards_store import AUTHOR_YI_LAN, SegmentOwnershipError
+from cards_store import AUTHOR_YI_LAN, AUTHOR_DISPLAY_NAMES, SegmentOwnershipError
 
 # 2026-07-16: raised from the frontend's old combined-5 cap to a per-type
 # cap of 10 (Yi Lan wants up to 10 photos AND up to 10 files on one card).
@@ -49,15 +49,19 @@ def _validate_attachment_count(attachments) -> str | None:
 def _ownership_conflict_response(e: SegmentOwnershipError) -> JSONResponse:
     """2026-07-17: structured 409 for rule C (Yi Lan's decision) -- the
     frontend needs the real author + a text preview to build an actual
-    confirmation dialog ("this was written by Lin Zhan: '...' -- overwrite
-    anyway?"), not a generic 500 with just an exception message."""
+    confirmation dialog, not a generic 500 with just an exception message.
+    `message` is a ready-to-use fallback string for any caller that doesn't
+    build its own dialog; wording matches what Yi Lan asked for after the
+    original "确定要整段覆盖吗" phrasing read as more destructive than most
+    of these actually are (often just a wording tweak, not a real overwrite)."""
+    name = AUTHOR_DISPLAY_NAMES.get(e.author, e.author)
     return JSONResponse(
         {
             "error": "ownership_conflict",
             "segment_id": e.segment_id,
             "author": e.author,
             "text_preview": e.text_preview,
-            "message": f"这段是 {e.author} 写的，需要 force=true 才能覆盖/删除。",
+            "message": f"你修改了{name}的内容，需要 force=true 才能保存。",
         },
         status_code=409,
     )

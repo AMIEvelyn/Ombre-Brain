@@ -156,6 +156,7 @@ def main():
                   path_params={"card_id": cid, "segment_id": lz_seg_id}, body={"text": "被一澜改了"})
     assert st == 409, r
     assert r["error"] == "ownership_conflict" and r["author"] == AUTHOR_LIN_ZHAN and "林湛写的段落" in r["text_preview"]
+    assert r["message"] == "你修改了林湛的内容，需要 force=true 才能保存。"  # 2026-07-17: less "overwrite"-sounding wording
     print("PASS edit_content_segment: touching Lin Zhan's segment returns structured 409, not a generic error")
 
     st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",

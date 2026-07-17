@@ -37,7 +37,7 @@ and no attachment upload (no binary-file channel through an MCP tool call).
 
 from __future__ import annotations
 
-from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
+from cards_store import AUTHOR_LIN_ZHAN, AUTHOR_DISPLAY_NAMES, SegmentOwnershipError
 
 # Default page size for card_attachment_read's start/max_chars pagination
 # when max_chars isn't given -- same as server.py's whole-file truncation
@@ -46,17 +46,35 @@ from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
 FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS = 4000
 
 
+def _fmt_segments(segments: list[dict]) -> list[str]:
+    """One line per segment, each prefixed with its id in brackets --
+    that id is exactly what card_edit_content/card_delete_content need as
+    their segment_id argument. Without this, those two tools were
+    unreachable in practice: there was no way to discover a segment's id
+    (2026-07-17, bug Lin Zhan actually ran into testing)."""
+    lines = []
+    for s in segments:
+        name = AUTHOR_DISPLAY_NAMES.get(s.get("author"))
+        label = f"{name}：" if name else ""
+        lines.append(f"    [{s.get('id', '')}] {label}{s.get('text', '')}")
+    return lines
+
+
 def _fmt_card(store, card: dict) -> str:
     cur = card.get("current") or {}
     title = str(cur.get("title") or "").strip() or "(无标题)"
-    content = str(cur.get("content") or "").strip()
+    segments = cur.get("content_segments") or []
     history = card.get("history") or []
     tags = [str(t) for t in (cur.get("tags") or [])]
     attachments = cur.get("attachments") or []
     buckets = card.get("buckets") or []
 
     lines = [f"【{title}】"]
-    lines.append(f"  现在：{content}" if content else "  现在：（无内容）")
+    if segments:
+        lines.append("  现在：")
+        lines.extend(_fmt_segments(segments))
+    else:
+        lines.append("  现在：（无内容）")
     if tags:
         lines.append("  " + " ".join(f"#{t}" for t in tags))
     if len(history) > 1:
@@ -467,6 +485,23 @@ def register_card_write_tools(mcp, store) -> None:
         cur = (card or {}).get("current") or {}
         return f"【{cur.get('title') or '(无标题)'}】（id: {card_id}）"
 
+    def _segments_from_text(text: str) -> list[dict]:
+        """Real bug fix (2026-07-17, found by Lin Zhan testing card_new_revision):
+        his `content` string might be plain new text, or might be the full
+        visible text of an existing multi-author card he read back via
+        card_lookup/card_history (e.g. re-saving with a small tweak) --
+        either way it needs the same "作者：" parsing the Dashboard's content
+        editor uses, or every paragraph in it silently gets re-attributed to
+        him, even ones that were originally Yi Lan's. A paragraph with no
+        recognized prefix defaults to him (unlike the Dashboard, where
+        unlabeled text stays deliberately unattributed -- there's no
+        ambiguity here, he's the only one calling this)."""
+        segments = store.parse_content_text(text)
+        for seg in segments:
+            if seg.get("author") is None:
+                seg["author"] = AUTHOR_LIN_ZHAN
+        return segments
+
     @mcp.tool()
     async def card_create(
         title: str = "", content: str = "", tags: list[str] | None = None,
@@ -489,7 +524,9 @@ def register_card_write_tools(mcp, store) -> None:
             folder_ids = [folder_id]
         try:
             card_id = store.create_card(
-                title=title, content=content, tags=tags or [],
+                title=title,
+                content_segments=(_segments_from_text(content) if content else None),
+                tags=tags or [],
                 valid_at=(valid_at.strip() or None), folder_ids=folder_ids,
                 author=AUTHOR_LIN_ZHAN,
             )
@@ -603,7 +640,7 @@ def register_card_write_tools(mcp, store) -> None:
                 found["id"], segment_id, text=text, author=AUTHOR_LIN_ZHAN, force=force,
             )
         except SegmentOwnershipError as e:
-            return f"这段是一澜写的：「{e.text_preview}」。确定要改的话，带上 force=true 再调用一次。"
+            return f"你修改了一澜的内容：「{e.text_preview}」。确定要保存的话，带上 force=true 再调用一次。"
         return "已修改。" if ok else f"没找到 segment_id={segment_id!r}。"
 
     @mcp.tool()
@@ -619,7 +656,7 @@ def register_card_write_tools(mcp, store) -> None:
         try:
             ok = store.delete_content_segment(found["id"], segment_id, author=AUTHOR_LIN_ZHAN, force=force)
         except SegmentOwnershipError as e:
-            return f"这段是一澜写的：「{e.text_preview}」。确定要删的话，带上 force=true 再调用一次。"
+            return f"你删除了一澜的内容：「{e.text_preview}」。确定要保存的话，带上 force=true 再调用一次。"
         return "已删除。" if ok else f"没找到 segment_id={segment_id!r}。"
 
     @mcp.tool()
@@ -633,9 +670,12 @@ def register_card_write_tools(mcp, store) -> None:
         只是不出现在这个新时间点上，想看回去用 card_history）。
         想在保留原内容基础上加东西、又不想产生新时间点，用 card_add_content。
         valid_at：这个时间点对应的真实日期，不传默认现在。
-        如果传的 content 会导致一澜写的某一段彻底消失（新内容里找不到那段
-        原文），第一次调用（不传 force）会告诉你那段是什么、不会真的执行；
-        确认要这样做的话，带上 force=true 再调用一次。"""
+        content 里如果带着"一澜：""林湛："这种标签（比如你把 card_lookup 读到的
+        完整正文原样传回来），会按标签正确识别每一段是谁写的，不会因为是你
+        传的就整段变成你的；没有标签的部分默认算你写的。
+        如果这次改动会导致一澜写的某一段原文一个字都对不上了（哪怕只是被
+        改了几个字），第一次调用（不传 force）会告诉你那段是什么、不会真的
+        执行；确认要保存的话，带上 force=true 再调用一次。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
@@ -643,7 +683,7 @@ def register_card_write_tools(mcp, store) -> None:
         if title:
             kwargs["title"] = title
         if content:
-            kwargs["content"] = content
+            kwargs["content_segments"] = _segments_from_text(content)
         if tags is not None:
             kwargs["tags"] = tags
         if valid_at:
@@ -651,7 +691,7 @@ def register_card_write_tools(mcp, store) -> None:
         try:
             store.add_revision(found["id"], **kwargs)
         except SegmentOwnershipError as e:
-            return f"这段是一澜写的：「{e.text_preview}」。确定新版本里不保留这段的话，带上 force=true 再调用一次。"
+            return f"你修改了一澜的内容：「{e.text_preview}」。确定新版本要保存的话，带上 force=true 再调用一次。"
         except ValueError as e:
             return str(e)
         return f"已加新时间点：{_card_result(found['id'])}"
