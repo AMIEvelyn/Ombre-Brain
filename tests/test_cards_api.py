@@ -137,45 +137,50 @@ def main():
     assert len(r["revisions"]) == 2
     print("PASS new revision + list")
 
-    # --- content segments: add always works, edit/delete gated by rule C ---
-    st, r = _call(mcp, "POST", C + "/{card_id}/content-segments", path_params={"card_id": cid}, body={"text": ""})
-    assert st == 400, r  # empty text rejected
-    st, r = _call(mcp, "POST", C + "/{card_id}/content-segments", path_params={"card_id": cid},
-                  body={"text": "一澜补充的一段"})
+    # --- content_text (whole-content editing, 2026-07-17 second pass): add always
+    # works, touching Lin Zhan's paragraph is gated by rule C -- no segment_id
+    # anywhere in this flow (that concept was removed: Lin Zhan had no way to
+    # discover one, making the old per-segment endpoints unusable in practice) ---
+    shown = store.get_current_revision(cid)["content"]
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content_text": shown + "\n\n一澜补充的一段"})
     assert st == 200, r
-    yl_seg_id = r["segment_id"]
     assert r["card"]["current"]["content_segments"][-1]["text"] == "一澜补充的一段"
-    print("PASS add_content_segment: always allowed, no auth conflict")
+    print("PASS content_text: adding a new paragraph always works, no auth conflict")
 
-    # simulate Lin Zhan having added his own segment via his MCP tools (this
+    # simulate Lin Zhan having added his own paragraph via his MCP tools (this
     # HTTP API is Dashboard-only/Yi-Lan-only, so injecting directly through
     # the store is the realistic way to set up a real cross-author card)
-    lz_seg_id = store.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的段落")
+    store.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的段落")
+    shown = store.get_current_revision(cid)["content"]
 
-    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
-                  path_params={"card_id": cid, "segment_id": lz_seg_id}, body={"text": "被一澜改了"})
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content_text": shown.replace("林湛写的段落", "被一澜改了")})
     assert st == 409, r
     assert r["error"] == "ownership_conflict" and r["author"] == AUTHOR_LIN_ZHAN and "林湛写的段落" in r["text_preview"]
     assert r["message"] == "你修改了林湛的内容，需要 force=true 才能保存。"  # 2026-07-17: less "overwrite"-sounding wording
-    print("PASS edit_content_segment: touching Lin Zhan's segment returns structured 409, not a generic error")
+    print("PASS content_text: touching Lin Zhan's paragraph returns structured 409, not a generic error")
 
-    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
-                  path_params={"card_id": cid, "segment_id": lz_seg_id}, body={"text": "被一澜改了", "force": True})
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content_text": shown.replace("林湛写的段落", "被一澜改了"), "force": True})
     assert st == 200, r
-    print("PASS edit_content_segment: force=true actually applies it")
+    print("PASS content_text: force=true actually applies it")
 
-    st, r = _call(mcp, "PATCH", C + "/{card_id}/content-segments/{segment_id}",
-                  path_params={"card_id": cid, "segment_id": yl_seg_id}, body={"text": "一澜改了自己写的"})
-    assert st == 200, r  # own segment never needs force
-    print("PASS edit_content_segment: editing your own segment never needs force")
+    shown = store.get_current_revision(cid)["content"]
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content_text": shown.replace("一澜补充的一段", "一澜改了自己写的")})
+    assert st == 200, r  # own paragraph never needs force
+    print("PASS content_text: editing your own paragraph never needs force")
 
-    st, r = _call(mcp, "DELETE", C + "/{card_id}/content-segments/{segment_id}",
-                  path_params={"card_id": cid, "segment_id": lz_seg_id})
+    # dropping Lin Zhan's paragraph entirely is the same rule-C gate
+    shown = store.get_current_revision(cid)["content"]
+    dropped = "\n\n".join(p for p in shown.split("\n\n") if "被一澜改了" not in p)
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid}, body={"content_text": dropped})
     assert st == 409 and r["error"] == "ownership_conflict", r
-    st, r = _call(mcp, "DELETE", C + "/{card_id}/content-segments/{segment_id}",
-                  path_params={"card_id": cid, "segment_id": lz_seg_id}, query={"force": "1"})
+    st, r = _call(mcp, "PATCH", C + "/{card_id}", path_params={"card_id": cid},
+                  body={"content_text": dropped, "force": True})
     assert st == 200, r
-    print("PASS delete_content_segment: same 409-then-force pattern as edit")
+    print("PASS content_text: dropping Lin Zhan's paragraph needs force too, same as editing it")
 
     # --- whole-string edit_card(content=...) is rule-C gated too (it wipes every segment) ---
     store.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="又一段林湛写的")

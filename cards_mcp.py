@@ -29,15 +29,23 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
 register_card_write_tools(mcp, store) is the separate write surface (2026-07-17,
 docs/facts-model-v2-collection-redesign.md §14 item 3): card_create,
 card_create_folder, card_add_to_folder, card_remove_from_folder,
-card_edit_title, card_edit_tags, card_add_content, card_edit_content,
-card_delete_content, card_new_revision, card_link_bucket, card_unlink_bucket.
+card_edit_title, card_edit_tags, card_edit_content, card_new_revision,
+card_link_bucket, card_unlink_bucket.
 No card_delete (Yi Lan wants a recycle-bin review step first, not built yet)
 and no attachment upload (no binary-file channel through an MCP tool call).
+
+card_edit_content takes the card's whole new content as one string (2026-07-17,
+second pass) -- an earlier version required a segment_id identifying which
+piece of content to touch, but there was never any way for Lin Zhan to
+discover one (card_lookup/card_history didn't expose it), making that
+version unusable in practice. Whole-content editing with a diff-based
+ownership check (same idea as card_new_revision and the Dashboard's content
+editor) needs no id at all.
 """
 
 from __future__ import annotations
 
-from cards_store import AUTHOR_LIN_ZHAN, AUTHOR_DISPLAY_NAMES, SegmentOwnershipError
+from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
 
 # Default page size for card_attachment_read's start/max_chars pagination
 # when max_chars isn't given -- same as server.py's whole-file truncation
@@ -46,35 +54,17 @@ from cards_store import AUTHOR_LIN_ZHAN, AUTHOR_DISPLAY_NAMES, SegmentOwnershipE
 FACTS_ATTACHMENT_DEFAULT_PAGE_CHARS = 4000
 
 
-def _fmt_segments(segments: list[dict]) -> list[str]:
-    """One line per segment, each prefixed with its id in brackets --
-    that id is exactly what card_edit_content/card_delete_content need as
-    their segment_id argument. Without this, those two tools were
-    unreachable in practice: there was no way to discover a segment's id
-    (2026-07-17, bug Lin Zhan actually ran into testing)."""
-    lines = []
-    for s in segments:
-        name = AUTHOR_DISPLAY_NAMES.get(s.get("author"))
-        label = f"{name}：" if name else ""
-        lines.append(f"    [{s.get('id', '')}] {label}{s.get('text', '')}")
-    return lines
-
-
 def _fmt_card(store, card: dict) -> str:
     cur = card.get("current") or {}
     title = str(cur.get("title") or "").strip() or "(无标题)"
-    segments = cur.get("content_segments") or []
+    content = str(cur.get("content") or "").strip()
     history = card.get("history") or []
     tags = [str(t) for t in (cur.get("tags") or [])]
     attachments = cur.get("attachments") or []
     buckets = card.get("buckets") or []
 
     lines = [f"【{title}】"]
-    if segments:
-        lines.append("  现在：")
-        lines.extend(_fmt_segments(segments))
-    else:
-        lines.append("  现在：（无内容）")
+    lines.append(f"  现在：{content}" if content else "  现在：（无内容）")
     if tags:
         lines.append("  " + " ".join(f"#{t}" for t in tags))
     if len(history) > 1:
@@ -609,55 +599,30 @@ def register_card_write_tools(mcp, store) -> None:
         return f"标签已更新为：{'、'.join(tags) if tags else '（空）'}"
 
     @mcp.tool()
-    async def card_add_content(card: str = "", text: str = "") -> str:
-        """给一张卡的内容追加一段你写的文字——是在已有内容后面加一段，不是替换，
-        不产生新的时间点。**永远不需要确认**：加东西不会碰到一澜写的部分，
-        这是你日常给卡片补充想法最正常的用法。
-        card：卡片标题或id。text：你要写的内容。"""
+    async def card_edit_content(card: str = "", content: str = "", force: bool = False) -> str:
+        """整份替换这张卡当前时间点的内容（原地改，不产生新时间点——就跟改一份
+        文档一样，不需要知道内容内部是怎么切分的）。
+        content：传这张卡完整的新内容。可以保留一澜原有的"一澜："段落原样不动，
+        只改自己那部分；也可以整段重写。带着"一澜：""林湛："标签的部分会被
+        正确识别成对应的作者，没有标签的部分默认算你写的。
+        如果这次改动会让一澜写的某一段原文一个字都对不上了（哪怕只是被改了
+        几个字、或者干脆整段没了），第一次调用（不传 force）会告诉你那段是
+        什么、不会真的执行；确认要保存的话，带上 force=true 再调用一次。
+        单纯往后面加一段自己的话（不碰一澜的任何部分）永远不需要 force。
+        想看当前完整内容用 card_lookup。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
-        text = str(text or "")
-        if not text.strip():
+        if not content.strip():
             return "内容不能是空的。"
-        store.add_content_segment(found["id"], author=AUTHOR_LIN_ZHAN, text=text)
-        return "已添加。"
-
-    @mcp.tool()
-    async def card_edit_content(card: str = "", segment_id: str = "", text: str = "", force: bool = False) -> str:
-        """修改内容里的某一段。改自己写的那段不需要确认；改一澜写的那段，第一次
-        调用（不传 force）会告诉你那段是谁写的、写了什么，不会真的改——确认要
-        改的话，带上 force=true 再调用一次才会真的执行。
-        segment_id：card_lookup/card_history 或上一次操作的结果里能看到每段
-        内容自己的 id。"""
-        found, err = _resolve_card(store, card)
-        if err:
-            return err
-        if not segment_id:
-            return "请给要修改的那一段的 segment_id。"
         try:
-            ok = store.edit_content_segment(
-                found["id"], segment_id, text=text, author=AUTHOR_LIN_ZHAN, force=force,
+            store.edit_current(
+                found["id"], content_segments=_segments_from_text(content),
+                author=AUTHOR_LIN_ZHAN, force=force,
             )
         except SegmentOwnershipError as e:
             return f"你修改了一澜的内容：「{e.text_preview}」。确定要保存的话，带上 force=true 再调用一次。"
-        return "已修改。" if ok else f"没找到 segment_id={segment_id!r}。"
-
-    @mcp.tool()
-    async def card_delete_content(card: str = "", segment_id: str = "", force: bool = False) -> str:
-        """删除内容里的某一段。规则跟 card_edit_content 一样：删自己写的不用
-        确认；删一澜写的那段，第一次调用会先告诉你是谁写的、写了什么，带
-        force=true 再调用一次才会真的删。"""
-        found, err = _resolve_card(store, card)
-        if err:
-            return err
-        if not segment_id:
-            return "请给要删除的那一段的 segment_id。"
-        try:
-            ok = store.delete_content_segment(found["id"], segment_id, author=AUTHOR_LIN_ZHAN, force=force)
-        except SegmentOwnershipError as e:
-            return f"你删除了一澜的内容：「{e.text_preview}」。确定要保存的话，带上 force=true 再调用一次。"
-        return "已删除。" if ok else f"没找到 segment_id={segment_id!r}。"
+        return "已保存。"
 
     @mcp.tool()
     async def card_new_revision(
@@ -668,7 +633,7 @@ def register_card_write_tools(mcp, store) -> None:
         上一个时间点；传了 content 会**整体替换**这个新时间点的内容（不会自动
         带上上一个时间点里一澜写的部分——旧内容还完整留在历史记录里，没丢，
         只是不出现在这个新时间点上，想看回去用 card_history）。
-        想在保留原内容基础上加东西、又不想产生新时间点，用 card_add_content。
+        想在保留原内容基础上加东西、又不想产生新时间点，用 card_edit_content。
         valid_at：这个时间点对应的真实日期，不传默认现在。
         content 里如果带着"一澜：""林湛："这种标签（比如你把 card_lookup 读到的
         完整正文原样传回来），会按标签正确识别每一段是谁写的，不会因为是你

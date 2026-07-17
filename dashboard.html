@@ -8549,17 +8549,6 @@ function cardsV2RenderContentSegments(cur){
   return '<div class="facts-detail-content">' + body + toggle + '</div>';
 }
 
-async function cardsV2QuickAddContent(){
-  var card = cardsV2.detail; if (!card) return;
-  var text = prompt('给这张卡加一段你的想法：');
-  if (!text || !text.trim()) return;
-  try {
-    await fetch('/api/cards-skeleton/cards/' + card.id + '/content-segments', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({text: text}),
-    });
-  } catch(e){}
-  await openCardsV2Detail(card.id); loadCardsV2();
-}
 function cardsV2ToggleContent(){ cardsV2ContentExpanded = !cardsV2ContentExpanded; renderCardsV2Detail(); }
 function cardsV2ToggleTimelineEntry(id){ cardsV2TimelineExpanded[id] = !cardsV2TimelineExpanded[id]; renderCardsV2Detail(); }
 function renderCardsV2Detail(){
@@ -8578,7 +8567,6 @@ function renderCardsV2Detail(){
     + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
     + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
     + '<div onclick="openCardsV2EditModal()">✎ Edit</div>'
-    + '<div onclick="cardsV2QuickAddContent()">✚ 添加想法</div>'
     + '<div onclick="openCardsV2BucketsModal()">🫙 View Bucket' + (buckets.length ? '（' + buckets.length + '）' : '') + '</div>'
     + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'

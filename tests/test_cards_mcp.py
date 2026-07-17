@@ -124,11 +124,7 @@ def main():
     # --- card_lookup output: leads with CURRENT state, hints history, shows star ---
     out = _run(card_lookup(query="酸辣粉"))
     assert "【酸辣粉】" in out
-    assert "现在：" in out and "一澜：不爱吃了" in out  # current = latest revision, not "爱吃"; labeled (2026-07-17)
-    # segment id exposed (2026-07-17, bug Lin Zhan hit -- card_edit_content/
-    # card_delete_content need this id and had no way to discover it before)
-    cur_seg_id = store.get_current_revision(suanla)["content_segments"][0]["id"]
-    assert f"[{cur_seg_id}]" in out
+    assert "现在：一澜：不爱吃了" in out       # current = latest revision, not "爱吃"; labeled (2026-07-17)
     assert "有 2 条历史" in out               # history folded behind a hint
     assert "⭐" in out and "林湛收藏" in out   # favorite membership surfaced
     print("PASS card_lookup current-state + history hint + star")

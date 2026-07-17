@@ -41,19 +41,22 @@ def main():
     cards_mcp.register_card_write_tools(mcp, store)
     assert set(mcp.tools) == {
         "card_create", "card_create_folder", "card_add_to_folder", "card_remove_from_folder",
-        "card_edit_title", "card_edit_tags", "card_add_content", "card_edit_content",
-        "card_delete_content", "card_new_revision", "card_link_bucket", "card_unlink_bucket",
+        "card_edit_title", "card_edit_tags", "card_edit_content",
+        "card_new_revision", "card_link_bucket", "card_unlink_bucket",
     }
     assert "card_delete" not in mcp.tools  # deliberately scoped out, see docstring
+    # 2026-07-17, second pass: card_add_content/card_delete_content are gone --
+    # folded into card_edit_content, which now takes the whole content string
+    # (same idea as card_new_revision) instead of a segment_id nothing could
+    # ever discover (that's the real bug this consolidation fixes).
+    assert "card_add_content" not in mcp.tools and "card_delete_content" not in mcp.tools
     card_create = mcp.tools["card_create"]
     card_create_folder = mcp.tools["card_create_folder"]
     card_add_to_folder = mcp.tools["card_add_to_folder"]
     card_remove_from_folder = mcp.tools["card_remove_from_folder"]
     card_edit_title = mcp.tools["card_edit_title"]
     card_edit_tags = mcp.tools["card_edit_tags"]
-    card_add_content = mcp.tools["card_add_content"]
     card_edit_content = mcp.tools["card_edit_content"]
-    card_delete_content = mcp.tools["card_delete_content"]
     card_new_revision = mcp.tools["card_new_revision"]
     card_link_bucket = mcp.tools["card_link_bucket"]
     card_unlink_bucket = mcp.tools["card_unlink_bucket"]
@@ -113,44 +116,49 @@ def main():
     assert "空" in empty_out
     print("PASS card_edit_tags: whole-list replace including clearing to empty")
 
-    # --- card_add_content: always allowed, no force needed ---
+    # --- card_edit_content: whole-content, no segment_id involved (2026-07-17, second pass) ---
     yl_card = store.create_card(title="沟通方式", content="我希望吵架后能先冷静半小时", author=AUTHOR_YI_LAN)
-    add_content_out = _run(card_add_content(card="沟通方式", text="我会记得先深呼吸，不马上回复"))
-    assert "已添加" in add_content_out
+    shown = store.get_current_revision(yl_card)["content"]
+    assert shown == "一澜：我希望吵架后能先冷静半小时"
+
+    # adding his own paragraph after Yi Lan's, keeping hers verbatim -- never needs force
+    add_out = _run(card_edit_content(card="沟通方式", content=shown + "\n\n我会记得先深呼吸，不马上回复"))
+    assert "已保存" in add_out
     cur = store.get_current_revision(yl_card)
     assert len(cur["content_segments"]) == 2
     assert [s["author"] for s in cur["content_segments"]] == [AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN]
-    print("PASS card_add_content: appends without touching Yi Lan's segment, no force needed")
+    print("PASS card_edit_content: adding without touching Yi Lan's paragraph, no force needed")
 
-    # --- card_edit_content / card_delete_content: rule C in action ---
-    yl_seg_id = cur["content_segments"][0]["id"]
-    lz_seg_id = cur["content_segments"][1]["id"]
-
-    blocked = _run(card_edit_content(card="沟通方式", segment_id=yl_seg_id, text="被改了"))
+    # editing Yi Lan's exact words (even keeping her label) needs force
+    shown2 = store.get_current_revision(yl_card)["content"]
+    edited_hers = shown2.replace("我希望吵架后能先冷静半小时", "被改了")
+    blocked = _run(card_edit_content(card="沟通方式", content=edited_hers))
     assert "你修改了一澜的内容" in blocked and "我希望吵架后能先冷静半小时" in blocked
     unchanged = store.get_current_revision(yl_card)["content_segments"][0]["text"]
     assert unchanged == "我希望吵架后能先冷静半小时"  # unforced attempt didn't mutate
-    print("PASS card_edit_content: touching Yi Lan's segment blocked with a real preview, not mutated")
+    print("PASS card_edit_content: touching Yi Lan's paragraph blocked with a real preview, not mutated")
 
-    forced = _run(card_edit_content(card="沟通方式", segment_id=yl_seg_id, text="一澜的话被林湛改了", force=True))
-    assert "已修改" in forced
-    print("PASS card_edit_content: force=True actually applies the edit")
+    forced = _run(card_edit_content(card="沟通方式", content=edited_hers, force=True))
+    assert "已保存" in forced
+    edited = store.get_current_revision(yl_card)["content_segments"][0]
+    assert edited["text"] == "被改了" and edited["author"] == AUTHOR_YI_LAN  # author preserved despite the edit
+    print("PASS card_edit_content: force=True applies the edit, original author label preserved")
 
-    own_edit = _run(card_edit_content(card="沟通方式", segment_id=lz_seg_id, text="林湛改了自己写的"))
-    assert "已修改" in own_edit  # editing own segment never needs force
-    print("PASS card_edit_content: editing your own segment never needs force")
+    own_shown = store.get_current_revision(yl_card)["content"]
+    own_edit = _run(card_edit_content(card="沟通方式", content=own_shown.replace("不马上回复", "会先冷静一下")))
+    assert "已保存" in own_edit  # editing his own paragraph never needs force
+    print("PASS card_edit_content: editing your own paragraph never needs force")
 
-    blocked_delete = _run(card_delete_content(card="沟通方式", segment_id=yl_seg_id))
-    assert "你删除了一澜的内容" in blocked_delete
-    assert len(store.get_current_revision(yl_card)["content_segments"]) == 2  # untouched
-    forced_delete = _run(card_delete_content(card="沟通方式", segment_id=yl_seg_id, force=True))
-    assert "已删除" in forced_delete
+    # dropping his own paragraph entirely is also fine without force (it's his to remove)
+    yl_only = store.get_current_revision(yl_card)["content_segments"][0]
+    drop_out = _run(card_edit_content(card="沟通方式", content=f"一澜：{yl_only['text']}"))
+    assert "已保存" in drop_out
     assert len(store.get_current_revision(yl_card)["content_segments"]) == 1
-    print("PASS card_delete_content: same rule-C gate as edit, force actually deletes")
+    print("PASS card_edit_content: dropping your own paragraph needs no force either")
 
-    missing_seg = _run(card_edit_content(card="沟通方式", segment_id="seg_does_not_exist", text="x", force=True))
-    assert "没找到" in missing_seg
-    print("PASS card_edit_content: unknown segment_id handled cleanly")
+    empty_out = _run(card_edit_content(card="沟通方式", content="   "))
+    assert "内容不能是空的" in empty_out
+    print("PASS card_edit_content: empty content rejected")
 
     # --- card_new_revision: content REPLACES, rule-C gated (2026-07-17, second pass) ---
     novel_card = store.create_card(title="慁", content="第一版内容", author=AUTHOR_YI_LAN)
@@ -214,7 +222,7 @@ def main():
     # --- missing-card resolution shared across all write tools ---
     for fn, kwargs in [
         (card_edit_title, {"card": "不存在的卡", "title": "x"}),
-        (card_add_content, {"card": "不存在的卡", "text": "x"}),
+        (card_edit_content, {"card": "不存在的卡", "content": "x"}),
         (card_new_revision, {"card": "不存在的卡"}),
         (card_link_bucket, {"card": "不存在的卡", "bucket_id": "b1"}),
     ]:
@@ -238,7 +246,7 @@ def real_fastmcp_registration_smoke_test():
     cards_mcp.register_card_write_tools(mcp, store)
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
-    assert len(names) == 19, names
+    assert len(names) == 17, names  # 2026-07-17: card_add_content/card_delete_content folded into card_edit_content
     assert "card_create" in names and "card_lookup" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")
 

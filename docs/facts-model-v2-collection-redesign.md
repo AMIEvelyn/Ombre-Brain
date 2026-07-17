@@ -419,6 +419,13 @@ docker exec ombre-brain pip install python-docx pypdf
    - **弹窗/提示文案**：一澜反馈"这段是林湛写的：『……』确定要整段覆盖吗？"这种措辞容易让人以为是要删除/覆盖，其实很多时候只是改几个字。两边（Dashboard的确认弹窗 + 林湛工具返回的确认文字）统一改成"你修改了林湛的内容：『……』确定保存吗？"这种更中性的说法。
    - **预览按钮**：一澜明确要"不需要实时"，要一个按钮点了才弹出预览、关掉继续编辑——不是旁边实时同步的那种。做了一个纯前端的预览（JS版的 `parse_content_text`，只做展示，不影响真正保存时后端的解析），加在 Create/Edit/New Revision 三个内容输入框下面。
    - 新增测试：完整复现了林湛报告的bug场景（一澜写一段、林湛写一段，林湛读回完整正文改自己那段再传回去，验证一澜那段的作者没被覆盖）+ segment id 暴露的断言 + 弹窗文案的断言，全部通过。
+
+   **Phase 3e（彻底删掉 segment_id 这个概念，2026-07-17 当天，一澜+林湛一致要求）**：Phase 3d 给 `card_lookup` 加的"每段亮出 id"是个错误方向——一澜完全不知道 segment 是什么、也没被告知过有这个概念，而这个 id 唯一的用途是给 `card_edit_content`（旧版，按 segment_id 改某一段）当参数，林湛测试时也确认这套接口不顺手。真正的修法不是"把 id 暴露出来"，是"压根不需要 id"：
+   - `card_add_content`/`card_edit_content`（旧版，`segment_id`+`text`）/`card_delete_content` 三个工具合并成一个新的 `card_edit_content(content, force)`——直接传这张卡完整的新内容（跟 `card_new_revision` 一个思路），不用知道内部怎么切分。加东西、改自己的部分、删自己的部分都不需要 force；碰到一澜的段落文字对不上了才会弹确认。
+   - `card_lookup`/`_fmt_card` 的"现在"这一行改回原来的单行纯文字格式，不再列每段的 id——反正现在没有任何工具需要这个 id 了。
+   - Dashboard 这边同步删掉：三个 `content-segments` HTTP 接口（`add_content_segment`/`edit_content_segment`/`delete_content_segment`）整个删掉，路由数从21降到18；卡片详情"···"菜单里的"✚ 添加想法"入口和背后的 `cardsV2QuickAddContent()` 函数也一起删了（现在 Edit 表单本身就是整份文本编辑，这个入口纯属多余）。
+   - `cards_store.py` 内部的 `add_content_segment`/`edit_content_segment`/`delete_content_segment` 三个方法保留（没删）——它们现在只是内部实现细节/测试用的搭建工具，不再对外暴露成任何 API 或 MCP 工具，所以不算"把 segment_id 又露出来了"。
+   - 四个测试套件同步大改（write-mcp 工具从12个减到10个、api路由从21降到18），全部重跑通过。
 4. **合并/去重工具**（林湛提的 merge 想法，§8.1）+ **自动矛盾检测**一起做——两者是同一个"新记忆 vs 已有记忆该怎么处理"判断问题的两面，不单独立项。不再卡在批量导入后面（批量导入已放弃），可以直接排，排在写入工具后面是因为它没有紧迫性，纯粹是数据整洁度的事。
 
 ### 第三优先级——该收尾但不紧急
