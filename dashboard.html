@@ -2450,6 +2450,7 @@
 
   /* 丝带 (folder ribbon timeline), 2026-07-18 -- §14 item 6 */
   .cards-v2-ribbon-card {
+    position: relative;
     background: var(--surface-solid);
     border: 1px solid var(--border);
     border-radius: 16px;
@@ -2567,15 +2568,17 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .cards-v2-ribbon-footer {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 4px;
-  }
+  /* Floats over the card's bottom-right corner, clear of the ~6px
+     scrollbar beneath it -- not in document flow, so it can't push the
+     ribbon around or end up stranded away from the scrollbar it labels. */
   .cards-v2-ribbon-path {
+    position: absolute;
+    right: 24px;
+    bottom: 14px;
     font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 12px;
     color: var(--text-dim);
+    pointer-events: none;
   }
   .cards-v2-additem {
     padding: 9px 8px;
@@ -3747,7 +3750,6 @@
         <button title="放大" onclick="cardsV2RibbonZoom(1.4)">＋</button>
       </div>
     </div>
-    <div class="cards-v2-ribbon-footer"><span class="cards-v2-ribbon-path" id="cards-v2-ribbon-path"></span></div>
     <div id="cards-v2-ribbon-viewport" class="cards-v2-ribbon-viewport"
          onmousedown="cardsV2RibbonOnMouseDown(event)" onmousemove="cardsV2RibbonOnMouseMove(event)"
          onmouseup="cardsV2RibbonOnMouseUp(event)" onmouseleave="cardsV2RibbonOnMouseUp(event)"
@@ -3755,6 +3757,7 @@
          ontouchstart="cardsV2RibbonOnTouchStart(event)" ontouchmove="cardsV2RibbonOnTouchMove(event)" ontouchend="cardsV2RibbonOnTouchEnd(event)">
       <div id="cards-v2-ribbon-body"><div class="loading">加载中…</div></div>
     </div>
+    <span class="cards-v2-ribbon-path" id="cards-v2-ribbon-path"></span>
   </div>
 </div>
 
