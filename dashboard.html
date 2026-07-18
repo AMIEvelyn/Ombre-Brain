@@ -2372,7 +2372,7 @@
     margin-bottom: -16px;
     padding-bottom: 26px;
   }
-  /* v2 资料卡: dynamic-depth Miller columns (one column per drilled level) */
+  /* v2 事实卡: dynamic-depth Miller columns (one column per drilled level) */
   .cards-v2-columns {
     display: flex;
     align-items: stretch;
@@ -3577,7 +3577,7 @@
         <button type="button" onclick="openCardsV2CreateModal()">+ 新建卡</button>
       </div>
     </div>
-    <div id="cards-v2-nav" class="profile-list"><div class="loading">加载资料卡…</div></div>
+    <div id="cards-v2-nav" class="profile-list"><div class="loading">加载事实卡…</div></div>
   </div>
 </div>
 
@@ -8545,7 +8545,7 @@ async function batchReview(idsJson, action) {
   } catch(e) {}
 }
 
-// ===================== Facts-model v2: 资料卡 (collection/playlist) =====================
+// ===================== Facts-model v2: 事实卡 (collection/playlist) =====================
 var cardsV2 = { folders: [], path: [], cardsByFolder: {}, detail: null, addTags: [], editTags: [], editId: '', revId: '' };
 // 2026-07-18: the two fixed favorite folders always sort first among their
 // siblings, regardless of creation order -- Yi Lan's request, so they don't

@@ -164,7 +164,7 @@ def _resolve_card(store, card: str):
     if len(exact) > 1:
         candidates = exact
     if not candidates:
-        return None, f"没找到叫「{card}」的资料卡。"
+        return None, f"没找到叫「{card}」的事实卡。"
     if len(candidates) == 1:
         return candidates[0], ""
     titles = "、".join(str((c.get("current") or {}).get("title") or c["id"]) for c in candidates)
@@ -386,7 +386,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
-        """【时光馆】只读查询骨架层资料卡（collection/歌单式的新模型，cards.sqlite）。
+        """【时光馆】只读查询骨架层事实卡（collection/歌单式的新模型，cards.sqlite）。
         每张卡显示的"现在"就是它最新时间点的内容（当前状态）；旧的时间点是历史，
         默认折叠，需要看变化过程再单独说。
         query：在标题/内容/标签里搜关键词（字面包含即可命中）；留空则列出范围内全部。
@@ -402,23 +402,23 @@ def register_card_tools(
         try:
             cards = store.search_cards(query, folder_id=folder_id)
         except Exception as e:
-            return f"查询资料卡失败: {e}"
+            return f"查询事实卡失败: {e}"
         if not cards:
             if query:
-                return f"没搜到匹配「{query}」的资料卡。"
+                return f"没搜到匹配「{query}」的事实卡。"
             flavor = _favorite_flavor(folder_id)
             hint = f" {flavor}" if flavor else ""
-            return f"这个范围里还没有资料卡。{hint}（新模型刚建好，数据还很少，正常）"
+            return f"这个范围里还没有事实卡。{hint}（新模型刚建好，数据还很少，正常）"
         scope = f"（在 {store.folder_path(folder_id)} 里）" if folder_id else ""
         flavor = _favorite_flavor(folder_id)
-        header = f"=== 资料卡{scope}" + (f" {flavor}" if flavor else "") + " ==="
+        header = f"=== 事实卡{scope}" + (f" {flavor}" if flavor else "") + " ==="
         return "\n".join([header] + [_fmt_card(store, c) for c in cards])
 
     FOLDER_TIMELINE_PAGE_SIZE = 50
 
     @mcp.tool()
     async def folder_timeline(folder: str = "", recursive: bool = True, page: int = 1) -> str:
-        """【时光馆】把一个范围里全部资料卡的**完整历史**按日期交错排成一条时间线
+        """【时光馆】把一个范围里全部事实卡的**完整历史**按日期交错排成一条时间线
         （叙事丝带）——不是每张卡只挑一个代表点，是**每一个历史时间点都在这条线上**，
         跟别的卡的时间点混排。比如"讲讲我们旅行的经过"就传 folder="旅行"：如果"香港"
         这张卡记过 出发→迪士尼→回家 三个时间点，这三个点会分别出现在时间线上（各自
@@ -428,7 +428,7 @@ def register_card_tools(
         标题去调 card_history/card_lookup 等工具。
         这张卡"现在"的那个时间点会标"（当前）"。
 
-        folder：**留空 = 全部资料卡的时间线，不限定任何文件夹**（一次看到你和一澜
+        folder：**留空 = 全部事实卡的时间线，不限定任何文件夹**（一次看到你和一澜
         所有事情交织在一起的完整叙事）；传了就只看这个文件夹（及其子文件夹，见
         recursive）范围内的。文件夹名或 id 都行。
         recursive：只在传了 folder 时才有意义。True（默认）连子文件夹里的卡也一起
@@ -448,7 +448,7 @@ def register_card_tools(
         scope_name = f"「{store.folder_path(folder_id)}」这个文件夹" if folder_id else "现在"
         if not entries:
             hint = f" {flavor}" if flavor else ""
-            return f"{scope_name}还没有任何资料卡。{hint}"
+            return f"{scope_name}还没有任何事实卡。{hint}"
         page = max(1, int(page or 1))
         total = len(entries)
         total_pages = (total + FOLDER_TIMELINE_PAGE_SIZE - 1) // FOLDER_TIMELINE_PAGE_SIZE
@@ -456,7 +456,7 @@ def register_card_tools(
             return f"没有第 {page} 页——{scope_name}一共只有 {total} 个时间点，共 {total_pages} 页。"
         start = (page - 1) * FOLDER_TIMELINE_PAGE_SIZE
         page_entries = entries[start:start + FOLDER_TIMELINE_PAGE_SIZE]
-        title = f"【{store.folder_path(folder_id)}】" if folder_id else "【全部资料卡】"
+        title = f"【{store.folder_path(folder_id)}】" if folder_id else "【全部事实卡】"
         header = f"=== {title}时间线（第 {page}/{total_pages} 页，共 {total} 个时间点）" + (f" {flavor}" if flavor else "") + " ==="
         lines = [header]
         for e in page_entries:
@@ -515,7 +515,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_history(card: str = "") -> str:
-        """【时光馆】读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
+        """【时光馆】读一张事实卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
         最新状态）。card_lookup 对更早的时间点只给一句"有 N 条历史"的提示，这个
         工具才是真正把那 N 条内容逐条读出来的入口，想知道某件事是怎么一步步变
         成现在这样时用这个。
@@ -550,7 +550,7 @@ def register_card_tools(
     async def card_attachment_read(
         card: str = "", label: str = "", section_id: str = "", start: int = 0, max_chars: int = 0, at: str = "",
     ) -> str:
-        """【时光馆】读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
+        """【时光馆】读取一张事实卡附件里的文字内容——.txt/.md/.json/.py 直接读，
         .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
         实验性功能），旧版二进制 .doc 格式也读不了（没有轻量可用的解析库），
         这两种会明确告诉你读不了、不是没找到。
@@ -660,7 +660,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_attachment_outline(card: str = "", label: str = "", at: str = "") -> str:
-        """【时光馆】解析一张资料卡附件的章节/目录结构（.docx/.pdf/.md），配合
+        """【时光馆】解析一张事实卡附件的章节/目录结构（.docx/.pdf/.md），配合
         card_attachment_read 的 section_id 参数分章节读长文档，不用一次性
         读全文再自己找位置。
         .docx 优先读 Word 的"标题1/标题2/标题3"样式；如果整篇都没用过标题样式，
@@ -710,7 +710,7 @@ def register_card_tools(
         # Image class) -- confirmed by reproducing it directly against
         # FastMCP.list_tools(). Runtime behavior (sometimes str, sometimes
         # Image) is unaffected; only the type hint had to go.
-        """【时光馆】把一张资料卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
+        """【时光馆】把一张事实卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
         它存在。**这是实验性功能（2026-07-16）**：MCP 协议支持这样返回图片，但
         ChatGPT 连接器具体能不能把这种图片内容真的显示给你看，还没有确认过——
         调用后如果你能描述出图片里的内容，说明能看；如果只是报错或者看不出画面，
@@ -760,7 +760,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_buckets(card: str = "") -> str:
-        """【时光馆】查看一张资料卡关联了哪些记忆桶（这张事实是从哪些原始记忆来的证据来源）。
+        """【时光馆】查看一张事实卡关联了哪些记忆桶（这张事实是从哪些原始记忆来的证据来源）。
         card_lookup 只会提示"关联了 N 个记忆桶"，这个工具才是把这几个桶具体是哪些、
         写了什么摘要都列出来的入口。
         card：卡片标题或 id。"""
@@ -836,7 +836,7 @@ def register_card_write_tools(mcp, store) -> None:
         title: str = "", content: str = "", tags: list[str] | None = None,
         valid_at: str = "", folder: str = "", bucket_ids: list[str] | None = None,
     ) -> str:
-        """【时光馆】新建一张资料卡，字段跟一澜在Dashboard上新建时一样：标题、内容、标签、
+        """【时光馆】新建一张事实卡，字段跟一澜在Dashboard上新建时一样：标题、内容、标签、
         日期（valid_at，不传默认今天）、归入哪个文件夹（可选，传文件夹名或id，
         文件夹必须已经存在——想建一个还不存在的新文件夹，先调 card_create_folder）、
         要关联哪些记忆桶（bucket_ids，可选）。

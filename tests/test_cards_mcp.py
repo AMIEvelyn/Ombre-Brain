@@ -156,7 +156,7 @@ def main():
 
     # --- folder_timeline: leaving folder empty means every card, paginated ---
     tl_all = _run(folder_timeline())
-    assert "全部资料卡" in tl_all and "出发" in tl_all and "火锅" in tl_all
+    assert "全部事实卡" in tl_all and "出发" in tl_all and "火锅" in tl_all
     tl_page2_oob = _run(folder_timeline(page=99))
     assert "没有第 99 页" in tl_page2_oob
     print("PASS folder_timeline: empty folder = everything, out-of-range page handled")
