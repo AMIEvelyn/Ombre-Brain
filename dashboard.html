@@ -8547,8 +8547,18 @@ async function batchReview(idsJson, action) {
 
 // ===================== Facts-model v2: 资料卡 (collection/playlist) =====================
 var cardsV2 = { folders: [], path: [], cardsByFolder: {}, detail: null, addTags: [], editTags: [], editId: '', revId: '' };
-function cardsV2Tops(){ return cardsV2.folders.filter(function(f){ return !f.parent_id; }); }
-function cardsV2Kids(pid){ return cardsV2.folders.filter(function(f){ return f.parent_id === pid; }); }
+// 2026-07-18: the two fixed favorite folders always sort first among their
+// siblings, regardless of creation order -- Yi Lan's request, so they don't
+// drift below whatever test folders happen to predate them.
+function cardsV2SortFavFirst(list){
+  var favIds = [CARDS_V2_FAVORITE_FOLDER.yi_lan, CARDS_V2_FAVORITE_FOLDER.lin_zhan];
+  return list.slice().sort(function(a, b){
+    var af = favIds.indexOf(a.id) !== -1, bf = favIds.indexOf(b.id) !== -1;
+    return af === bf ? 0 : (af ? -1 : 1);
+  });
+}
+function cardsV2Tops(){ return cardsV2SortFavFirst(cardsV2.folders.filter(function(f){ return !f.parent_id; })); }
+function cardsV2Kids(pid){ return cardsV2SortFavFirst(cardsV2.folders.filter(function(f){ return f.parent_id === pid; })); }
 function cardsV2Find(id){ return cardsV2.folders.find(function(f){ return f.id === id; }); }
 function cardsV2Path(id){  // readable "我们 · 物品 · 小馆" path for a folder id
   var by = {}; cardsV2.folders.forEach(function(f){ by[f.id] = f; });

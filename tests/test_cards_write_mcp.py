@@ -11,7 +11,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cards_store import CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN  # noqa: E402
+from cards_store import CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN, FAVORITE_FOLDER_LIN_ZHAN  # noqa: E402
 import cards_mcp  # noqa: E402
 
 
@@ -41,6 +41,7 @@ def main():
     cards_mcp.register_card_write_tools(mcp, store)
     assert set(mcp.tools) == {
         "card_create", "card_create_folder", "card_add_to_folder", "card_remove_from_folder",
+        "card_favorite", "card_unfavorite",
         "card_edit_title", "card_edit_tags", "card_edit_content",
         "card_new_revision", "card_link_bucket", "card_unlink_bucket",
         "card_merge_preview", "card_merge",
@@ -55,6 +56,8 @@ def main():
     card_create_folder = mcp.tools["card_create_folder"]
     card_add_to_folder = mcp.tools["card_add_to_folder"]
     card_remove_from_folder = mcp.tools["card_remove_from_folder"]
+    card_favorite = mcp.tools["card_favorite"]
+    card_unfavorite = mcp.tools["card_unfavorite"]
     card_edit_title = mcp.tools["card_edit_title"]
     card_edit_tags = mcp.tools["card_edit_tags"]
     card_edit_content = mcp.tools["card_edit_content"]
@@ -99,6 +102,21 @@ def main():
     rm_out = _run(card_remove_from_folder(card="放进文件夹的卡", folder="收藏夹测试"))
     assert "已移出" in rm_out
     print("PASS card_add_to_folder/card_remove_from_folder: idempotent add, real remove")
+
+    # --- card_favorite / card_unfavorite: his own fixed collection, no folder needed ---
+    fav_out = _run(card_favorite(card="放进文件夹的卡"))
+    assert "已收藏" in fav_out
+    card = store.search_cards("放进文件夹的卡")[0]
+    assert any(f["id"] == FAVORITE_FOLDER_LIN_ZHAN for f in card["folders"])
+    fav_again = _run(card_favorite(card="放进文件夹的卡"))
+    assert "已经在你的收藏里了" in fav_again
+    unfav_out = _run(card_unfavorite(card="放进文件夹的卡"))
+    assert "已取消收藏" in unfav_out
+    card = store.search_cards("放进文件夹的卡")[0]
+    assert not any(f["id"] == FAVORITE_FOLDER_LIN_ZHAN for f in card["folders"])
+    unfav_again = _run(card_unfavorite(card="放进文件夹的卡"))
+    assert "本来就不在你的收藏里" in unfav_again
+    print("PASS card_favorite/card_unfavorite: his own collection, no folder name/id needed")
 
     # --- card_edit_title: no ownership check, tags title_author ---
     title_out = _run(card_edit_title(card="ZhLanism 设定", title="ZhLanism 设定（改）"))
@@ -268,7 +286,7 @@ def real_fastmcp_registration_smoke_test():
     cards_mcp.register_card_write_tools(mcp, store)
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
-    assert len(names) == 19, names  # 2026-07-17: +card_merge_preview, +card_merge (§14 item 4)
+    assert len(names) == 21, names  # 2026-07-18: +card_favorite, +card_unfavorite (§14 item 5)
     assert "card_create" in names and "card_lookup" in names
     assert "card_merge_preview" in names and "card_merge" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")

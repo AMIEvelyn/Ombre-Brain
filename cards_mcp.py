@@ -29,10 +29,13 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
 register_card_write_tools(mcp, store) is the separate write surface (2026-07-17,
 docs/facts-model-v2-collection-redesign.md §14 item 3): card_create,
 card_create_folder, card_add_to_folder, card_remove_from_folder,
-card_edit_title, card_edit_tags, card_edit_content, card_new_revision,
-card_link_bucket, card_unlink_bucket, card_merge_preview, card_merge (merge
-tool, §14 item 4 -- manual/deterministic timeline interleave, no auto
-duplicate detection; see merge_cards' docstring in cards_store.py).
+card_favorite, card_unfavorite (2026-07-18, §14 item 5 -- his own fixed
+collection, "林湛 / 收藏", mirrors the green heart on Yi Lan's Dashboard; no
+folder name/id needed), card_edit_title, card_edit_tags, card_edit_content,
+card_new_revision, card_link_bucket, card_unlink_bucket, card_merge_preview,
+card_merge (merge tool, §14 item 4 -- manual/deterministic timeline
+interleave, no auto duplicate detection; see merge_cards' docstring in
+cards_store.py).
 No card_delete (Yi Lan wants a recycle-bin review step first, not built yet)
 and no attachment upload (no binary-file channel through an MCP tool call).
 
@@ -810,6 +813,27 @@ def register_card_write_tools(mcp, store) -> None:
             return err
         removed = store.remove_card_from_folder(found["id"], folder_id)
         return "已移出。" if removed else "这张卡本来就不在这个文件夹里。"
+
+    @mcp.tool()
+    async def card_favorite(card: str = "") -> str:
+        """把一张卡收藏进你自己的收藏（"林湛 / 收藏"）——就是一澜 Dashboard 上
+        那颗绿心的效果，不用知道任何文件夹名或 id，也不影响这张卡在其它文件夹
+        里的归属。card：卡片标题或 id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        added = store.add_card_to_folder(found["id"], FAVORITE_FOLDER_LIN_ZHAN)
+        return "已收藏。" if added else "已经在你的收藏里了。"
+
+    @mcp.tool()
+    async def card_unfavorite(card: str = "") -> str:
+        """把一张卡从你自己的收藏（"林湛 / 收藏"）里移出——只是取消收藏，卡本身
+        不会被删，也不影响它在其它文件夹里的归属。card：卡片标题或 id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        removed = store.remove_card_from_folder(found["id"], FAVORITE_FOLDER_LIN_ZHAN)
+        return "已取消收藏。" if removed else "这张卡本来就不在你的收藏里。"
 
     @mcp.tool()
     async def card_edit_title(card: str = "", title: str = "") -> str:
