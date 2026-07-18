@@ -2493,7 +2493,13 @@
     flex: 1;
     min-height: 210px;
     padding: 45px 0 36px;
+    scrollbar-width: thin;              /* Firefox: thin, no boxy track */
+    scrollbar-color: #c7d6c9 transparent;
   }
+  .cards-v2-ribbon-viewport::-webkit-scrollbar { height: 6px; }
+  .cards-v2-ribbon-viewport::-webkit-scrollbar-track { background: transparent; }
+  .cards-v2-ribbon-viewport::-webkit-scrollbar-thumb { background: #c7d6c9; border-radius: 4px; }
+  .cards-v2-ribbon-viewport::-webkit-scrollbar-thumb:hover { background: #9db89e; }
   .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
   .cards-v2-ribbon-track { position: relative; height: 130px; }
   .cards-v2-ribbon-line {
@@ -2503,54 +2509,68 @@
     background: #9db89e;
     transform: translateY(-50%);
   }
+  /* Dot/title/date are each independently anchored to this point's center
+     (2026-07-18 fix: they used to stack top-down inside a flex column, so a
+     title that wrapped to more lines pushed its own dot down the track,
+     leaving dots misaligned with the line and with each other). */
   .cards-v2-ribbon-point {
     position: absolute;
-    top: 0;
-    transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100px;
-    cursor: pointer;
+    top: 50%;
+    transform: translate(-50%, -50%);
   }
   .cards-v2-ribbon-point-title {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 12px;
     color: #9db89e;
-    width: 100px;
     white-space: normal;
     word-break: break-word;
     overflow-wrap: break-word;
     line-height: 1.35;
     text-align: center;
-    margin-bottom: 6px;
+    cursor: pointer;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
   }
+  .cards-v2-ribbon-point-title.ellipsis { -webkit-line-clamp: 1; white-space: nowrap; text-overflow: ellipsis; }
   .cards-v2-ribbon-point-title.current { font-weight: bold; color: #2f6b45; }
   .cards-v2-ribbon-dot {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
     width: 9px;
     height: 9px;
     border-radius: 50%;
     background: #9db89e;
-    flex: 0 0 auto;
+    cursor: pointer;
   }
-  .cards-v2-ribbon-dot.current {
-    width: 14px;
-    height: 14px;
-    background: #2f6b45;
-  }
+  .cards-v2-ribbon-dot.current { background: #2f6b45; }  /* same size, color-only distinction (Yi Lan's call) */
   .cards-v2-ribbon-point-date {
+    position: absolute;
+    left: 50%;
+    top: 20px;
+    transform: translateX(-50%);
+    width: 50px;
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 11px;
     color: #9db89e;
-    margin-top: 6px;
     line-height: 1.3;
     text-align: center;
     white-space: nowrap;
+    cursor: pointer;
   }
   .cards-v2-ribbon-footer {
     display: flex;
     justify-content: flex-end;
-    margin-top: 4px;
+    margin-bottom: 4px;
   }
   .cards-v2-ribbon-path {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
     font-size: 12px;
     color: var(--text-dim);
   }
@@ -3724,6 +3744,7 @@
         <button title="放大" onclick="cardsV2RibbonZoom(1.4)">＋</button>
       </div>
     </div>
+    <div class="cards-v2-ribbon-footer"><span class="cards-v2-ribbon-path" id="cards-v2-ribbon-path"></span></div>
     <div id="cards-v2-ribbon-viewport" class="cards-v2-ribbon-viewport"
          onmousedown="cardsV2RibbonOnMouseDown(event)" onmousemove="cardsV2RibbonOnMouseMove(event)"
          onmouseup="cardsV2RibbonOnMouseUp(event)" onmouseleave="cardsV2RibbonOnMouseUp(event)"
@@ -3731,7 +3752,6 @@
          ontouchstart="cardsV2RibbonOnTouchStart(event)" ontouchmove="cardsV2RibbonOnTouchMove(event)" ontouchend="cardsV2RibbonOnTouchEnd(event)">
       <div id="cards-v2-ribbon-body"><div class="loading">加载中…</div></div>
     </div>
-    <div class="cards-v2-ribbon-footer"><span class="cards-v2-ribbon-path" id="cards-v2-ribbon-path"></span></div>
   </div>
 </div>
 
@@ -8836,6 +8856,9 @@ var CARDS_V2_RIBBON_ABS_MIN_GAP = 16;   // px
 var CARDS_V2_RIBBON_PX_PER_DAY_MIN = 0.3;
 var CARDS_V2_RIBBON_PX_PER_DAY_MAX = 200;
 var CARDS_V2_RIBBON_PAD = 70;           // left/right breathing room inside the track
+var CARDS_V2_RIBBON_TITLE_MAX_WIDTH = 100;      // widest a title box ever gets
+var CARDS_V2_RIBBON_TITLE_MIN_WRAP_WIDTH = 56;  // below this, give up on wrapping -- ellipsis-truncate instead
+var CARDS_V2_RIBBON_GAP_MARGIN = 10;            // breathing room so adjacent title boxes never touch
 
 async function cardsV2OpenRibbon(folderId){
   cardsV2Ribbon.folderId = folderId;
@@ -8891,14 +8914,25 @@ function renderCardsV2Ribbon(){
   var positions = cardsV2RibbonLayout();
   var totalWidth = positions[positions.length - 1] + CARDS_V2_RIBBON_PAD;
   var line = '<div class="cards-v2-ribbon-line" style="width:' + totalWidth + 'px;"></div>';
+  // Title box width shrinks to whatever room this point actually has before
+  // its neighbors (2026-07-18, Yi Lan's call): zooming out packs points
+  // closer together, so a fixed-width title would start overlapping its
+  // neighbor's -- instead the box narrows first, wrapping into more/shorter
+  // lines, and once it's too narrow to wrap sensibly, falls back to a single
+  // ellipsis-truncated line rather than ever visually colliding.
   var points = entries.map(function(e, i){
     var cur = !!e.is_current;
     var dotClass = 'cards-v2-ribbon-dot' + (cur ? ' current' : '');
-    var titleClass = 'cards-v2-ribbon-point-title' + (cur ? ' current' : '');
-    return '<div class="cards-v2-ribbon-point" style="left:' + positions[i] + 'px;" onclick="cardsV2RibbonPointClick(\'' + e.card_id + '\')">'
-      + '<div class="' + titleClass + '">' + esc(e.title || '(无标题)') + '</div>'
-      + '<div class="' + dotClass + '"></div>'
-      + '<div class="cards-v2-ribbon-point-date">' + cardsV2RibbonDateLines(e.date) + '</div>'
+    var gapBefore = i > 0 ? positions[i] - positions[i - 1] : Infinity;
+    var gapAfter = i < positions.length - 1 ? positions[i + 1] - positions[i] : Infinity;
+    var available = Math.min(gapBefore, gapAfter) - CARDS_V2_RIBBON_GAP_MARGIN;
+    var boxWidth = Math.max(30, Math.min(CARDS_V2_RIBBON_TITLE_MAX_WIDTH, available));
+    var titleClass = 'cards-v2-ribbon-point-title' + (cur ? ' current' : '') + (boxWidth < CARDS_V2_RIBBON_TITLE_MIN_WRAP_WIDTH ? ' ellipsis' : '');
+    var onclick = 'onclick="cardsV2RibbonPointClick(\'' + e.card_id + '\')"';
+    return '<div class="cards-v2-ribbon-point" style="left:' + positions[i] + 'px;">'
+      + '<div class="' + titleClass + '" style="width:' + boxWidth + 'px;" ' + onclick + '>' + esc(e.title || '(无标题)') + '</div>'
+      + '<div class="' + dotClass + '" ' + onclick + '></div>'
+      + '<div class="cards-v2-ribbon-point-date" ' + onclick + '>' + cardsV2RibbonDateLines(e.date) + '</div>'
       + '</div>';
   }).join('');
   body.innerHTML = '<div class="cards-v2-ribbon-track" style="width:' + totalWidth + 'px;">' + line + points + '</div>';
