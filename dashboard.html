@@ -2293,6 +2293,8 @@
   }
   .facts-nav-row:hover .facts-nav-chevron { color: var(--accent); }
   .facts-nav-chevron { color: var(--text-dim); }
+  .facts-nav-row-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .facts-nav-hearts { display: flex; align-items: center; gap: 2px; }
   .facts-browse-columns {
     display: flex;
     align-items: stretch;
@@ -2498,6 +2500,21 @@
     flex: 0 0 auto;
   }
   .facts-detail-menu-btn:hover { background: var(--surface-solid); }
+  .facts-detail-header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .facts-detail-hearts { display: flex; align-items: center; gap: 4px; }
+  .facts-detail-heart {
+    cursor: pointer;
+    display: inline-flex;
+    padding: 4px;
+    border-radius: 8px;
+    line-height: 0;
+  }
+  .facts-detail-heart:hover { background: var(--surface-solid); }
   .facts-detail-menu {
     position: absolute;
     top: 28px;
@@ -8610,9 +8627,16 @@ function renderCardsV2Nav(){
       if (subs.length) inner += '<div style="border-top:1px solid rgba(90,70,40,0.14);margin:10px 4px;"></div>';
       inner += cards.map(function(card){
         var cur = card.current || {}; var n = (card.history || []).length;
+        // 2026-07-18: only show a heart for whoever actually favorited this
+        // card -- none at all if neither did, matching Yi Lan's spec (not
+        // two hollow placeholders cluttering every row).
+        var favHtml = '';
+        if (cardsV2IsFavoritedBy(card, 'lin_zhan')) favHtml += cardsV2HeartIcon(CARDS_V2_AUTHOR_COLOR.lin_zhan, true, 15);
+        if (cardsV2IsFavoritedBy(card, 'yi_lan')) favHtml += cardsV2HeartIcon(CARDS_V2_AUTHOR_COLOR.yi_lan, true, 15);
+        if (favHtml) favHtml = '<span class="facts-nav-hearts">' + favHtml + '</span>';
         return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + card.id + '\')"><div><b>' + esc(cur.title || '(无标题)') + '</b>'
           + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(card.id) + '<br>变动过 ' + n + ' 次<br>最新变动于 ' + esc(cardsV2Date(cur.valid_at)) + '</div></div>'
-          + '<span class="facts-nav-chevron">›</span></div>';
+          + '<div class="facts-nav-row-right">' + favHtml + '<span class="facts-nav-chevron">›</span></div></div>';
       }).join('');
     }
     inner += '<div class="cards-v2-additem" onclick="cardsV2CreateFolderAt(' + k + ')">＋ ' + (k === 0 ? '建顶层馆' : '在这里建子馆') + '</div>';
@@ -8651,6 +8675,28 @@ function cardsV2PhotoTouchEnd(e, count){ var s = cardsV2Touch; cardsV2Touch = nu
 // swatches she sent, not arbitrary): 一澜 = Pull Cyan Blue, 林湛 = Cypress Green.
 var CARDS_V2_AUTHOR_COLOR = { yi_lan: '#044d78', lin_zhan: '#264939' };
 var CARDS_V2_AUTHOR_NAME = { yi_lan: '一澜', lin_zhan: '林湛' };
+
+// 2026-07-18: the two hearts' fixed destinations -- must match
+// cards_store.py's FAVORITE_FOLDER_YI_LAN/FAVORITE_FOLDER_LIN_ZHAN exactly
+// (Yi Lan's chosen strings, not arbitrary; see docs/facts-model-v2-collection-redesign.md §14 item 5).
+var CARDS_V2_FAVORITE_FOLDER = { yi_lan: 'lan_only_for_zhan', lin_zhan: 'zhan_only_for_lan' };
+function cardsV2IsFavoritedBy(card, who){
+  var fid = CARDS_V2_FAVORITE_FOLDER[who];
+  return (card && card.folders || []).some(function(f){ return f.id === fid; });
+}
+// Outline heart glyph (Yi Lan's reference: a plain icon-library heart, not
+// an emoji) -- filled with the author color when active, hollow otherwise.
+function cardsV2HeartIcon(color, active, size){
+  size = size || 20;
+  return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="' + (active ? color : 'none') + '" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+}
+async function cardsV2ToggleFavorite(who){
+  var card = cardsV2.detail; if (!card) return;
+  var fid = CARDS_V2_FAVORITE_FOLDER[who]; if (!fid) return;
+  if (cardsV2IsFavoritedBy(card, who)) await cardsV2RemoveFolder(fid);
+  else await cardsV2AddFolder(fid);
+}
 
 // Small markdown subset -- bold/italic/code/headers/lists -- not a full
 // CommonMark implementation, just what Yi Lan actually asked to see
@@ -8724,10 +8770,16 @@ function renderCardsV2Detail(){
   var photos = atts.filter(function(a){ return a.type === 'image'; }).slice(0, 10);
   var files = atts.filter(function(a){ return a.type !== 'image'; });
   var tags = cur.tags || []; var history = card.history || []; var buckets = card.buckets || [];
+  var favLZ = cardsV2IsFavoritedBy(card, 'lin_zhan'), favYL = cardsV2IsFavoritedBy(card, 'yi_lan');
+  var heartsHtml = '<div class="facts-detail-hearts">'
+    + '<span class="facts-detail-heart" title="' + (favLZ ? '移出' : '收藏进') + CARDS_V2_AUTHOR_NAME.lin_zhan + '的收藏" onclick="cardsV2ToggleFavorite(\'lin_zhan\')">' + cardsV2HeartIcon(CARDS_V2_AUTHOR_COLOR.lin_zhan, favLZ) + '</span>'
+    + '<span class="facts-detail-heart" title="' + (favYL ? '移出' : '收藏进') + CARDS_V2_AUTHOR_NAME.yi_lan + '的收藏" onclick="cardsV2ToggleFavorite(\'yi_lan\')">' + cardsV2HeartIcon(CARDS_V2_AUTHOR_COLOR.yi_lan, favYL) + '</span>'
+    + '</div>';
   var h = '<div class="facts-detail-card">';
   h += '<div class="facts-detail-header"><div class="facts-detail-header-left">'
     + '<button class="facts-detail-close-btn" onclick="closeCardsV2Detail()">✕</button>'
     + '<span class="facts-detail-breadcrumb">' + esc(path) + '</span></div>'
+    + '<div class="facts-detail-header-right">' + heartsHtml
     + '<button class="facts-detail-menu-btn" onclick="toggleCardsV2Menu()">···</button>'
     + '<div id="cards-v2-detail-menu" class="facts-detail-menu" style="display:none">'
     + '<div onclick="openCardsV2RevisionModal()">⊕ New Revision</div>'
@@ -8736,7 +8788,7 @@ function renderCardsV2Detail(){
     + '<div onclick="openCardsV2FoldersModal()">🗂 馆</div>'
     + '<div onclick="openCardsV2MergeModal()">🔗 合并到另一张卡</div>'
     + '<div onclick="deleteCardsV2()" style="color:#c0392b">🗑 Delete</div>'
-    + '</div></div>';
+    + '</div></div></div>';
   var titleColor = CARDS_V2_AUTHOR_COLOR[cur.title_author] || '';
   h += '<div class="facts-detail-title"' + (titleColor ? ' style="color:' + titleColor + ';"' : '') + '>' + esc(cur.title || '(无标题)') + '</div>';
   h += '<div class="facts-detail-breadcrumb" style="margin:-6px 0 12px;">id：' + esc(card.id) + '</div>';

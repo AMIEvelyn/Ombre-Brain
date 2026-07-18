@@ -53,11 +53,10 @@ _AUTHOR_PREFIX_TO_CODE = {f"{name}：": code for code, name in AUTHOR_DISPLAY_NA
 # The two hearts' fixed destinations (2026-07-18, favorites work). Each
 # heart in the UI/MCP always points at exactly one of these two folders --
 # fixed ids, not looked up by name, so renaming "收藏" later can't sever the
-# link. Placeholders: Yi Lan wants to pick the real strings herself; this is
-# the one place to change once she does (nothing else references these
-# folders by name, only by id -- see _ensure_favorite_folders).
-FAVORITE_FOLDER_YI_LAN = "fav_yi_lan"
-FAVORITE_FOLDER_LIN_ZHAN = "fav_lin_zhan"
+# link. Yi Lan's chosen strings (her pick, not arbitrary): each collection is
+# named "only for" the other person, not "belongs to" its own owner.
+FAVORITE_FOLDER_YI_LAN = "lan_only_for_zhan"
+FAVORITE_FOLDER_LIN_ZHAN = "zhan_only_for_lan"
 
 
 class SegmentOwnershipError(Exception):
