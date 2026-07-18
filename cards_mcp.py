@@ -172,13 +172,29 @@ def _resolve_card(store, card: str):
 
 
 def _resolve_folder(store, folder: str):
-    """Return (folder_id, error_message). Accepts an exact folder id or a name
-    (disambiguated by path if several match)."""
+    """Return (folder_id, error_message). Accepts an exact folder id, a bare
+    name (disambiguated by path if several match), or a full "A / B / C"
+    path.
+
+    2026-07-18 (Lin Zhan reported): passing back the exact path text several
+    tools already show him -- e.g. card_lookup's "⭐ 收藏在：一澜 / 收藏" or a
+    merge preview's folder list -- didn't resolve, because find_folders_by_name
+    only substring-matches a folder's own leaf name, not a whole path string.
+    Reuses folder_path()'s own " / " separator rather than inventing a new
+    convention, so anything he copies straight out of another tool's output
+    works here without him reformatting it."""
     folder = str(folder or "").strip()
     if not folder:
         return "", "请给一个文件夹名或文件夹 id。"
     if store.get_folder(folder):
         return folder, ""
+    if "/" in folder:
+        segments = [s.strip() for s in folder.split("/") if s.strip()]
+        normalized = " / ".join(segments)
+        for f in store.list_folders():
+            if store.folder_path(f["id"]) == normalized:
+                return f["id"], ""
+        return "", f"没找到路径是「{normalized}」的文件夹。"
     matches = store.find_folders_by_name(folder)
     if not matches:
         return "", f"没找到叫「{folder}」的文件夹。"

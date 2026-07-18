@@ -160,6 +160,16 @@ def main():
     assert "没找到" in _run(folder_timeline(folder="根本没有这个"))
     print("PASS folder resolution (ambiguous + missing)")
 
+    # --- 2026-07-18 (Lin Zhan reported): full "A / B" path resolution, not
+    # just a bare name or exact id -- pasting back what another tool already
+    # showed him (e.g. card_lookup's "⭐ 收藏在：一澜 / 收藏") should work ---
+    out_by_path = _run(folder_timeline(folder="一澜 / 喜欢的食物"))  # bare name is ambiguous, full path isn't
+    assert "酸辣粉" in out_by_path and "冰粉" in out_by_path
+    out_no_spaces = _run(folder_timeline(folder="一澜/喜欢的食物"))  # normalizes missing spaces around "/"
+    assert "酸辣粉" in out_no_spaces and "冰粉" in out_no_spaces
+    assert "没找到路径" in _run(folder_timeline(folder="一澜 / 不存在的馆"))
+    print("PASS folder resolution: full path, with or without spaces around /")
+
     # --- favorite folder flavor hint (2026-07-18): Lin Zhan should notice
     # this folder is special just by browsing into it, not only when he
     # already knows to look for a star on one specific card ---
