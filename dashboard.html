@@ -29,6 +29,17 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  /* App-wide thin scrollbar (2026-07-18, Yi Lan's ask -- was just the
+     ribbon's own, now every scrollable area in the app matches). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #c7d6c9 transparent;
+  }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: #c7d6c9; border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: #9db89e; }
+
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-weight: 400;
@@ -2490,16 +2501,8 @@
     touch-action: pan-x;
     user-select: none;
     -webkit-user-select: none;
-    flex: 1;
-    min-height: 210px;
     padding: 45px 0 36px;
-    scrollbar-width: thin;              /* Firefox: thin, no boxy track */
-    scrollbar-color: #c7d6c9 transparent;
   }
-  .cards-v2-ribbon-viewport::-webkit-scrollbar { height: 6px; }
-  .cards-v2-ribbon-viewport::-webkit-scrollbar-track { background: transparent; }
-  .cards-v2-ribbon-viewport::-webkit-scrollbar-thumb { background: #c7d6c9; border-radius: 4px; }
-  .cards-v2-ribbon-viewport::-webkit-scrollbar-thumb:hover { background: #9db89e; }
   .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
   .cards-v2-ribbon-track { position: relative; height: 130px; }
   .cards-v2-ribbon-line {
