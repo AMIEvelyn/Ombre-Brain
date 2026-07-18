@@ -30,15 +30,19 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   /* App-wide thin scrollbar (2026-07-18, Yi Lan's ask -- was just the
-     ribbon's own, now every scrollable area in the app matches). */
-  * {
+     ribbon's own, now every scrollable area in the app matches).
+     html/body get their own explicit copy: the root/page-level scrollbar
+     (e.g. behind a modal whose overlay doesn't fully suppress body scroll)
+     doesn't reliably pick up a universal `*` selector in every browser --
+     Yi Lan hit exactly this on the card detail popup. */
+  *, html, body {
     scrollbar-width: thin;
     scrollbar-color: #c7d6c9 transparent;
   }
-  *::-webkit-scrollbar { width: 6px; height: 6px; }
-  *::-webkit-scrollbar-track { background: transparent; }
-  *::-webkit-scrollbar-thumb { background: #c7d6c9; border-radius: 4px; }
-  *::-webkit-scrollbar-thumb:hover { background: #9db89e; }
+  *::-webkit-scrollbar, html::-webkit-scrollbar, body::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track, html::-webkit-scrollbar-track, body::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb, html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb { background: #c7d6c9; border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover, html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover { background: #9db89e; }
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
