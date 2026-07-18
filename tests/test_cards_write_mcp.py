@@ -89,6 +89,13 @@ def main():
     assert any(store.folder_path(f["id"]) == "世界观 / 子设定" for f in card_in_folder["folders"])
     print("PASS card_create_folder + card_create(folder=...) nesting works")
 
+    # 2026-07-18: trying to nest a folder under either favorite collection
+    # returns a clear message instead of a raw exception -- he can be told
+    # not to (docstring) and still be handled cleanly if he forgets/misreads.
+    out_locked = _run(card_create_folder(name="不该建的子馆", parent=FAVORITE_FOLDER_LIN_ZHAN))
+    assert "扁平" in out_locked
+    print("PASS card_create_folder: rejects nesting under a favorite collection")
+
     out_bad_folder = _run(card_create(title="坏文件夹测试", folder="不存在的馆"))
     assert "没找到" in out_bad_folder
     print("PASS card_create: unknown folder name rejected, doesn't silently create one")

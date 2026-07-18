@@ -13,7 +13,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cards_store import CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN  # noqa: E402
+from cards_store import CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN, FAVORITE_FOLDER_LIN_ZHAN  # noqa: E402
 import cards_api  # noqa: E402
 
 
@@ -75,6 +75,9 @@ def main():
     # missing name
     st, r = _call(mcp, "POST", F, body={})
     assert st == 400, r
+    # 2026-07-18: can't nest a folder under either favorite collection
+    st, r = _call(mcp, "POST", F, body={"name": "不该建的", "parent_id": FAVORITE_FOLDER_LIN_ZHAN})
+    assert st == 400 and "扁平" in r.get("error", ""), r
     print("PASS folders create + validation")
 
     # --- create a card filed into hk + fav ---

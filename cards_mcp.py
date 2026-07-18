@@ -9,6 +9,11 @@ small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
                      how "取消失效" reads cleanly for Lin Zhan: newest = current.
   folder_timeline -- pull a whole folder's cards onto one chronological line
                      (a narrative ribbon), Yi Lan's headline use-case.
+  folder_tree     -- 2026-07-18: the whole folder structure as one text tree
+                     (same data as Yi Lan's Dashboard sidebar) -- Lin Zhan had
+                     no way to browse "what folders even exist" before this,
+                     only tools that require already knowing a folder's name
+                     (see docs/facts-model-v2-collection-redesign.md §14 item 5).
   card_history    -- the other half of card_lookup's "有 N 条历史" hint: reads
                      back the full timeline of one specific card (see
                      docs/facts-model-v2-collection-redesign.md §14 item 2).
@@ -417,6 +422,47 @@ def register_card_tools(
         return "\n".join(lines)
 
     @mcp.tool()
+    async def folder_tree() -> str:
+        """列出全部文件夹（馆），按 subject → 子文件夹的树状结构显示——跟一澜
+        Dashboard 左侧看到的是同一份数据。想"到处翻翻看看现在都有哪些馆、分
+        几层"时用这个；查具体某张卡用 card_lookup，拉某个馆的完整时间线用
+        folder_timeline，这个工具只管结构，不列卡的内容。
+        每个馆名字后面带"（N张卡）"（直接归在这个馆里的卡数，不含子馆），
+        没有卡的馆不带这个提示。"一澜 / 收藏"、"林湛 / 收藏"这两个收藏馆分别
+        标 💖/💙（这两个馆是故意做成扁平的，不会有子馆）。"""
+        folders = store.list_folders()
+        if not folders:
+            return "还没有任何文件夹。"
+        by_parent: dict[str, list[dict]] = {}
+        for f in folders:
+            by_parent.setdefault(str(f.get("parent_id") or ""), []).append(f)
+
+        def sort_key(f: dict):
+            is_fav = f["id"] in (FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN)
+            return (0 if is_fav else 1, str(f.get("created_at") or ""))
+        for kids in by_parent.values():
+            kids.sort(key=sort_key)
+
+        def marker(f: dict) -> str:
+            if f["id"] == FAVORITE_FOLDER_YI_LAN:
+                return " 💖"
+            if f["id"] == FAVORITE_FOLDER_LIN_ZHAN:
+                return " 💙"
+            return ""
+
+        lines = ["=== 文件夹结构 ==="]
+
+        def walk(folder_id: str, depth: int) -> None:
+            for f in by_parent.get(folder_id, []):
+                count = len(store.list_cards_in_folder(f["id"], recursive=False))
+                count_hint = f"（{count}张卡）" if count else ""
+                lines.append("  " * depth + f"{f.get('name', '')}{marker(f)}{count_hint}")
+                walk(f["id"], depth + 1)
+
+        walk("", 0)
+        return "\n".join(lines)
+
+    @mcp.tool()
     async def card_history(card: str = "") -> str:
         """读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
         最新状态）。card_lookup 对更早的时间点只给一句"有 N 条历史"的提示，这个
@@ -776,7 +822,9 @@ def register_card_write_tools(mcp, store) -> None:
     @mcp.tool()
     async def card_create_folder(name: str = "", parent: str = "") -> str:
         """新建一个文件夹（馆），可选归到某个已有文件夹底下。
-        name：新文件夹的名字。parent：可选，父文件夹名或id，不传就是顶层新馆。"""
+        name：新文件夹的名字。parent：可选，父文件夹名或id，不传就是顶层新馆。
+        注意：不能在"一澜/收藏"或"林湛/收藏"这两个收藏馆下面建子馆——收藏是
+        故意做成扁平的一个筐（一澜+你都同意的），想分类用标签，别用子馆。"""
         name = str(name or "").strip()
         if not name:
             return "请给文件夹起个名字。"
@@ -785,7 +833,10 @@ def register_card_write_tools(mcp, store) -> None:
             parent_id, err = _resolve_folder(store, parent)
             if err:
                 return err
-        folder_id = store.create_folder(name, parent_id=parent_id)
+        try:
+            folder_id = store.create_folder(name, parent_id=parent_id)
+        except ValueError as e:
+            return str(e)
         return f"已新建文件夹「{store.folder_path(folder_id)}」（id: {folder_id}）"
 
     @mcp.tool()

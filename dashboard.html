@@ -8605,7 +8605,10 @@ async function cardsV2CreateFolderAt(k){  // build a 馆 at column k's level: k=
   if (!name || !name.trim()) return;
   var parent = k === 0 ? '' : cardsV2.path[k - 1];
   var body = { name: name.trim() }; if (parent) body.parent_id = parent;
-  try { await fetch('/api/cards-skeleton/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); } catch(e){}
+  try {
+    var r = await fetch('/api/cards-skeleton/folders', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) { var d = await r.json().catch(function(){return {};}); alert(d.error || '建馆失败。'); return; }
+  } catch(e){ alert('建馆失败：' + e.message); return; }
   await loadCardsV2();
 }
 async function cardsV2DeleteFolderById(id){

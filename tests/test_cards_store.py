@@ -101,6 +101,26 @@ def test_folder_tree_and_descendants():
     assert len(top_level_ids) == 3
 
 
+def test_create_folder_rejects_favorite_folder_as_parent():
+    # 2026-07-18 (Yi Lan + Lin Zhan, both agreed): the two favorite
+    # collections stay flat -- enforced here so neither of them has to
+    # remember not to nest a folder under one.
+    s = _store()
+    try:
+        s.create_folder("子馆", parent_id=FAVORITE_FOLDER_YI_LAN)
+        assert False, "should have raised"
+    except ValueError:
+        pass
+    try:
+        s.create_folder("子馆", parent_id=FAVORITE_FOLDER_LIN_ZHAN)
+        assert False, "should have raised"
+    except ValueError:
+        pass
+    # ordinary folders are unaffected
+    ok = s.create_folder("正常子馆", parent_id=s.get_folder(FAVORITE_FOLDER_YI_LAN)["parent_id"])
+    assert s.get_folder(ok) is not None
+
+
 def test_delete_folder_reparents_children_and_unlinks_cards():
     s = _store()
     root = s.create_folder("一澜")

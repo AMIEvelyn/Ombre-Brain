@@ -92,11 +92,12 @@ def main():
         bucket_summary=_fake_bucket_summary,
     )
     assert set(mcp.tools) == {
-        "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
+        "card_lookup", "folder_timeline", "folder_tree", "card_history", "card_attachment_read",
         "card_attachment_outline", "card_attachment_view", "card_buckets",
     }
     card_lookup = mcp.tools["card_lookup"]
     folder_timeline = mcp.tools["folder_timeline"]
+    folder_tree = mcp.tools["folder_tree"]
     card_history = mcp.tools["card_history"]
     card_attachment_outline = mcp.tools["card_attachment_outline"]
     card_attachment_read = mcp.tools["card_attachment_read"]
@@ -172,6 +173,17 @@ def main():
     tl_fav = _run(folder_timeline(folder=FAVORITE_FOLDER_LIN_ZHAN))
     assert "💙 这是收藏馆，都是被我自己珍藏的卡" in tl_fav and "婚戒" in tl_fav
     print("PASS favorite folder flavor hint (card_lookup + folder_timeline)")
+
+    # --- folder_tree (2026-07-18): the whole structure, Lin Zhan's "what
+    # folders even exist" tool -- nested, card counts, favorite markers ---
+    tree = _run(folder_tree())
+    assert tree.startswith("=== 文件夹结构 ===")
+    assert "收藏 💖\n" in tree or tree.rstrip().endswith("收藏 💖")  # empty -- no card-count suffix
+    assert "收藏 💙（1张卡）" in tree                                  # 婚戒, just favorited above
+    assert "喜欢的食物（2张卡）" in tree                                # 酸辣粉 + 冰粉
+    i_travel, i_hk_line = tree.index("旅行"), tree.index("香港")
+    assert i_travel < i_hk_line                                       # parent listed before nested child
+    print("PASS folder_tree: nested structure + card counts + favorite markers")
 
     # --- card_history: the other half of card_lookup's "有 N 条历史" hint ---
     hist = _run(card_history(card="酸辣粉"))
@@ -496,12 +508,29 @@ def real_fastmcp_registration_smoke_test():
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
     assert names == {
-        "card_lookup", "folder_timeline", "card_history", "card_attachment_read",
+        "card_lookup", "folder_timeline", "folder_tree", "card_history", "card_attachment_read",
         "card_attachment_outline", "card_attachment_view", "card_buckets",
     }, names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} tools, no schema errors)")
 
 
+def folder_tree_fresh_store_test():
+    # 2026-07-18: _ensure_favorite_folders means a brand new store is never
+    # actually empty (it always has the two auto-provisioned favorite
+    # folders) -- folder_tree's "还没有任何文件夹" branch is defensive-only,
+    # unreachable via a real CardStore. This is what a fresh install looks
+    # like to Lin Zhan before Yi Lan has built anything by hand.
+    store = CardStore(db_path=os.path.join(tempfile.mkdtemp(), "cards.sqlite"))
+    mcp = FakeMCP()
+    cards_mcp.register_card_tools(mcp, store)
+    tree = _run(mcp.tools["folder_tree"]())
+    assert "一澜" in tree and "林湛" in tree
+    assert tree.count("💖") == 1 and tree.count("💙") == 1
+    assert "（" not in tree  # nothing has any cards yet -- no count hints at all
+    print("PASS folder_tree: fresh store already shows the two auto-provisioned collections")
+
+
 if __name__ == "__main__":
     main()
     real_fastmcp_registration_smoke_test()
+    folder_tree_fresh_store_test()

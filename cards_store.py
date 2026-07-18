@@ -789,7 +789,18 @@ class CardStore:
         """folder_id: optional fixed id instead of an auto-generated one --
         used for the two well-known favorite folders (see
         _ensure_favorite_folders) so they can be found by id rather than by
-        name. Leave blank for normal folders; auto-generates as before."""
+        name. Leave blank for normal folders; auto-generates as before.
+
+        2026-07-18 (Yi Lan + Lin Zhan, both agreed): the two favorite
+        collections stay flat on purpose -- no sub-folders under either one.
+        Raises ValueError if parent_id is one of them, rather than relying on
+        both of them remembering not to (see docs/facts-model-v2-collection-
+        redesign.md §14 item 5, "方案 A"). Doesn't apply to _ensure_favorite_
+        folders itself -- that inserts "收藏" as a child of the *subject*
+        folder, never as a child of the favorite folder."""
+        parent_id = str(parent_id or "")
+        if parent_id in (FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN):
+            raise ValueError("收藏馆下不能再建子馆——收藏是扁平的一个筐，想分类用标签，不要用子馆。")
         folder_id = str(folder_id or "").strip() or _gen_id("D")
         conn = self._connect()
         conn.execute(

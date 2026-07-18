@@ -248,7 +248,10 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         parent_id = str(body.get("parent_id") or "").strip()
         if parent_id and not store.get_folder(parent_id):
             return JSONResponse({"error": "parent folder not found"}, status_code=400)
-        folder_id = store.create_folder(name, parent_id=parent_id, is_favorite=bool(body.get("is_favorite")))
+        try:
+            folder_id = store.create_folder(name, parent_id=parent_id, is_favorite=bool(body.get("is_favorite")))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"status": "created", "folder": store.get_folder(folder_id)})
 
     async def list_folders(request):
