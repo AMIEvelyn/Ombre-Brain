@@ -2425,6 +2425,129 @@
   }
   .cards-v2-item:hover .cards-v2-del { opacity: 0.5; }
   .cards-v2-del:hover { opacity: 1 !important; color: #c0392b; }
+  .cards-v2-ribbon-btn {
+    opacity: 0;
+    margin-left: 6px;
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: opacity .15s;
+  }
+  .cards-v2-item:hover .cards-v2-ribbon-btn { opacity: 0.5; }
+  .cards-v2-ribbon-btn:hover { opacity: 1 !important; color: var(--accent); }
+
+  /* 丝带 (folder ribbon timeline), 2026-07-18 -- §14 item 6 */
+  .cards-v2-ribbon-card {
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
+    width: min(920px, 95vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .cards-v2-ribbon-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .cards-v2-ribbon-back {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+    border-radius: 8px;
+  }
+  .cards-v2-ribbon-back:hover { background: var(--surface-solid); }
+  .cards-v2-ribbon-title {
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    font-size: 20px;
+    color: var(--text);
+  }
+  .cards-v2-ribbon-zoom { margin-left: auto; display: flex; gap: 4px; }
+  .cards-v2-ribbon-zoom button {
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    font-size: 15px;
+    line-height: 1;
+  }
+  .cards-v2-ribbon-zoom button:hover { color: var(--accent); border-color: var(--accent); }
+  .cards-v2-ribbon-viewport {
+    overflow-x: auto;
+    overflow-y: hidden;
+    cursor: grab;
+    touch-action: pan-x;
+    user-select: none;
+    -webkit-user-select: none;
+    flex: 1;
+    padding: 30px 0 24px;
+  }
+  .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
+  .cards-v2-ribbon-track { position: relative; height: 56px; }
+  .cards-v2-ribbon-line {
+    position: absolute;
+    left: 0; top: 50%;
+    height: 2px;
+    background: #9db89e;
+    transform: translateY(-50%);
+  }
+  .cards-v2-ribbon-point {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 120px;
+    cursor: pointer;
+  }
+  .cards-v2-ribbon-point-title {
+    font-size: 12px;
+    color: var(--text);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+  }
+  .cards-v2-ribbon-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #9db89e;
+    flex: 0 0 auto;
+  }
+  .cards-v2-ribbon-dot.current {
+    width: 14px;
+    height: 14px;
+    background: #2f6b45;
+  }
+  .cards-v2-ribbon-point-date {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+  .cards-v2-ribbon-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+  .cards-v2-ribbon-path {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
   .cards-v2-additem {
     padding: 9px 8px;
     font-size: 14px;
@@ -3583,6 +3706,27 @@
 
 <div id="cards-v2-detail-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2Detail()">
   <div id="cards-v2-detail-body"></div>
+</div>
+
+<div id="cards-v2-ribbon-overlay" class="facts-modal-overlay facts-detail-overlay" style="display:none" onclick="if(event.target===this) cardsV2CloseRibbon()">
+  <div class="cards-v2-ribbon-card">
+    <div class="cards-v2-ribbon-header">
+      <button class="cards-v2-ribbon-back" onclick="cardsV2CloseRibbon()">‹</button>
+      <span class="cards-v2-ribbon-title">丝带</span>
+      <div class="cards-v2-ribbon-zoom">
+        <button title="缩小" onclick="cardsV2RibbonZoom(1/1.4)">－</button>
+        <button title="放大" onclick="cardsV2RibbonZoom(1.4)">＋</button>
+      </div>
+    </div>
+    <div id="cards-v2-ribbon-viewport" class="cards-v2-ribbon-viewport"
+         onmousedown="cardsV2RibbonOnMouseDown(event)" onmousemove="cardsV2RibbonOnMouseMove(event)"
+         onmouseup="cardsV2RibbonOnMouseUp(event)" onmouseleave="cardsV2RibbonOnMouseUp(event)"
+         onwheel="cardsV2RibbonOnWheel(event)"
+         ontouchstart="cardsV2RibbonOnTouchStart(event)" ontouchmove="cardsV2RibbonOnTouchMove(event)" ontouchend="cardsV2RibbonOnTouchEnd(event)">
+      <div id="cards-v2-ribbon-body"><div class="loading">加载中…</div></div>
+    </div>
+    <div class="cards-v2-ribbon-footer"><span class="cards-v2-ribbon-path" id="cards-v2-ribbon-path"></span></div>
+  </div>
 </div>
 
 <div id="cards-v2-create-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2CreateModal()">
@@ -8634,6 +8778,7 @@ function renderCardsV2Nav(){
       var st = active ? ' style="background:' + nextColor + ';"' : '';
       return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="cardsV2Drill(' + k + ',\'' + f.id + '\')">'
         + '<span style="flex:1;">' + esc(f.name) + '</span>'
+        + '<span class="cards-v2-ribbon-btn" title="看这个馆的丝带（完整时间线）" onclick="event.stopPropagation();cardsV2OpenRibbon(\'' + f.id + '\')">' + cardsV2RibbonIcon() + '</span>'
         + '<span class="cards-v2-del" title="删除这个馆" onclick="event.stopPropagation();cardsV2DeleteFolderById(\'' + f.id + '\')">✕</span></div>';
     }).join('');
     if (cards.length) {
@@ -8657,6 +8802,151 @@ function renderCardsV2Nav(){
   }
   c.innerHTML = '<div class="cards-v2-columns">' + cols + '</div>';
 }
+
+// ==================== 丝带 (folder ribbon timeline), 2026-07-18 -- §14 item 6 ====================
+// Full interleaved history of a folder (recursive), laid out on a
+// horizontal, zoomable, pannable ribbon. Yi Lan's spec: date-proportional
+// spacing with a comfortable minimum gap (never lets same-day points
+// collapse into each other), zoom to compress/expand that spacing rather
+// than a fixed scale, and clicking a point opens that timepoint's card.
+function cardsV2RibbonIcon(){
+  return '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
+    + '<line x1="2" y1="12" x2="22" y2="12"/>'
+    + '<circle cx="6" cy="12" r="2.2" fill="currentColor" stroke="none"/>'
+    + '<circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>'
+    + '<circle cx="18" cy="12" r="2.2" fill="currentColor" stroke="none"/>'
+    + '</svg>';
+}
+var cardsV2Ribbon = { folderId: '', entries: [], pxPerDay: 6 };
+var CARDS_V2_RIBBON_MIN_GAP = 64;       // px -- floor even for same-day points, so they never overlap
+var CARDS_V2_RIBBON_PX_PER_DAY_MIN = 0.3;
+var CARDS_V2_RIBBON_PX_PER_DAY_MAX = 200;
+var CARDS_V2_RIBBON_PAD = 70;           // left/right breathing room inside the track
+
+async function cardsV2OpenRibbon(folderId){
+  cardsV2Ribbon.folderId = folderId;
+  cardsV2Ribbon.entries = [];
+  cardsV2Ribbon.pxPerDay = 6;
+  document.getElementById('cards-v2-ribbon-overlay').style.display = '';
+  document.getElementById('cards-v2-ribbon-path').textContent = cardsV2Path(folderId);
+  renderCardsV2Ribbon();
+  try {
+    var r = await fetch('/api/cards-skeleton/folders/' + folderId + '/timeline?recursive=true');
+    var d = await r.json();
+    cardsV2Ribbon.entries = d.timeline || [];
+  } catch(e) { cardsV2Ribbon.entries = []; }
+  renderCardsV2Ribbon();
+}
+function cardsV2CloseRibbon(){ document.getElementById('cards-v2-ribbon-overlay').style.display = 'none'; }
+
+function cardsV2RibbonDateMs(s){
+  var t = Date.parse(String(s || '').slice(0, 10) + 'T00:00:00Z');
+  return isNaN(t) ? 0 : t;
+}
+// Cumulative x-position per entry -- date-proportional gaps (Yi Lan's
+// call: a 40-day gap should visually read as much wider than a 2-day one,
+// not squashed to even spacing), but never below CARDS_V2_RIBBON_MIN_GAP so
+// two same-day (or near-same-day) points stay comfortably clickable.
+function cardsV2RibbonLayout(){
+  var entries = cardsV2Ribbon.entries, pxPerDay = cardsV2Ribbon.pxPerDay;
+  var positions = [], x = CARDS_V2_RIBBON_PAD, prevMs = null;
+  entries.forEach(function(e){
+    var ms = cardsV2RibbonDateMs(e.date);
+    if (prevMs !== null) x += Math.max(CARDS_V2_RIBBON_MIN_GAP, (ms - prevMs) / 86400000 * pxPerDay);
+    positions.push(x);
+    prevMs = ms;
+  });
+  return positions;
+}
+function renderCardsV2Ribbon(){
+  var body = document.getElementById('cards-v2-ribbon-body');
+  if (!body) return;
+  var entries = cardsV2Ribbon.entries;
+  if (!entries.length) { body.innerHTML = '<div class="loading">这个馆还没有任何事实卡。</div>'; return; }
+  var positions = cardsV2RibbonLayout();
+  var totalWidth = positions[positions.length - 1] + CARDS_V2_RIBBON_PAD;
+  var line = '<div class="cards-v2-ribbon-line" style="width:' + totalWidth + 'px;"></div>';
+  var points = entries.map(function(e, i){
+    var dotClass = 'cards-v2-ribbon-dot' + (e.is_current ? ' current' : '');
+    return '<div class="cards-v2-ribbon-point" style="left:' + positions[i] + 'px;" onclick="cardsV2RibbonPointClick(\'' + e.card_id + '\')">'
+      + '<div class="cards-v2-ribbon-point-title">' + esc(e.title || '(无标题)') + '</div>'
+      + '<div class="' + dotClass + '"></div>'
+      + '<div class="cards-v2-ribbon-point-date">' + esc(cardsV2Date(e.date)) + '</div>'
+      + '</div>';
+  }).join('');
+  body.innerHTML = '<div class="cards-v2-ribbon-track" style="width:' + totalWidth + 'px;">' + line + points + '</div>';
+}
+var cardsV2RibbonSuppressClickUntil = 0;
+function cardsV2RibbonPointClick(cardId){
+  if (Date.now() < cardsV2RibbonSuppressClickUntil) return;  // was a drag, not a tap
+  cardsV2CloseRibbon();
+  openCardsV2Detail(cardId);
+}
+
+// ---- zoom: preserves the point nearest the focal x so it doesn't jump ----
+function cardsV2RibbonZoom(factor, focalClientX){
+  var viewport = document.getElementById('cards-v2-ribbon-viewport');
+  if (!viewport || !cardsV2Ribbon.entries.length) return;
+  var rect = viewport.getBoundingClientRect();
+  var focalX = focalClientX != null ? focalClientX - rect.left : rect.width / 2;
+  var localX = focalX + viewport.scrollLeft;
+  var oldPositions = cardsV2RibbonLayout();
+  var nearest = 0, bestDist = Infinity;
+  oldPositions.forEach(function(x, i){ var dist = Math.abs(x - localX); if (dist < bestDist) { bestDist = dist; nearest = i; } });
+  var newPxPerDay = Math.min(CARDS_V2_RIBBON_PX_PER_DAY_MAX, Math.max(CARDS_V2_RIBBON_PX_PER_DAY_MIN, cardsV2Ribbon.pxPerDay * factor));
+  if (newPxPerDay === cardsV2Ribbon.pxPerDay) return;
+  cardsV2Ribbon.pxPerDay = newPxPerDay;
+  renderCardsV2Ribbon();
+  var newPositions = cardsV2RibbonLayout();
+  viewport.scrollLeft = Math.max(0, newPositions[nearest] - focalX);
+}
+function cardsV2RibbonOnWheel(e){
+  if (!(e.ctrlKey || e.metaKey)) return;  // plain scroll/trackpad = native horizontal pan
+  e.preventDefault();
+  cardsV2RibbonZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX);
+}
+
+// ---- desktop drag-to-pan (native overflow-x scroll/trackpad also work) ----
+var cardsV2RibbonDrag = null;
+function cardsV2RibbonOnMouseDown(e){
+  var viewport = document.getElementById('cards-v2-ribbon-viewport');
+  cardsV2RibbonDrag = { startX: e.clientX, scrollLeft: viewport.scrollLeft, moved: false };
+  viewport.classList.add('dragging');
+}
+function cardsV2RibbonOnMouseMove(e){
+  if (!cardsV2RibbonDrag) return;
+  var viewport = document.getElementById('cards-v2-ribbon-viewport');
+  var dx = e.clientX - cardsV2RibbonDrag.startX;
+  if (Math.abs(dx) > 4) cardsV2RibbonDrag.moved = true;
+  viewport.scrollLeft = cardsV2RibbonDrag.scrollLeft - dx;
+}
+function cardsV2RibbonOnMouseUp(){
+  var viewport = document.getElementById('cards-v2-ribbon-viewport');
+  if (viewport) viewport.classList.remove('dragging');
+  if (cardsV2RibbonDrag && cardsV2RibbonDrag.moved) cardsV2RibbonSuppressClickUntil = Date.now() + 50;
+  cardsV2RibbonDrag = null;
+}
+
+// ---- mobile pinch-to-zoom (single-finger pan is native overflow-x scroll) ----
+var cardsV2RibbonPinch = null;
+function cardsV2RibbonTouchDist(touches){
+  var dx = touches[0].clientX - touches[1].clientX, dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function cardsV2RibbonOnTouchStart(e){
+  if (e.touches.length === 2) cardsV2RibbonPinch = { dist: cardsV2RibbonTouchDist(e.touches), midX: (e.touches[0].clientX + e.touches[1].clientX) / 2 };
+}
+function cardsV2RibbonOnTouchMove(e){
+  if (e.touches.length !== 2 || !cardsV2RibbonPinch) return;
+  e.preventDefault();
+  var newDist = cardsV2RibbonTouchDist(e.touches);
+  var factor = newDist / cardsV2RibbonPinch.dist;
+  if (Math.abs(factor - 1) > 0.03) { cardsV2RibbonZoom(factor, cardsV2RibbonPinch.midX); cardsV2RibbonPinch.dist = newDist; }
+}
+function cardsV2RibbonOnTouchEnd(e){
+  if (e.touches.length < 2) cardsV2RibbonPinch = null;
+}
+
 async function openCardsV2Detail(id){
   var card = null;
   try { var r = await fetch('/api/cards-skeleton/cards/' + id); var d = await r.json(); card = d.card; } catch(e){}
