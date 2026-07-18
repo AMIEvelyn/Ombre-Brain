@@ -1,6 +1,24 @@
-# 上游 Yinglianchun/Ombre-Brain 更新评估 + 5 项小同步（2026-07-17）
+# 上游 Yinglianchun/Ombre-Brain 更新评估 + 全部同步完成（2026-07-17 ～ 2026-07-18）
 
 写给：一澜、林湛、以及接手的新会话
+
+## ✅ 状态：更新帖里的 9 项全部处理完（2026-07-18 收尾）
+
+一句话版：更新帖提到的东西，该同步的都同步了，该确认"我们已经有、跳过"的也都核实过了，没有遗漏。分两轮做完：
+
+**第一轮（2026-07-17，5 项小同步）**：部署绑定挂载防护、raw memory API 服务鉴权、梦境 Dashboard 直接查看、`bucket_manager.py` 词法评分缓存、`gateway.py` 动态 alpha 置信度校准。
+
+**第二轮（2026-07-18，原计划"留到大改动会话"的 4 项，一澜明确要求这次也一起做完）**：
+- **主域判断模型 / semantic_rescue**（`gateway.py`）——默认关闭（`semantic_rescue_enabled: false`），因为触发条件是照着我们自己的 `recall_policy.py` 重新梳理的，不是照抄上游，建议先观察一阵子 debug 再决定开不开。
+- **`POST /api/hook/recall`**（`gateway.py`）——给以后可能接的 Codex/Claude Code CLI 用的轻量记忆查询接口，比上游简化了很多，等真有具体工具要接了再按需扩展。
+- **照顾备忘 / `reminder_store.py`**（新文件）——独立提醒系统，跟旧的 `todo_store.py`（从记忆桶 `### followup` 派生的待办）并行存在，没有替换关系。3 个 MCP 工具：`reminder_create`/`reminder_list`/`reminder_update`。**注意**：重复规则等纯数据操作走 MCP 就能用，但"到点自动悄悄提醒"这个动作只有走 Gateway 才有，纯 MCP 场景下需要主动调用 `reminder_list` 去查，不会自己冒出来。
+- **画像编辑+锁定**（`portrait_engine.py` + `dashboard.html`）——Dashboard 画像页 stable 段加了"编辑"和"锁定"按钮，锁定后夜间自动画像维护不会再改写这个 scope。比上游简化，没做版本历史/回滚。
+
+**全部改动都已提交到 `claude/cards-merge-dedup-tool` 分支并推送**，一澜正在按提示部署上线。详细的逐项技术细节、部署命令见下文各章节。
+
+**下一步**：不再有上游同步相关的待办了。接手会话请直接去 `docs/facts-model-v2-collection-redesign.md` §14 第 5 项（收藏功能收尾）——一澜已经决定下一个会话从那里开始。
+
+---
 
 一澜看到她实际部署所基于的 fork（`github.com/Yinglianchun/Ombre-Brain`，README 自称"Haven/Rain Fork"）作者发的更新帖（3 张截图），想知道能不能把里面提到的更新同步过来，但**明确要求不能碰到时光馆**（`docs/facts-model-v2-collection-redesign.md` 记录的那整套骨架层 v2 系统）。
 
