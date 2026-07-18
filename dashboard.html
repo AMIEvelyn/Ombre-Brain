@@ -2460,7 +2460,8 @@
     border-radius: 16px;
     padding: 20px;
     box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
-    width: min(920px, 95vw);
+    width: min(760px, 90vw);
+    aspect-ratio: 16 / 9;    /* 2026-07-18, Yi Lan's ask -- landscape, narrower + taller than before */
     max-height: 92vh;
     display: flex;
     flex-direction: column;
@@ -2507,9 +2508,12 @@
     user-select: none;
     -webkit-user-select: none;
     padding: 45px 0 36px;
+    flex: 1;              /* fill the taller 16:9 card instead of hugging content height */
+    display: flex;
+    align-items: center;  /* vertically center the (fixed-height) track in that extra room */
   }
   .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
-  .cards-v2-ribbon-track { position: relative; height: 130px; }
+  .cards-v2-ribbon-track { position: relative; height: 130px; flex: 0 0 auto; }
   .cards-v2-ribbon-line {
     position: absolute;
     left: 0; top: 50%;
