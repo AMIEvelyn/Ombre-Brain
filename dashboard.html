@@ -2508,11 +2508,25 @@
     user-select: none;
     -webkit-user-select: none;
     padding: 45px 0 36px;
-    flex: 1;              /* fill the taller 16:9 card instead of hugging content height */
+    flex: 1;               /* fill the taller 16:9 card instead of hugging content height */
     display: flex;
-    align-items: center;  /* vertically center the (fixed-height) track in that extra room */
+    align-items: center;   /* vertically center the (fixed-height) track/empty-state message */
+    /* Horizontal centering is done in JS (renderCardsV2Ribbon), not via
+       justify-content: center here -- that has a known cross-browser edge
+       case with an overflowing flex item where the start of the content
+       can become unreachable by scroll. A short ribbon narrower than the
+       viewport gets centered explicitly; a wide one that needs scrolling
+       is left alone. */
   }
   .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
+  /* 2026-07-18: horizontal centering for a short ribbon (or the empty-
+     folder message) when it's narrower than the viewport -- margin:auto
+     on a flex item is the safe way to do this: it centers when there's
+     free space, and simply collapses to 0 (flush left, fully scrollable)
+     the moment content overflows, unlike `justify-content: center` on the
+     container, which has a known cross-browser gotcha where an
+     overflowing item's start becomes unreachable by scroll. */
+  #cards-v2-ribbon-body { margin: 0 auto; }
   .cards-v2-ribbon-track { position: relative; height: 130px; flex: 0 0 auto; }
   .cards-v2-ribbon-line {
     position: absolute;
