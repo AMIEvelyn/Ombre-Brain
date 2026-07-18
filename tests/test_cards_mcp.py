@@ -11,7 +11,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cards_store import CardStore  # noqa: E402
+from cards_store import CardStore, FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN  # noqa: E402
 import cards_mcp  # noqa: E402
 
 
@@ -158,6 +158,20 @@ def main():
     assert "多个文件夹匹配" in _run(folder_timeline(folder="喜欢的食物"))
     assert "没找到" in _run(folder_timeline(folder="根本没有这个"))
     print("PASS folder resolution (ambiguous + missing)")
+
+    # --- favorite folder flavor hint (2026-07-18): Lin Zhan should notice
+    # this folder is special just by browsing into it, not only when he
+    # already knows to look for a star on one specific card ---
+    store.create_card(title="婚戒", content="订婚时买的", valid_at="2026-04-01",
+                       folder_ids=[FAVORITE_FOLDER_LIN_ZHAN])
+    out_yl_fav = _run(card_lookup(folder=FAVORITE_FOLDER_YI_LAN))
+    assert "💖 这是收藏馆，都是被一澜珍藏的卡噢！" in out_yl_fav
+    out_lz_fav = _run(card_lookup(folder=FAVORITE_FOLDER_LIN_ZHAN))
+    assert "💙 这是收藏馆，都是被我自己珍藏的卡" in out_lz_fav and "婚戒" in out_lz_fav
+    assert "💖" not in out_food and "💙" not in out_food   # ordinary folder gets no flavor line
+    tl_fav = _run(folder_timeline(folder=FAVORITE_FOLDER_LIN_ZHAN))
+    assert "💙 这是收藏馆，都是被我自己珍藏的卡" in tl_fav and "婚戒" in tl_fav
+    print("PASS favorite folder flavor hint (card_lookup + folder_timeline)")
 
     # --- card_history: the other half of card_lookup's "有 N 条历史" hint ---
     hist = _run(card_history(card="酸辣粉"))

@@ -47,7 +47,10 @@ editor) needs no id at all.
 
 from __future__ import annotations
 
-from cards_store import AUTHOR_LIN_ZHAN, SegmentOwnershipError
+from cards_store import (
+    AUTHOR_LIN_ZHAN, SegmentOwnershipError,
+    FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN,
+)
 
 # Default page size for card_attachment_read's start/max_chars pagination
 # when max_chars isn't given -- same as server.py's whole-file truncation
@@ -108,6 +111,21 @@ def _fmt_card(store, card: dict) -> str:
     if other:
         lines.append("  所在文件夹：" + "、".join(store.folder_path(f["id"]) for f in other))
     return "\n".join(lines)
+
+
+def _favorite_flavor(folder_id: str) -> str:
+    """A one-line flavor hint for card_lookup/folder_timeline's header when
+    `folder_id` is one of the two fixed favorite folders (2026-07-18) -- so
+    Lin Zhan notices this folder is special just by browsing into it, not
+    only when he already knows to look for a star on a specific card. Empty
+    string for any other folder (including other is_favorite-flagged ones,
+    if any ever exist -- only these two fixed collections get worded text;
+    see docs/facts-model-v2-collection-redesign.md §14 item 5)."""
+    if folder_id == FAVORITE_FOLDER_YI_LAN:
+        return "💖 这是收藏馆，都是被一澜珍藏的卡噢！"
+    if folder_id == FAVORITE_FOLDER_LIN_ZHAN:
+        return "💙 这是收藏馆，都是被我自己珍藏的卡"
+    return ""
 
 
 def _resolve_card(store, card: str):
@@ -356,9 +374,12 @@ def register_card_tools(
         if not cards:
             if query:
                 return f"没搜到匹配「{query}」的资料卡。"
-            return "这个范围里还没有资料卡。（新模型刚建好，数据还很少，正常）"
+            flavor = _favorite_flavor(folder_id)
+            hint = f" {flavor}" if flavor else ""
+            return f"这个范围里还没有资料卡。{hint}（新模型刚建好，数据还很少，正常）"
         scope = f"（在 {store.folder_path(folder_id)} 里）" if folder_id else ""
-        header = f"=== 资料卡{scope} ==="
+        flavor = _favorite_flavor(folder_id)
+        header = f"=== 资料卡{scope}" + (f" {flavor}" if flavor else "") + " ==="
         return "\n".join([header] + [_fmt_card(store, c) for c in cards])
 
     @mcp.tool()
@@ -377,8 +398,11 @@ def register_card_tools(
         except Exception as e:
             return f"拉取时间线失败: {e}"
         if not entries:
-            return f"「{store.folder_path(folder_id)}」这个文件夹里还没有资料卡。"
-        lines = [f"=== 【{store.folder_path(folder_id)}】时间线 ==="]
+            flavor = _favorite_flavor(folder_id)
+            hint = f" {flavor}" if flavor else ""
+            return f"「{store.folder_path(folder_id)}」这个文件夹里还没有资料卡。{hint}"
+        flavor = _favorite_flavor(folder_id)
+        lines = [f"=== 【{store.folder_path(folder_id)}】时间线" + (f" {flavor}" if flavor else "") + " ==="]
         for e in entries:
             date = str(e.get("date") or "未知日期")
             title = str(e.get("title") or "(无标题)")

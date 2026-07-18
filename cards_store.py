@@ -50,6 +50,15 @@ AUTHOR_DISPLAY_NAMES = {AUTHOR_YI_LAN: "一澜", AUTHOR_LIN_ZHAN: "林湛"}
 # generates, so a save-then-reload of hand-edited text round-trips cleanly.
 _AUTHOR_PREFIX_TO_CODE = {f"{name}：": code for code, name in AUTHOR_DISPLAY_NAMES.items()}
 
+# The two hearts' fixed destinations (2026-07-18, favorites work). Each
+# heart in the UI/MCP always points at exactly one of these two folders --
+# fixed ids, not looked up by name, so renaming "收藏" later can't sever the
+# link. Placeholders: Yi Lan wants to pick the real strings herself; this is
+# the one place to change once she does (nothing else references these
+# folders by name, only by id -- see _ensure_favorite_folders).
+FAVORITE_FOLDER_YI_LAN = "fav_yi_lan"
+FAVORITE_FOLDER_LIN_ZHAN = "fav_lin_zhan"
+
 
 class SegmentOwnershipError(Exception):
     """Raised by edit_content_segment/delete_content_segment when the caller
@@ -152,7 +161,39 @@ class CardStore:
         # startup; a no-op once nothing but 'evidence' exists.
         conn.execute("UPDATE card_buckets SET relation_type = 'evidence' WHERE relation_type != 'evidence'")
         conn.commit()
+        self._ensure_favorite_folders(conn)
         conn.close()
+
+    def _ensure_favorite_folders(self, conn: sqlite3.Connection) -> None:
+        """Auto-provision the two hearts' fixed destinations (2026-07-18):
+        '一澜 / 收藏' and '林湛 / 收藏', each a favorite-flagged child folder
+        under its subject. Yi Lan hasn't built either by hand yet, so this
+        creates whatever's missing (subject folder included) on every
+        startup -- idempotent, keyed by FAVORITE_FOLDER_YI_LAN/LIN_ZHAN's id,
+        not by name, so it's a no-op once both already exist even if she
+        later renames either folder."""
+        for owner_name, folder_id in (
+            (AUTHOR_DISPLAY_NAMES[AUTHOR_YI_LAN], FAVORITE_FOLDER_YI_LAN),
+            (AUTHOR_DISPLAY_NAMES[AUTHOR_LIN_ZHAN], FAVORITE_FOLDER_LIN_ZHAN),
+        ):
+            if conn.execute("SELECT 1 FROM folders WHERE id = ?", (folder_id,)).fetchone():
+                continue
+            subject_row = conn.execute(
+                "SELECT id FROM folders WHERE parent_id = '' AND name = ?", (owner_name,)
+            ).fetchone()
+            if subject_row:
+                subject_id = subject_row["id"]
+            else:
+                subject_id = _gen_id("D")
+                conn.execute(
+                    "INSERT INTO folders (id, name, parent_id, is_favorite, created_at) VALUES (?, ?, '', 0, ?)",
+                    (subject_id, owner_name, self._now_iso()),
+                )
+            conn.execute(
+                "INSERT INTO folders (id, name, parent_id, is_favorite, created_at) VALUES (?, '收藏', ?, 1, ?)",
+                (folder_id, subject_id, self._now_iso()),
+            )
+        conn.commit()
 
     def _migrate_authorship_columns(self, conn: sqlite3.Connection) -> None:
         """Migration-safe ALTER TABLE, same pattern as facts_store.py's --
@@ -745,8 +786,12 @@ class CardStore:
     # ==================================================================
     # folders (a tree; parent_id='' == top-level == a subject)
     # ==================================================================
-    def create_folder(self, name: str, *, parent_id: str = "", is_favorite: bool = False) -> str:
-        folder_id = _gen_id("D")
+    def create_folder(self, name: str, *, parent_id: str = "", is_favorite: bool = False, folder_id: str = "") -> str:
+        """folder_id: optional fixed id instead of an auto-generated one --
+        used for the two well-known favorite folders (see
+        _ensure_favorite_folders) so they can be found by id rather than by
+        name. Leave blank for normal folders; auto-generates as before."""
+        folder_id = str(folder_id or "").strip() or _gen_id("D")
         conn = self._connect()
         conn.execute(
             "INSERT INTO folders (id, name, parent_id, is_favorite, created_at) VALUES (?, ?, ?, ?, ?)",

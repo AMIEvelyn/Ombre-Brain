@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cards_store import (  # noqa: E402
     CardStore, AUTHOR_YI_LAN, AUTHOR_LIN_ZHAN, SegmentOwnershipError,
+    FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN,
 )
 
 
@@ -86,14 +87,18 @@ def test_delete_card_cascades():
 
 def test_folder_tree_and_descendants():
     s = _store()
-    yilan = s.create_folder("一澜")               # subject (top-level)
-    food = s.create_folder("喜欢的食物", parent_id=yilan)
+    subject = s.create_folder("测试科目")          # subject (top-level)
+    food = s.create_folder("喜欢的食物", parent_id=subject)
     snack = s.create_folder("零食类", parent_id=food)
-    assert s.get_folder(food)["parent_id"] == yilan
-    desc = set(s.descendant_folder_ids(yilan))
-    assert desc == {yilan, food, snack}
-    assert set(s.descendant_folder_ids(yilan, include_self=False)) == {food, snack}
-    assert [f["id"] for f in s.list_folders(parent_id="")] == [yilan]  # only subject at top
+    assert s.get_folder(food)["parent_id"] == subject
+    desc = set(s.descendant_folder_ids(subject))
+    assert desc == {subject, food, snack}
+    assert set(s.descendant_folder_ids(subject, include_self=False)) == {food, snack}
+    top_level_ids = [f["id"] for f in s.list_folders(parent_id="")]
+    assert subject in top_level_ids and food not in top_level_ids
+    # the two auto-provisioned favorite subjects (see
+    # test_favorite_folders_auto_provisioned) are also always there
+    assert len(top_level_ids) == 3
 
 
 def test_delete_folder_reparents_children_and_unlinks_cards():
@@ -638,6 +643,45 @@ def test_search_cards_matches_by_id_substring_too():
     assert [c["id"] for c in s.search_cards(cid)] == [cid]
     assert [c["id"] for c in s.search_cards(cid[:6])] == [cid]  # partial id still matches
     assert other not in [c["id"] for c in s.search_cards(cid)]
+
+
+def test_favorite_folders_auto_provisioned():
+    # 2026-07-18: the two hearts' fixed destinations get created on first
+    # startup, no manual setup needed -- Yi Lan hadn't built either by hand.
+    s = _store()
+    yilan_fav = s.get_folder(FAVORITE_FOLDER_YI_LAN)
+    linzhan_fav = s.get_folder(FAVORITE_FOLDER_LIN_ZHAN)
+    assert yilan_fav is not None and yilan_fav["is_favorite"]
+    assert linzhan_fav is not None and linzhan_fav["is_favorite"]
+    assert s.folder_path(FAVORITE_FOLDER_YI_LAN) == "一澜 / 收藏"
+    assert s.folder_path(FAVORITE_FOLDER_LIN_ZHAN) == "林湛 / 收藏"
+    # only one "一澜" / "林湛" subject each, not a duplicate per collection
+    subjects = [f for f in s.list_folders(parent_id="") if f["name"] in ("一澜", "林湛")]
+    assert len(subjects) == 2
+
+
+def test_favorite_folders_idempotent_across_restarts_and_existing_subjects():
+    # Re-opening the same db (or a db where "一澜"/"林湛" subjects already
+    # exist from other folders) must not create duplicates.
+    tmp = tempfile.mkdtemp()
+    db_path = os.path.join(tmp, "cards.sqlite")
+    s1 = CardStore(db_path=db_path)
+    yilan_subject_id = s1.get_folder(FAVORITE_FOLDER_YI_LAN)["parent_id"]
+    s1.create_folder("身体状态", parent_id=yilan_subject_id)  # other real content under the subject
+
+    s2 = CardStore(db_path=db_path)  # simulates a process restart
+    assert s2.get_folder(FAVORITE_FOLDER_YI_LAN)["parent_id"] == yilan_subject_id
+    subjects = [f for f in s2.list_folders(parent_id="") if f["name"] == "一澜"]
+    assert len(subjects) == 1  # not re-created as a second "一澜"
+
+
+def test_favorite_folders_usable_like_any_other_folder():
+    # No special-cased code path for membership itself -- these are ordinary
+    # folders that happen to be pre-created and favorite-flagged.
+    s = _store()
+    cid = s.create_card(title="婚戒", folder_ids=[FAVORITE_FOLDER_LIN_ZHAN])
+    assert cid in {c["id"] for c in s.list_cards_in_folder(FAVORITE_FOLDER_LIN_ZHAN)}
+    assert [f["id"] for f in s.get_card_favorite_folders(cid)] == [FAVORITE_FOLDER_LIN_ZHAN]
 
 
 def _run_all():
