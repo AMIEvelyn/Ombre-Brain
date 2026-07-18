@@ -414,35 +414,62 @@ def register_card_tools(
         header = f"=== 资料卡{scope}" + (f" {flavor}" if flavor else "") + " ==="
         return "\n".join([header] + [_fmt_card(store, c) for c in cards])
 
+    FOLDER_TIMELINE_PAGE_SIZE = 50
+
     @mcp.tool()
-    async def folder_timeline(folder: str = "", recursive: bool = True) -> str:
-        """【时光馆】把某个文件夹里的所有资料卡按时间铺成一条完整时间线（叙事丝带）。
-        比如"讲讲我们旅行的经过"就传 folder="旅行"，会把 我们/旅行 里所有卡按日期排出来。
-        folder：文件夹名或 id。recursive=True（默认）会把子文件夹里的卡也一起收进来，
-        recursive=False 只排这个文件夹里直接归的卡。
-        每张卡在时间线上是一个点（落在它当前时间点的日期），要看某张卡自己的变化史，
-        再用 card_lookup 或读那张卡。"""
-        folder_id, err = _resolve_folder(store, folder)
-        if err:
-            return err
+    async def folder_timeline(folder: str = "", recursive: bool = True, page: int = 1) -> str:
+        """【时光馆】把一个范围里全部资料卡的**完整历史**按日期交错排成一条时间线
+        （叙事丝带）——不是每张卡只挑一个代表点，是**每一个历史时间点都在这条线上**，
+        跟别的卡的时间点混排。比如"讲讲我们旅行的经过"就传 folder="旅行"：如果"香港"
+        这张卡记过 出发→迪士尼→回家 三个时间点，这三个点会分别出现在时间线上（各自
+        显示"当时"的标题/内容，不是现在的），不会被压缩成只剩最后一个。
+        每个点后面都带着"来源卡"信息（现在的标题 + id）——哪怕这张卡后来改过名，
+        你也不会认错是哪张卡；想看这张卡完整变化史或改它，直接拿这里的 id/现在的
+        标题去调 card_history/card_lookup 等工具。
+        这张卡"现在"的那个时间点会标"（当前）"。
+
+        folder：**留空 = 全部资料卡的时间线，不限定任何文件夹**（一次看到你和一澜
+        所有事情交织在一起的完整叙事）；传了就只看这个文件夹（及其子文件夹，见
+        recursive）范围内的。文件夹名或 id 都行。
+        recursive：只在传了 folder 时才有意义。True（默认）连子文件夹里的卡也一起
+        收进来；False 只排直接归在这个文件夹本身的卡。
+        page：每页最多 50 个时间点，量大的范围（尤其留空看全部）会自动分页，页数
+        不够、超出范围会告诉你一共有几页；不传就是第 1 页。"""
+        folder_id = ""
+        if str(folder or "").strip():
+            folder_id, err = _resolve_folder(store, folder)
+            if err:
+                return err
         try:
             entries = store.folder_timeline(folder_id, recursive=bool(recursive))
         except Exception as e:
             return f"拉取时间线失败: {e}"
-        if not entries:
-            flavor = _favorite_flavor(folder_id)
-            hint = f" {flavor}" if flavor else ""
-            return f"「{store.folder_path(folder_id)}」这个文件夹里还没有资料卡。{hint}"
         flavor = _favorite_flavor(folder_id)
-        lines = [f"=== 【{store.folder_path(folder_id)}】时间线" + (f" {flavor}" if flavor else "") + " ==="]
-        for e in entries:
+        scope_name = f"「{store.folder_path(folder_id)}」这个文件夹" if folder_id else "现在"
+        if not entries:
+            hint = f" {flavor}" if flavor else ""
+            return f"{scope_name}还没有任何资料卡。{hint}"
+        page = max(1, int(page or 1))
+        total = len(entries)
+        total_pages = (total + FOLDER_TIMELINE_PAGE_SIZE - 1) // FOLDER_TIMELINE_PAGE_SIZE
+        if page > total_pages:
+            return f"没有第 {page} 页——{scope_name}一共只有 {total} 个时间点，共 {total_pages} 页。"
+        start = (page - 1) * FOLDER_TIMELINE_PAGE_SIZE
+        page_entries = entries[start:start + FOLDER_TIMELINE_PAGE_SIZE]
+        title = f"【{store.folder_path(folder_id)}】" if folder_id else "【全部资料卡】"
+        header = f"=== {title}时间线（第 {page}/{total_pages} 页，共 {total} 个时间点）" + (f" {flavor}" if flavor else "") + " ==="
+        lines = [header]
+        for e in page_entries:
             date = str(e.get("date") or "未知日期")
-            title = str(e.get("title") or "(无标题)")
+            marker = "（当前）" if e.get("is_current") else ""
+            title_at_time = str(e.get("title") or "(无标题)")
             content = str(e.get("content") or "").strip()
-            n = int(e.get("revision_count") or 1)
-            hist = f"（{n} 条历史）" if n > 1 else ""
-            body = f"：{content}" if content else ""
-            lines.append(f"- {date} 【{title}】{hist}{body}")
+            body = f"｜{content}" if content else ""
+            lines.append(f"- {date}{marker}｜当时标题：{title_at_time}{body}")
+            current_title = str(e.get("current_title") or "(无标题)")
+            lines.append(f"  来源卡：现在叫【{current_title}】（id: {e.get('card_id')}）")
+        if page < total_pages:
+            lines.append(f"（还有更多，传 page={page + 1} 继续看）")
         return "\n".join(lines)
 
     @mcp.tool()

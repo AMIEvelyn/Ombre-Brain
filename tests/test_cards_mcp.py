@@ -137,22 +137,29 @@ def main():
     assert "没搜到" in _run(card_lookup(query="不存在的东西"))
     print("PASS card_lookup scope + miss")
 
-    # --- folder_timeline: narrative ribbon sorted by date ---
+    # --- folder_timeline: full history interleaved, not one dot per card ---
     travel = store.create_folder("旅行", parent_id=yilan)
     hk = store.create_folder("香港", parent_id=travel)
     a = store.create_card(title="香港", content="出发", valid_at="2026-03-01", folder_ids=[hk])
     store.add_revision(a, content="回家", valid_at="2026-03-05")
     store.create_card(title="成都", content="火锅", valid_at="2026-06-10", folder_ids=[travel])
     tl = _run(folder_timeline(folder="旅行"))
-    assert "时间线" in tl
-    i_hk, i_cd = tl.index("香港"), tl.index("成都")
-    assert i_hk < i_cd                        # sorted ascending by date
-    assert "2026-03-05" in tl and "回家" in tl  # card sits at its CURRENT date
-    assert "（2 条历史）" in tl
+    assert "时间线" in tl and "第 1/1 页，共 3 个时间点" in tl
+    i_dep, i_home, i_cd = tl.index("出发"), tl.index("回家"), tl.index("火锅")
+    assert i_dep < i_home < i_cd              # every timepoint shown, sorted ascending, not collapsed
+    assert "（当前）" in tl                    # marks each card's current-state point
+    assert "来源卡：现在叫【香港】" in tl and "来源卡：现在叫【成都】" in tl
     # non-recursive excludes the subfolder card
     tl_flat = _run(folder_timeline(folder="旅行", recursive=False))
-    assert "成都" in tl_flat and "香港" not in tl_flat
-    print("PASS folder_timeline ribbon + recursive")
+    assert "火锅" in tl_flat and "出发" not in tl_flat and "回家" not in tl_flat
+    print("PASS folder_timeline ribbon: full history interleaved, current marker, source card")
+
+    # --- folder_timeline: leaving folder empty means every card, paginated ---
+    tl_all = _run(folder_timeline())
+    assert "全部资料卡" in tl_all and "出发" in tl_all and "火锅" in tl_all
+    tl_page2_oob = _run(folder_timeline(page=99))
+    assert "没有第 99 页" in tl_page2_oob
+    print("PASS folder_timeline: empty folder = everything, out-of-range page handled")
 
     # --- ambiguous / missing folder resolution ---
     store.create_folder("喜欢的食物", parent_id=store.create_folder("林湛"))  # a second "喜欢的食物"
@@ -540,7 +547,29 @@ def folder_tree_fresh_store_test():
     print("PASS folder_tree: fresh store already shows the two auto-provisioned collections")
 
 
+def folder_timeline_pagination_test():
+    # 2026-07-18 (Yi Lan's spec): 50 timepoints per page, page math + the
+    # "more to see" hint checked against a real >50-entry ribbon.
+    store = CardStore(db_path=os.path.join(tempfile.mkdtemp(), "cards.sqlite"))
+    mcp = FakeMCP()
+    cards_mcp.register_card_tools(mcp, store)
+    folder_timeline = mcp.tools["folder_timeline"]
+    cid = store.create_card(title="连载", content="第0点", valid_at="2026-01-01")
+    for i in range(1, 60):
+        store.add_revision(cid, content=f"第{i}点", valid_at=f"2026-01-{i + 1:02d}" if i < 31 else f"2026-02-{i - 30:02d}")
+    page1 = _run(folder_timeline(page=1))
+    assert "第 1/2 页，共 60 个时间点" in page1
+    assert page1.count("来源卡：") == 50
+    assert "（还有更多，传 page=2 继续看）" in page1
+    page2 = _run(folder_timeline(page=2))
+    assert "第 2/2 页，共 60 个时间点" in page2
+    assert page2.count("来源卡：") == 10
+    assert "还有更多" not in page2
+    print("PASS folder_timeline: pagination (50/page, page math, more-to-see hint)")
+
+
 if __name__ == "__main__":
     main()
     real_fastmcp_registration_smoke_test()
     folder_tree_fresh_store_test()
+    folder_timeline_pagination_test()

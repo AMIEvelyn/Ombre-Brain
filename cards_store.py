@@ -961,23 +961,45 @@ class CardStore:
                 cards.append(card)
         return cards
 
-    def folder_timeline(self, folder_id: str, *, recursive: bool = True) -> list[dict]:
-        """The folder overview: every card in the folder (recursively by default)
-        laid out on one timeline, one entry per card at its main date (its
-        current revision's valid_at), oldest first. Open a card to see its own
-        history."""
-        cards = self.list_cards_in_folder(folder_id, recursive=recursive)
+    def folder_timeline(self, folder_id: str = "", *, recursive: bool = True) -> list[dict]:
+        """The narrative ribbon: every historical timepoint of every card in
+        the folder (recursively by default), interleaved by date -- not one
+        entry per card. folder_id='' means every card system-wide, not
+        scoped to any folder at all (2026-07-18, Lin Zhan's ask: with only a
+        handful of top-level subjects, there was previously no way to see one
+        ribbon across everything -- ignores `recursive`, which only makes
+        sense when scoped to a folder).
+
+        2026-07-18 (Yi Lan + Lin Zhan, both wanted this): originally this
+        showed one point per card (its current state only) -- "the current
+        status of everything in this folder, sorted by date". That's useful
+        but redundant with card_lookup; the thing only this tool can show is
+        the actual interleaved history: card A happens, then card B changes,
+        then card A changes again. Truncating to "latest per card" collapsed
+        exactly that. Each entry carries the timepoint's own title/content
+        AS IT WAS then (not rewritten to the card's current text), plus the
+        source card's current title + id, so a later rename never causes
+        confusion about which card a historical point belongs to, and
+        anyone wanting the full picture can jump straight to that card."""
+        cards = self.all_cards() if not folder_id else self.list_cards_in_folder(folder_id, recursive=recursive)
         entries = []
         for card in cards:
             current = card.get("current") or {}
-            entries.append({
-                "card_id": card["id"],
-                "title": current.get("title", ""),
-                "date": current.get("valid_at", ""),
-                "content": current.get("content", ""),
-                "revision_count": len(card.get("history", [])),
-            })
-        entries.sort(key=lambda e: str(e.get("date") or ""))
+            current_id = current.get("id")
+            current_title = str(current.get("title", ""))
+            for rev in card.get("history") or []:
+                entries.append({
+                    "card_id": card["id"],
+                    "current_title": current_title,
+                    "title": rev.get("title", ""),
+                    "date": rev.get("valid_at", ""),
+                    "content": rev.get("content", ""),
+                    "is_current": rev.get("id") == current_id,
+                    "_rev_id": rev.get("id") or 0,  # internal: deterministic same-day ordering only
+                })
+        entries.sort(key=lambda e: (str(e.get("date") or ""), e["_rev_id"]))
+        for e in entries:
+            del e["_rev_id"]
         return entries
 
     # ==================================================================

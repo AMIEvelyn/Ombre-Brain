@@ -183,19 +183,40 @@ def test_list_cards_recursive():
     assert deep == {c1, c2}                            # includes subfolder card
 
 
-def test_folder_timeline_one_dot_per_card_sorted():
+def test_folder_timeline_full_history_interleaved_sorted():
+    # 2026-07-18 (Yi Lan + Lin Zhan, both wanted this): every historical
+    # timepoint appears on the ribbon, interleaved with other cards' points
+    # by date -- not collapsed to one "current state" dot per card.
     s = _store()
     travel = s.create_folder("旅行")
     a = s.create_card(title="香港", content="出发", valid_at="2026-03-01", folder_ids=[travel])
-    s.add_revision(a, content="回家", valid_at="2026-03-05")   # a's main date -> latest 03-05
-    s.create_card(title="成都", content="到达", valid_at="2026-06-10", folder_ids=[travel])
+    s.add_revision(a, content="去了迪士尼", valid_at="2026-03-03")
+    s.add_revision(a, content="回家", valid_at="2026-03-05")
+    s.create_card(title="成都", content="到达", valid_at="2026-03-04", folder_ids=[travel])  # interleaves between a's points
     tl = s.folder_timeline(travel)
-    assert [e["title"] for e in tl] == ["香港", "成都"]         # sorted by date ascending
-    assert len(tl) == 2                                        # one entry per card, not per timepoint
-    hk_entry = tl[0]
-    assert hk_entry["date"] == "2026-03-05"                    # positioned at its current date
-    assert hk_entry["content"] == "一澜：回家"
-    assert hk_entry["revision_count"] == 2                     # but knows it has history
+    assert len(tl) == 4                                         # every timepoint, not one per card
+    dates = [e["date"] for e in tl]
+    assert dates == sorted(dates)                               # ascending
+    assert [e["title"] for e in tl] == ["香港", "香港", "成都", "香港"]  # interleaved by date, not grouped by card
+    first = tl[0]
+    assert first["content"] == "一澜：出发" and first["current_title"] == "香港" and first["card_id"] == a
+    assert first["is_current"] is False                         # historical point, not the card's current state
+    assert tl[-1]["content"] == "一澜：回家" and tl[-1]["is_current"] is True
+
+
+def test_folder_timeline_empty_folder_id_means_every_card():
+    # 2026-07-18 (Lin Zhan's ask): a way to see the whole ribbon across
+    # every card, not forced to pick one of the few top-level subjects.
+    s = _store()
+    a_folder = s.create_folder("一个馆")
+    b_folder = s.create_folder("另一个馆")
+    s.create_card(title="A", content="x", valid_at="2026-01-01", folder_ids=[a_folder])
+    s.create_card(title="B", content="y", valid_at="2026-02-01", folder_ids=[b_folder])
+    s.create_card(title="孤儿", content="z", valid_at="2026-03-01")  # no folder at all
+    tl_all = s.folder_timeline("")
+    assert {e["title"] for e in tl_all} == {"A", "B", "孤儿"}     # every card, including unfiled ones
+    tl_scoped = s.folder_timeline(a_folder)
+    assert {e["title"] for e in tl_scoped} == {"A"}               # scoped call is unaffected
 
 
 def test_single_author_content_still_gets_labeled():
