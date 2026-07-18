@@ -293,7 +293,7 @@ def real_fastmcp_registration_smoke_test():
     cards_mcp.register_card_write_tools(mcp, store)
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
-    assert len(names) == 21, names  # 2026-07-18: +card_favorite, +card_unfavorite (§14 item 5)
+    assert len(names) == 22, names  # 2026-07-18: +card_favorite, +card_unfavorite, +folder_tree (§14 item 5)
     assert "card_create" in names and "card_lookup" in names
     assert "card_merge_preview" in names and "card_merge" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")

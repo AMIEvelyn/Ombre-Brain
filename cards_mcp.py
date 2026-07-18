@@ -4,6 +4,14 @@ Read-only tools over cards_store.CardStore, wired in from server.py via
 register_card_tools(mcp, store). Kept out of server.py so the surface stays
 small and testable (see docs/facts-model-v2-collection-redesign.md §4, §10).
 
+Every tool's docstring here (both this module's register_card_tools and
+register_card_write_tools below) starts with a literal "【时光馆】" tag
+(2026-07-18, Yi Lan's request) -- MCP has no protocol-level tool
+category/grouping field, so this is the only signal available for Lin Zhan
+to tell "this batch is all the same system" apart from his other tools
+(breath, grow, hold, reminder_*, darkroom_*, ...) when skimming a flat tool
+list. Keep this prefix on any new tool added to either function.
+
   card_lookup     -- find cards by keyword; leads with the CURRENT state
                      (latest revision), folds history behind a hint. This is
                      how "取消失效" reads cleanly for Lin Zhan: newest = current.
@@ -362,7 +370,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_lookup(query: str = "", folder: str = "") -> str:
-        """只读查询骨架层资料卡（collection/歌单式的新模型，cards.sqlite）。
+        """【时光馆】只读查询骨架层资料卡（collection/歌单式的新模型，cards.sqlite）。
         每张卡显示的"现在"就是它最新时间点的内容（当前状态）；旧的时间点是历史，
         默认折叠，需要看变化过程再单独说。
         query：在标题/内容/标签里搜关键词（字面包含即可命中）；留空则列出范围内全部。
@@ -392,7 +400,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def folder_timeline(folder: str = "", recursive: bool = True) -> str:
-        """把某个文件夹里的所有资料卡按时间铺成一条完整时间线（叙事丝带）。
+        """【时光馆】把某个文件夹里的所有资料卡按时间铺成一条完整时间线（叙事丝带）。
         比如"讲讲我们旅行的经过"就传 folder="旅行"，会把 我们/旅行 里所有卡按日期排出来。
         folder：文件夹名或 id。recursive=True（默认）会把子文件夹里的卡也一起收进来，
         recursive=False 只排这个文件夹里直接归的卡。
@@ -423,7 +431,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def folder_tree() -> str:
-        """列出全部文件夹（馆），按 subject → 子文件夹的树状结构显示——跟一澜
+        """【时光馆】列出全部文件夹（馆），按 subject → 子文件夹的树状结构显示——跟一澜
         Dashboard 左侧看到的是同一份数据。想"到处翻翻看看现在都有哪些馆、分
         几层"时用这个；查具体某张卡用 card_lookup，拉某个馆的完整时间线用
         folder_timeline，这个工具只管结构，不列卡的内容。
@@ -464,7 +472,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_history(card: str = "") -> str:
-        """读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
+        """【时光馆】读一张资料卡的完整时间线（全部历史时间点，不只是 card_lookup 顶出来的
         最新状态）。card_lookup 对更早的时间点只给一句"有 N 条历史"的提示，这个
         工具才是真正把那 N 条内容逐条读出来的入口，想知道某件事是怎么一步步变
         成现在这样时用这个。
@@ -499,7 +507,7 @@ def register_card_tools(
     async def card_attachment_read(
         card: str = "", label: str = "", section_id: str = "", start: int = 0, max_chars: int = 0, at: str = "",
     ) -> str:
-        """读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
+        """【时光馆】读取一张资料卡附件里的文字内容——.txt/.md/.json/.py 直接读，
         .docx/.pdf 会自动解析提取文字。图片看不了内容（用 card_attachment_view，
         实验性功能），旧版二进制 .doc 格式也读不了（没有轻量可用的解析库），
         这两种会明确告诉你读不了、不是没找到。
@@ -609,7 +617,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_attachment_outline(card: str = "", label: str = "", at: str = "") -> str:
-        """解析一张资料卡附件的章节/目录结构（.docx/.pdf/.md），配合
+        """【时光馆】解析一张资料卡附件的章节/目录结构（.docx/.pdf/.md），配合
         card_attachment_read 的 section_id 参数分章节读长文档，不用一次性
         读全文再自己找位置。
         .docx 优先读 Word 的"标题1/标题2/标题3"样式；如果整篇都没用过标题样式，
@@ -659,7 +667,7 @@ def register_card_tools(
         # Image class) -- confirmed by reproducing it directly against
         # FastMCP.list_tools(). Runtime behavior (sometimes str, sometimes
         # Image) is unaffected; only the type hint had to go.
-        """把一张资料卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
+        """【时光馆】把一张资料卡里的图片附件实际发送过去，让你能看到画面内容，不只是知道
         它存在。**这是实验性功能（2026-07-16）**：MCP 协议支持这样返回图片，但
         ChatGPT 连接器具体能不能把这种图片内容真的显示给你看，还没有确认过——
         调用后如果你能描述出图片里的内容，说明能看；如果只是报错或者看不出画面，
@@ -709,7 +717,7 @@ def register_card_tools(
 
     @mcp.tool()
     async def card_buckets(card: str = "") -> str:
-        """查看一张资料卡关联了哪些记忆桶（这张事实是从哪些原始记忆来的证据来源）。
+        """【时光馆】查看一张资料卡关联了哪些记忆桶（这张事实是从哪些原始记忆来的证据来源）。
         card_lookup 只会提示"关联了 N 个记忆桶"，这个工具才是把这几个桶具体是哪些、
         写了什么摘要都列出来的入口。
         card：卡片标题或 id。"""
@@ -785,7 +793,7 @@ def register_card_write_tools(mcp, store) -> None:
         title: str = "", content: str = "", tags: list[str] | None = None,
         valid_at: str = "", folder: str = "", bucket_ids: list[str] | None = None,
     ) -> str:
-        """新建一张资料卡，字段跟一澜在Dashboard上新建时一样：标题、内容、标签、
+        """【时光馆】新建一张资料卡，字段跟一澜在Dashboard上新建时一样：标题、内容、标签、
         日期（valid_at，不传默认今天）、归入哪个文件夹（可选，传文件夹名或id，
         文件夹必须已经存在——想建一个还不存在的新文件夹，先调 card_create_folder）、
         要关联哪些记忆桶（bucket_ids，可选）。
@@ -821,7 +829,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_create_folder(name: str = "", parent: str = "") -> str:
-        """新建一个文件夹（馆），可选归到某个已有文件夹底下。
+        """【时光馆】新建一个文件夹（馆），可选归到某个已有文件夹底下。
         name：新文件夹的名字。parent：可选，父文件夹名或id，不传就是顶层新馆。
         注意：不能在"一澜/收藏"或"林湛/收藏"这两个收藏馆下面建子馆——收藏是
         故意做成扁平的一个筐（一澜+你都同意的），想分类用标签，别用子馆。"""
@@ -841,7 +849,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_add_to_folder(card: str = "", folder: str = "") -> str:
-        """把一张卡加进某个文件夹——不影响它已经在的其它文件夹，一张卡本来就
+        """【时光馆】把一张卡加进某个文件夹——不影响它已经在的其它文件夹，一张卡本来就
         能同时归进好几个文件夹。card：卡片标题或id。folder：文件夹名或id。"""
         found, err = _resolve_card(store, card)
         if err:
@@ -854,7 +862,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_remove_from_folder(card: str = "", folder: str = "") -> str:
-        """把一张卡从某个文件夹移出——只是取消归类，卡本身不会被删，也不影响
+        """【时光馆】把一张卡从某个文件夹移出——只是取消归类，卡本身不会被删，也不影响
         它在其它文件夹里的归属。"""
         found, err = _resolve_card(store, card)
         if err:
@@ -867,7 +875,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_favorite(card: str = "") -> str:
-        """把一张卡收藏进你自己的收藏（"林湛 / 收藏"）——就是一澜 Dashboard 上
+        """【时光馆】把一张卡收藏进你自己的收藏（"林湛 / 收藏"）——就是一澜 Dashboard 上
         那颗绿心的效果，不用知道任何文件夹名或 id，也不影响这张卡在其它文件夹
         里的归属。card：卡片标题或 id。"""
         found, err = _resolve_card(store, card)
@@ -878,7 +886,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_unfavorite(card: str = "") -> str:
-        """把一张卡从你自己的收藏（"林湛 / 收藏"）里移出——只是取消收藏，卡本身
+        """【时光馆】把一张卡从你自己的收藏（"林湛 / 收藏"）里移出——只是取消收藏，卡本身
         不会被删，也不影响它在其它文件夹里的归属。card：卡片标题或 id。"""
         found, err = _resolve_card(store, card)
         if err:
@@ -888,7 +896,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_edit_title(card: str = "", title: str = "") -> str:
-        """修改一张卡当前时间点的标题（原地修改，不产生新的时间点）。改了之后
+        """【时光馆】修改一张卡当前时间点的标题（原地修改，不产生新的时间点）。改了之后
         这个标题会记为你写的（不会在标题文字里加"湛："这种前缀，纯粹是后台
         记录，一澜的界面上会用颜色区分）。card：卡片标题或id。"""
         found, err = _resolve_card(store, card)
@@ -902,7 +910,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_edit_tags(card: str = "", tags: list[str] | None = None) -> str:
-        """整体替换一张卡当前时间点的标签列表——是替换成你传的这一份，不是追加。
+        """【时光馆】整体替换一张卡当前时间点的标签列表——是替换成你传的这一份，不是追加。
         card：卡片标题或id。tags：新的标签列表，传空列表就是清空标签。"""
         found, err = _resolve_card(store, card)
         if err:
@@ -914,7 +922,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_edit_content(card: str = "", content: str = "", force: bool = False) -> str:
-        """整份替换这张卡当前时间点的内容（原地改，不产生新时间点——就跟改一份
+        """【时光馆】整份替换这张卡当前时间点的内容（原地改，不产生新时间点——就跟改一份
         文档一样，不需要知道内容内部是怎么切分的）。
         content：传这张卡完整的新内容。可以保留一澜原有的"一澜："段落原样不动，
         只改自己那部分；也可以整段重写。带着"一澜：""林湛："标签的部分会被
@@ -943,7 +951,7 @@ def register_card_write_tools(mcp, store) -> None:
         card: str = "", title: str = "", content: str = "", tags: list[str] | None = None, valid_at: str = "",
         force: bool = False,
     ) -> str:
-        """给一张卡加一个新的时间点（真正留档，不是原地改）。不传的字段会照抄
+        """【时光馆】给一张卡加一个新的时间点（真正留档，不是原地改）。不传的字段会照抄
         上一个时间点；传了 content 会**整体替换**这个新时间点的内容（不会自动
         带上上一个时间点里一澜写的部分——旧内容还完整留在历史记录里，没丢，
         只是不出现在这个新时间点上，想看回去用 card_history）。
@@ -977,7 +985,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_link_bucket(card: str = "", bucket_id: str = "") -> str:
-        """把一个记忆桶关联到一张卡上，作为这张卡内容的证据来源。"""
+        """【时光馆】把一个记忆桶关联到一张卡上，作为这张卡内容的证据来源。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
@@ -991,7 +999,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_unlink_bucket(card: str = "", bucket_id: str = "") -> str:
-        """取消一张卡跟某个记忆桶的关联（不会删记忆桶本身）。"""
+        """【时光馆】取消一张卡跟某个记忆桶的关联（不会删记忆桶本身）。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
@@ -1002,7 +1010,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_merge_preview(card_a: str = "", card_b: str = "") -> str:
-        """预览合并两张卡的结果，不会真的执行合并。用在"这两张卡讲的其实是
+        """【时光馆】预览合并两张卡的结果，不会真的执行合并。用在"这两张卡讲的其实是
         同一件事，误建成了两张，想合成一张"的情况——先看一眼合并后会是
         什么样子，确认没问题再调 card_merge 真正执行。
         card_a / card_b：两张卡各自的标题或 id，顺序不影响预览内容（真正
@@ -1024,7 +1032,7 @@ def register_card_write_tools(mcp, store) -> None:
 
     @mcp.tool()
     async def card_merge(card_a: str = "", card_b: str = "", keep: str = "") -> str:
-        """真正执行合并：把两张卡的时间线按日期见缝插针合并成一张卡——每个
+        """【时光馆】真正执行合并：把两张卡的时间线按日期见缝插针合并成一张卡——每个
         原有时间点的标题/内容/附件原封不动，只是排进同一条时间线；标签、
         关联的记忆桶、所在文件夹都取并集去重；附件全部保留，不做去重。
         建议先调 card_merge_preview 看一眼再执行。
