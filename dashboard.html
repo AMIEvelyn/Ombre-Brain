@@ -2445,7 +2445,7 @@
     padding: 20px;
     box-shadow: 4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);
     width: min(920px, 95vw);
-    max-height: 86vh;
+    max-height: 92vh;
     display: flex;
     flex-direction: column;
   }
@@ -2491,10 +2491,11 @@
     user-select: none;
     -webkit-user-select: none;
     flex: 1;
-    padding: 30px 0 24px;
+    min-height: 210px;
+    padding: 45px 0 36px;
   }
   .cards-v2-ribbon-viewport.dragging { cursor: grabbing; }
-  .cards-v2-ribbon-track { position: relative; height: 56px; }
+  .cards-v2-ribbon-track { position: relative; height: 130px; }
   .cards-v2-ribbon-line {
     position: absolute;
     left: 0; top: 50%;
@@ -2509,18 +2510,21 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 120px;
+    width: 100px;
     cursor: pointer;
   }
   .cards-v2-ribbon-point-title {
     font-size: 12px;
-    color: var(--text);
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-bottom: 4px;
+    color: #9db89e;
+    width: 100px;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.35;
+    text-align: center;
+    margin-bottom: 6px;
   }
+  .cards-v2-ribbon-point-title.current { font-weight: bold; color: #2f6b45; }
   .cards-v2-ribbon-dot {
     width: 9px;
     height: 9px;
@@ -2535,8 +2539,10 @@
   }
   .cards-v2-ribbon-point-date {
     font-size: 11px;
-    color: var(--text-dim);
-    margin-top: 4px;
+    color: #9db89e;
+    margin-top: 6px;
+    line-height: 1.3;
+    text-align: center;
     white-space: nowrap;
   }
   .cards-v2-ribbon-footer {
@@ -8817,8 +8823,16 @@ function cardsV2RibbonIcon(){
     + '<circle cx="18" cy="12" r="2.2" fill="currentColor" stroke="none"/>'
     + '</svg>';
 }
-var cardsV2Ribbon = { folderId: '', entries: [], pxPerDay: 6 };
-var CARDS_V2_RIBBON_MIN_GAP = 64;       // px -- floor even for same-day points, so they never overlap
+var cardsV2Ribbon = { folderId: '', entries: [], pxPerDay: 12 };
+// 2026-07-18 (Yi Lan's bug report): a fixed-pixel minimum gap made +/- zoom
+// completely inert whenever points shared a date (her real test data was
+// mostly same-day) -- Math.max(FIXED_PX, 0 * pxPerDay) never changes with
+// pxPerDay. Fix: treat any real gap under MIN_GAP_DAYS as if it were that
+// many days, so the minimum ALSO scales with zoom like every other gap.
+// ABS_MIN_GAP is just a hard pixel floor so dots can't fully overlap at the
+// most extreme zoom-out.
+var CARDS_V2_RIBBON_MIN_GAP_DAYS = 10;
+var CARDS_V2_RIBBON_ABS_MIN_GAP = 16;   // px
 var CARDS_V2_RIBBON_PX_PER_DAY_MIN = 0.3;
 var CARDS_V2_RIBBON_PX_PER_DAY_MAX = 200;
 var CARDS_V2_RIBBON_PAD = 70;           // left/right breathing room inside the track
@@ -8826,7 +8840,7 @@ var CARDS_V2_RIBBON_PAD = 70;           // left/right breathing room inside the 
 async function cardsV2OpenRibbon(folderId){
   cardsV2Ribbon.folderId = folderId;
   cardsV2Ribbon.entries = [];
-  cardsV2Ribbon.pxPerDay = 6;
+  cardsV2Ribbon.pxPerDay = 12;
   document.getElementById('cards-v2-ribbon-overlay').style.display = '';
   document.getElementById('cards-v2-ribbon-path').textContent = cardsV2Path(folderId);
   renderCardsV2Ribbon();
@@ -8843,16 +8857,27 @@ function cardsV2RibbonDateMs(s){
   var t = Date.parse(String(s || '').slice(0, 10) + 'T00:00:00Z');
   return isNaN(t) ? 0 : t;
 }
+// "2026\n07-17" -- year on its own line, month-day below (Yi Lan's ask).
+function cardsV2RibbonDateLines(s){
+  var d = cardsV2Date(s);
+  var m = /^(\d{4})-(\d{2}-\d{2})$/.exec(d);
+  if (!m) return esc(d);
+  return '<span>' + esc(m[1]) + '</span><br><span>' + esc(m[2]) + '</span>';
+}
 // Cumulative x-position per entry -- date-proportional gaps (Yi Lan's
 // call: a 40-day gap should visually read as much wider than a 2-day one,
-// not squashed to even spacing), but never below CARDS_V2_RIBBON_MIN_GAP so
-// two same-day (or near-same-day) points stay comfortably clickable.
+// not squashed to even spacing). Same-day/near clusters are floored to
+// CARDS_V2_RIBBON_MIN_GAP_DAYS worth of spacing -- scales with zoom like
+// every other gap, plus one hard pixel floor for the extreme zoom-out case.
 function cardsV2RibbonLayout(){
   var entries = cardsV2Ribbon.entries, pxPerDay = cardsV2Ribbon.pxPerDay;
   var positions = [], x = CARDS_V2_RIBBON_PAD, prevMs = null;
   entries.forEach(function(e){
     var ms = cardsV2RibbonDateMs(e.date);
-    if (prevMs !== null) x += Math.max(CARDS_V2_RIBBON_MIN_GAP, (ms - prevMs) / 86400000 * pxPerDay);
+    if (prevMs !== null) {
+      var days = Math.max((ms - prevMs) / 86400000, CARDS_V2_RIBBON_MIN_GAP_DAYS);
+      x += Math.max(CARDS_V2_RIBBON_ABS_MIN_GAP, days * pxPerDay);
+    }
     positions.push(x);
     prevMs = ms;
   });
@@ -8867,11 +8892,13 @@ function renderCardsV2Ribbon(){
   var totalWidth = positions[positions.length - 1] + CARDS_V2_RIBBON_PAD;
   var line = '<div class="cards-v2-ribbon-line" style="width:' + totalWidth + 'px;"></div>';
   var points = entries.map(function(e, i){
-    var dotClass = 'cards-v2-ribbon-dot' + (e.is_current ? ' current' : '');
+    var cur = !!e.is_current;
+    var dotClass = 'cards-v2-ribbon-dot' + (cur ? ' current' : '');
+    var titleClass = 'cards-v2-ribbon-point-title' + (cur ? ' current' : '');
     return '<div class="cards-v2-ribbon-point" style="left:' + positions[i] + 'px;" onclick="cardsV2RibbonPointClick(\'' + e.card_id + '\')">'
-      + '<div class="cards-v2-ribbon-point-title">' + esc(e.title || '(无标题)') + '</div>'
+      + '<div class="' + titleClass + '">' + esc(e.title || '(无标题)') + '</div>'
       + '<div class="' + dotClass + '"></div>'
-      + '<div class="cards-v2-ribbon-point-date">' + esc(cardsV2Date(e.date)) + '</div>'
+      + '<div class="cards-v2-ribbon-point-date">' + cardsV2RibbonDateLines(e.date) + '</div>'
       + '</div>';
   }).join('');
   body.innerHTML = '<div class="cards-v2-ribbon-track" style="width:' + totalWidth + 'px;">' + line + points + '</div>';
