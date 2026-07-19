@@ -48,9 +48,11 @@ folder name/id needed), card_edit_title, card_edit_tags, card_edit_content,
 card_new_revision, card_link_bucket, card_unlink_bucket, card_merge_preview,
 card_merge (merge tool, §14 item 4 -- manual/deterministic timeline
 interleave, no auto duplicate detection; see merge_cards' docstring in
-cards_store.py).
-No card_delete (Yi Lan wants a recycle-bin review step first, not built yet)
-and no attachment upload (no binary-file channel through an MCP tool call).
+cards_store.py), and the recycle bin (2026-07-19, §14 item 1 -- Yi Lan's
+call: both of them get delete/restore, symmetric with the Dashboard):
+card_delete (soft, reversible), card_trash_list (what's currently in the
+bin), card_restore, card_purge (irreversible, requires confirm=True).
+Still no attachment upload (no binary-file channel through an MCP tool call).
 
 card_edit_content takes the card's whole new content as one string (2026-07-17,
 second pass) -- an earlier version required a segment_id identifying which
@@ -64,7 +66,7 @@ editor) needs no id at all.
 from __future__ import annotations
 
 from cards_store import (
-    AUTHOR_LIN_ZHAN, SegmentOwnershipError,
+    AUTHOR_LIN_ZHAN, SegmentOwnershipError, TRASH_RETENTION_DAYS,
     FAVORITE_FOLDER_YI_LAN, FAVORITE_FOLDER_LIN_ZHAN,
 )
 
@@ -169,6 +171,32 @@ def _resolve_card(store, card: str):
         return candidates[0], ""
     titles = "、".join(str((c.get("current") or {}).get("title") or c["id"]) for c in candidates)
     return None, f"有多张卡匹配「{card}」：{titles}。请说得更具体一点。"
+
+
+def _resolve_trash_card(store, card: str):
+    """Same shape as _resolve_card (returns (card_dict, error_message)), but
+    scoped to what's currently in the recycle bin -- a card in the bin is
+    invisible to search_cards/get_card's normal listing-adjacent callers, so
+    card_restore/card_purge need their own lookup over list_trash_cards()
+    instead. Accepts an exact id or a title match against each trashed
+    card's current title."""
+    card = str(card or "").strip()
+    if not card:
+        return None, "请给一张卡的标题或 id。"
+    trash = store.list_trash_cards()
+    by_id = next((c for c in trash if c["id"] == card), None)
+    if by_id:
+        return by_id, ""
+    matches = [
+        c for c in trash
+        if card.lower() in str((c.get("current") or {}).get("title", "")).strip().lower()
+    ]
+    if not matches:
+        return None, f"回收站里没有叫「{card}」的事实卡（用 card_trash_list 看看回收站里都有什么）。"
+    if len(matches) == 1:
+        return matches[0], ""
+    titles = "、".join(str((c.get("current") or {}).get("title") or c["id"]) for c in matches)
+    return None, f"回收站里有多张卡匹配「{card}」：{titles}。请说得更具体一点，或者直接用 id。"
 
 
 def _resolve_folder(store, folder: str):
@@ -788,19 +816,25 @@ def register_card_tools(
         return "\n".join(lines)
 
 
-def register_card_write_tools(mcp, store) -> None:
+def register_card_write_tools(mcp, store, *, delete_attachments=None) -> None:
     """Lin Zhan's write access to cards.sqlite (see docs/facts-model-v2-
     collection-redesign.md §14 item 3): new/edit/new-revision, folder
-    management, bucket linking -- matching what Yi Lan can already do from
-    the Dashboard, field for field, per her explicit request.
+    management, bucket linking, and the recycle bin -- matching what Yi Lan
+    can already do from the Dashboard, field for field, per her explicit
+    request.
 
-    Deliberately does NOT include:
-    - Whole-card deletion. Yi Lan's call (2026-07-17): she wants a recycle-
-      bin/review step before anything he deletes is gone for good, bundled
-      with a future memory-bucket deletion project -- not built yet. Until
-      then, deleting a whole card stays a Dashboard-only (her) action.
-    - Attachment upload. He has no channel to send actual file bytes through
-      an MCP tool call -- only the Dashboard can receive a real upload.
+    delete_attachments: optional callable(card_dict) -> None, deleting every
+    attachment file across a card's whole history off disk (server.py owns
+    the actual attachments directory, same decoupling pattern as
+    register_card_tools' read_attachment_* params). Only called by
+    card_purge, right before the card row itself is destroyed -- soft
+    delete (card_delete) never touches attachment files, since a card in
+    the bin might still be restored. None disables attachment cleanup on
+    purge (the card row still gets purged; files would just be orphaned).
+
+    Deliberately does NOT include attachment upload -- he has no channel to
+    send actual file bytes through an MCP tool call, only the Dashboard can
+    receive a real upload.
 
     Every write here is tagged AUTHOR_LIN_ZHAN in cards_store's authorship
     model (see cards_store.py's module docstring / SegmentOwnershipError).
@@ -1113,3 +1147,64 @@ def register_card_write_tools(mcp, store) -> None:
         except ValueError as e:
             return str(e)
         return _fmt_merge_result(store, result)
+
+    @mcp.tool()
+    async def card_delete(card: str = "") -> str:
+        """【时光馆】把一张卡放进回收站——软删除，不是真的抹掉。这张卡会从 card_lookup/
+        folder_timeline/folder_tree 等正常查询里消失，但 30 天内一澜或你都能用
+        card_restore 原样恢复（标题、历史、文件夹归属、关联的记忆桶——全都原封
+        不动，删除本身完全不影响这张卡关联的记忆桶，那些桶还在，只是链接暂时
+        跟着卡一起不在正常列表里显示）。超过 30 天没恢复，会被自动清理，到时候
+        才是真的没了。
+        想看现在回收站里都有什么，用 card_trash_list。
+        card：卡片标题或 id。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        store.delete_card(found["id"])
+        return f"已放入回收站：{_card_result(found['id'])}（{TRASH_RETENTION_DAYS} 天内可用 card_restore 恢复）"
+
+    @mcp.tool()
+    async def card_trash_list() -> str:
+        """【时光馆】看看回收站里现在有哪些卡（还没被彻底清理掉的），每张卡带着还剩
+        多少天会被自动清理。想恢复用 card_restore，想直接彻底删掉用 card_purge。"""
+        trash = store.list_trash_cards()
+        if not trash:
+            return "回收站是空的。"
+        lines = [f"=== 回收站（共 {len(trash)} 张卡）==="]
+        for card in trash:
+            title = str((card.get("current") or {}).get("title") or "(无标题)")
+            lines.append(f"- 【{title}】（id: {card['id']}），删除于 {str(card.get('deleted_at') or '')[:10]}")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def card_restore(card: str = "") -> str:
+        """【时光馆】把回收站里的一张卡恢复回来——标题、历史、文件夹归属、关联的记忆桶
+        都是删除前的原样，恢复后立刻能在 card_lookup 等正常查询里重新看到。
+        card：回收站里那张卡的标题或 id（用 card_trash_list 先看一眼）。"""
+        found, err = _resolve_trash_card(store, card)
+        if err:
+            return err
+        store.restore_card(found["id"])
+        return f"已恢复：{_card_result(found['id'])}"
+
+    @mcp.tool()
+    async def card_purge(card: str = "", confirm: bool = False) -> str:
+        """【时光馆】把回收站里的一张卡彻底删除——真的删掉，之后谁都恢复不了，跟等 30 天
+        自动清理是同一个结果，只是现在马上执行。
+        第一次调用（不传 confirm）只会告诉你这是哪张卡，不会真的执行；确定要
+        删的话带上 confirm=true 再调一次。
+        card：回收站里那张卡的标题或 id（用 card_trash_list 先看一眼）。"""
+        found, err = _resolve_trash_card(store, card)
+        if err:
+            return err
+        result = _card_result(found["id"])
+        if not confirm:
+            return f"确定要彻底删除「{result}」吗？这个操作不能撤销。确定的话带上 confirm=true 再调用一次。"
+        if delete_attachments is not None:
+            try:
+                delete_attachments(found)
+            except Exception:
+                pass
+        store.purge_card(found["id"])
+        return f"已彻底删除 {result}。"

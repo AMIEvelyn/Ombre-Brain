@@ -24,7 +24,7 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -49,6 +49,13 @@ AUTHOR_DISPLAY_NAMES = {AUTHOR_YI_LAN: "一澜", AUTHOR_LIN_ZHAN: "林湛"}
 # pass): recognizes the exact "一澜："/"林湛：" prefix _render_content already
 # generates, so a save-then-reload of hand-edited text round-trips cleanly.
 _AUTHOR_PREFIX_TO_CODE = {f"{name}：": code for code, name in AUTHOR_DISPLAY_NAMES.items()}
+
+# Recycle bin (2026-07-19, docs/facts-model-v2-collection-redesign.md §14
+# item 1): how long a soft-deleted card sits in the bin before the scheduled
+# purge job removes it for good. Restoring within this window is exact --
+# soft delete never touches card_folders/card_buckets, only flips deleted_at,
+# so nothing needs to be reconstructed.
+TRASH_RETENTION_DAYS = 30
 
 # The two hearts' fixed destinations (2026-07-18, favorites work). Each
 # heart in the UI/MCP always points at exactly one of these two folders --
@@ -153,6 +160,7 @@ class CardStore:
         conn.commit()
         self._migrate_authorship_columns(conn)
         self._migrate_merge_columns(conn)
+        self._migrate_trash_columns(conn)
         # 2026-07-17 (Yi Lan + Lin Zhan): relation_type on card_buckets
         # (evidence/origin/related) turned out never to be used by either of
         # them in practice -- everything is 'evidence' -- so it's retired as
@@ -281,6 +289,21 @@ class CardStore:
             conn.execute("ALTER TABLE cards ADD COLUMN merged_into TEXT NOT NULL DEFAULT ''")
         if "tags_override" not in existing:
             conn.execute("ALTER TABLE cards ADD COLUMN tags_override TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+    def _migrate_trash_columns(self, conn: sqlite3.Connection) -> None:
+        """Migration-safe ALTER TABLE for the card recycle bin (2026-07-19,
+        docs/facts-model-v2-collection-redesign.md §14 item 1).
+
+        deleted_at: '' means "not in the bin"; any other value is the
+        soft-delete timestamp. Distinct from merged_into -- a merge tombstone
+        is a permanent redirect that's never coming back, whereas deleted_at
+        is a pending real deletion that restore_card can always undo within
+        TRASH_RETENTION_DAYS. Defaults to '' for every pre-existing row via
+        the column DEFAULT itself, a no-op."""
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
+        if "deleted_at" not in existing:
+            conn.execute("ALTER TABLE cards ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''")
         conn.commit()
 
     def _resolve_id(self, card_id: str) -> str:
@@ -762,6 +785,7 @@ class CardStore:
         return {
             "id": card["id"],
             "created_at": card["created_at"],
+            "deleted_at": card["deleted_at"],
             "current": current,
             "history": history,
             "folders": self.get_card_folders(card_id),
@@ -769,9 +793,78 @@ class CardStore:
         }
 
     def delete_card(self, card_id: str) -> bool:
-        """Destroy a card entirely: its revisions and all folder links go too.
-        This is the explicit destructive op -- distinct from removing the card
-        from a folder (remove_card_from_folder), which only unlinks."""
+        """Soft delete (2026-07-19, recycle bin -- both Yi Lan and Lin Zhan can
+        do this now): flips deleted_at, nothing else. card_revisions,
+        card_folders, card_buckets are all left completely untouched, so
+        restore_card is an exact, instant undo within TRASH_RETENTION_DAYS --
+        including every card_buckets link, so a card's linked memory buckets
+        are never affected by deleting the card (they're a separate store;
+        see docs/facts-model-v2-collection-redesign.md §14 item 1).
+
+        Real, unrecoverable deletion is purge_card -- either the scheduled
+        purge job after the retention window, or an explicit "delete forever"
+        from the recycle bin. Returns False if the card doesn't exist or is
+        already in the bin."""
+        card_id = self._resolve_id(card_id)
+        conn = self._connect()
+        cursor = conn.execute(
+            "UPDATE cards SET deleted_at = ? WHERE id = ? AND deleted_at = ''",
+            (self._now_iso(), str(card_id)),
+        )
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
+
+    def restore_card(self, card_id: str) -> bool:
+        """Undo delete_card: clears deleted_at. Returns False if the card
+        doesn't exist or wasn't in the bin. Nothing else needs restoring --
+        soft delete never touched folder/bucket links in the first place."""
+        card_id = self._resolve_id(card_id)
+        conn = self._connect()
+        cursor = conn.execute(
+            "UPDATE cards SET deleted_at = '' WHERE id = ? AND deleted_at != ''",
+            (str(card_id),),
+        )
+        conn.commit()
+        restored = cursor.rowcount > 0
+        conn.close()
+        return restored
+
+    def list_trash_cards(self) -> list[dict]:
+        """Every card currently in the bin, newest-deleted first. Each card
+        dict carries its usual get_card() shape (deleted_at included) plus
+        purge_at -- when the scheduled purge job will remove it for good,
+        for the Dashboard's "N days left" display."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id, deleted_at FROM cards WHERE deleted_at != '' ORDER BY deleted_at DESC"
+        ).fetchall()
+        conn.close()
+        out = []
+        for row in rows:
+            card = self.get_card(row["id"])
+            if not card:
+                continue
+            card["purge_at"] = self._purge_at(row["deleted_at"])
+            out.append(card)
+        return out
+
+    @staticmethod
+    def _purge_at(deleted_at: str) -> str:
+        try:
+            deleted = datetime.fromisoformat(str(deleted_at))
+        except ValueError:
+            return ""
+        return (deleted + timedelta(days=TRASH_RETENTION_DAYS)).isoformat(timespec="seconds")
+
+    def purge_card(self, card_id: str) -> bool:
+        """Destroy a card for real: its revisions and all folder/bucket links
+        go too (never the bucket files themselves -- card_buckets is just a
+        link table). This is the irreversible op, called from the recycle
+        bin's "delete forever" action or the scheduled purge job -- normal
+        deletion is delete_card (soft). Does NOT resolve merged_into (a
+        purge targets one concrete row, not whatever it might redirect to)."""
         conn = self._connect()
         cursor = conn.execute("DELETE FROM cards WHERE id = ?", (str(card_id),))
         existed = cursor.rowcount > 0
@@ -957,7 +1050,7 @@ class CardStore:
         cards = []
         for row in rows:
             card = self.get_card(row["card_id"])
-            if card:
+            if card and not card.get("deleted_at"):
                 cards.append(card)
         return cards
 
@@ -1050,6 +1143,35 @@ class CardStore:
         ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def find_cards_by_bucket(self, bucket_id: str) -> list[dict]:
+        """Reverse of get_bucket_links (2026-07-19, docs/facts-model-v2-
+        collection-redesign.md §14 item 7): every card this memory bucket is
+        linked to as evidence. Powers the "this bucket is referenced by a
+        fact card" protection -- a bucket linked to any card should get a
+        confirmation prompt before it's deleted, both from the Dashboard and
+        from Lin Zhan's trace(delete=True). Excludes cards currently in the
+        recycle bin (deleted_at != '') -- a card pending its own deletion
+        shouldn't block deleting the bucket it's linked to."""
+        bucket_id = str(bucket_id or "").strip()
+        if not bucket_id:
+            return []
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT cb.card_id FROM card_buckets cb JOIN cards c ON c.id = cb.card_id
+            WHERE cb.bucket_id = ? AND c.deleted_at = ''
+            ORDER BY cb.created_at
+            """,
+            (bucket_id,),
+        ).fetchall()
+        conn.close()
+        out = []
+        for row in rows:
+            card = self.get_card(row["card_id"])
+            if card:
+                out.append(card)
+        return out
 
     # ==================================================================
     # merge / dedup (docs/facts-model-v2-collection-redesign.md §14 item 4)
@@ -1201,11 +1323,15 @@ class CardStore:
     # lookup helpers (back the MCP tools in cards_mcp.py)
     # ==================================================================
     def all_cards(self) -> list[dict]:
-        """Every living card -- excludes merge tombstones (merged_into != ''),
+        """Every living card -- excludes merge tombstones (merged_into != '')
         so a card merged away doesn't show up twice (once under its own id,
-        once again via its canonical id resolving back to the same card)."""
+        once again via its canonical id resolving back to the same card), and
+        excludes cards currently in the recycle bin (deleted_at != '') -- use
+        list_trash_cards() to see those."""
         conn = self._connect()
-        rows = conn.execute("SELECT id FROM cards WHERE merged_into = '' ORDER BY created_at").fetchall()
+        rows = conn.execute(
+            "SELECT id FROM cards WHERE merged_into = '' AND deleted_at = '' ORDER BY created_at"
+        ).fetchall()
         conn.close()
         return [c for c in (self.get_card(r["id"]) for r in rows) if c]
 

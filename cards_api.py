@@ -67,12 +67,18 @@ def _ownership_conflict_response(e: SegmentOwnershipError) -> JSONResponse:
     )
 
 
-def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
+def register_card_routes(mcp, store, require_auth, bucket_summary=None, delete_attachments=None) -> None:
     """Register the /api/cards-skeleton/* routes.
 
     mcp          -- the FastMCP instance (provides .custom_route)
     store        -- a cards_store.CardStore
     require_auth -- callable(request) -> error-response-or-None (dashboard auth)
+    delete_attachments -- optional callable(card_dict) -> None, removing every
+    attachment file across a card's whole history off disk (server.py owns
+    the attachments directory; same decoupling as bucket_summary). Only
+    called from the recycle bin's "delete forever" endpoint, right before
+    the card row itself is purged -- soft delete (DELETE /cards/{id}) never
+    touches attachment files, since a trashed card might still be restored.
     """
 
     def _guard(request):
@@ -228,6 +234,9 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         return JSONResponse({"revisions": store.list_revisions(card_id)})
 
     async def delete_card(request):
+        """Soft delete (2026-07-19, recycle bin): moves the card into the bin,
+        doesn't touch its revisions/folders/bucket links. See restore_card /
+        list_trash / purge_card for the rest of the flow."""
         err = _guard(request)
         if err:
             return err
@@ -235,6 +244,47 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         if not store.delete_card(card_id):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"status": "deleted", "card_id": card_id})
+
+    async def restore_card(request):
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        if not store.restore_card(card_id):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"status": "restored", "card": store.get_card(card_id)})
+
+    async def list_trash(request):
+        err = _guard(request)
+        if err:
+            return err
+        return JSONResponse({"cards": store.list_trash_cards()})
+
+    async def purge_card(request):
+        """Real, irreversible deletion from the recycle bin -- distinct from
+        delete_card (soft). Requires {"confirm": "DELETE"} in the body, same
+        confirmation shape as /api/buckets/delete, so the Dashboard can reuse
+        one confirm dialog pattern for both. Cleans up attachment files (if
+        delete_attachments was wired in) before the card row goes -- this is
+        the only path that ever removes attachment files, since soft delete
+        leaves everything untouched for a possible restore."""
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        body = await _body(request)
+        if body.get("confirm") != "DELETE":
+            return JSONResponse({"error": "confirmation required"}, status_code=400)
+        card = store.get_card(card_id)
+        if not card:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if delete_attachments is not None:
+            try:
+                delete_attachments(card)
+            except Exception:
+                pass
+        store.purge_card(card_id)
+        return JSONResponse({"status": "purged", "card_id": card_id})
 
     # ---- folders -----------------------------------------------------
     async def create_folder(request):
@@ -435,6 +485,9 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None) -> None:
         ("/api/cards-skeleton/cards/{card_id}", ["GET"], get_card),
         ("/api/cards-skeleton/cards/{card_id}", ["PATCH"], edit_card),
         ("/api/cards-skeleton/cards/{card_id}", ["DELETE"], delete_card),
+        ("/api/cards-skeleton/cards/{card_id}/restore", ["POST"], restore_card),
+        ("/api/cards-skeleton/trash", ["GET"], list_trash),
+        ("/api/cards-skeleton/trash/cards/{card_id}", ["DELETE"], purge_card),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["POST"], add_revision),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["GET"], list_revisions),
         ("/api/cards-skeleton/cards/{card_id}/folders", ["GET"], card_folders),

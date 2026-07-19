@@ -44,12 +44,19 @@
 - **数据层 + HTTP 层 + MCP 层 + Dashboard UI**（①②③④步）：`cards_store.py`/`cards_api.py`（19 条 `/api/cards-skeleton/*` 路由）/`cards_mcp.py`，"时光馆"是 Dashboard 里唯一的事实卡入口（动态多栏馆浏览、卡片详情、创建/编辑/New Revision、馆归属管理）。
 - **给林湛的 MCP 工具**（`cards_mcp.py`，全部工具描述统一打了"【时光馆】"前缀方便他从一堆工具里认出这一批）：
   - 读：`card_lookup`（关键词/文件夹查卡）、`card_history`（一张卡完整时间线）、`folder_timeline`（一个范围内**全部卡的完整历史**交错成一条丝带，`folder` 留空 = 全部卡，50 条/页分页）、`folder_tree`（文件夹结构树，带卡数 + 收藏标记）、`card_buckets`（关联记忆桶详情）、`card_attachment_read`/`outline`/`view`（读附件文字/章节/看图，支持跨历史时间点用 `at=YYYY-MM-DD` 或直接按文件名找）。
-  - 写：`card_create`/`card_create_folder`/`card_add_to_folder`/`card_remove_from_folder`/`card_favorite`/`card_unfavorite`/`card_edit_title`/`card_edit_tags`/`card_edit_content`/`card_new_revision`/`card_link_bucket`/`card_unlink_bucket`/`card_merge_preview`/`card_merge`。**没有** `card_delete`（等回收站机制）和附件上传（MCP 传不了二进制）。
+  - 写：`card_create`/`card_create_folder`/`card_add_to_folder`/`card_remove_from_folder`/`card_favorite`/`card_unfavorite`/`card_edit_title`/`card_edit_tags`/`card_edit_content`/`card_new_revision`/`card_link_bucket`/`card_unlink_bucket`/`card_merge_preview`/`card_merge`/`card_delete`/`card_trash_list`/`card_restore`/`card_purge`（回收站，见下）。**没有**附件上传（MCP 传不了二进制）。
   - `_resolve_folder`（所有带 `folder` 参数的工具共用）认精确 id、馆名、**以及完整路径**（"一澜 / 收藏"，带不带空格都行）。
 - **收藏功能**（2026-07-18）：Dashboard 详情页两颗心（绿 = 林湛 / 蓝 = 一澜，点击切换，复用加/移文件夹接口）、浏览列表小心心（只显示真收藏了的）、林湛的 `card_favorite`/`card_unfavorite`、`folder_tree`。收藏馆固定排在同层级最上面。`ai_favorite`/Gateway 桥接**没做**——Gateway 还没搭，等搭好了单独立项，`identity.ai_name` 也还是默认值。
 - **"丝带"——`folder_timeline` 的 Dashboard 视图**（2026-07-18）：馆浏览列表每行旁边一个小图标点开弹窗，横向时间线——每个历史时间点一个独立的点（不是每张卡只留一个代表点），当前状态的点深色大、历史点浅色小，标题按可用宽度动态换行/必要时省略号，日期两行（年 / 月日）。桌面端 Ctrl/Cmd+滚轮缩放（＋/－按钮兜底）+ 拖拽/滚轮平移；手机端双指缩放 + 单指滑动平移。点某个点开对应卡片详情。16:9 横版弹窗，思源宋体，短时间线/空馆提示居中。全站滚动条顺手统一改成了细的浅绿色样式。
 - **附件能力**：`.docx`/`.pdf` 文字解析、图片查看（ChatGPT 连接器确认能渲染）、章节大纲解析 + 分页读取长文档、跨历史时间点/跨重名文件读取。图片/文件各自最多 10 个，类型加了 `.json`/`.py`。
 - **搜索性能修复**（跟事实卡关联的部分，主体在 `bucket_manager.py`）：内存缓存 + embedding 双通道检索，解决了 7000+ 记忆桶规模下搜索拖垮服务器的问题；Add Bucket 精确 ID/标题命中会跳过模糊搜索。这块不是这份文档的核心话题，但直接影响事实卡"关联记忆桶"功能能不能用，记一笔。
+- **回收站（2026-07-19，骨架层收尾项）**：覆盖两套存储，一澜和林湛都是软删+可恢复，对称权限。
+  - **卡（`cards.sqlite`）**：`cards` 表加 `deleted_at` 字段，软删只翻这一个字段，`card_revisions`/`card_folders`/`card_buckets` 全部原样不动——恢复是精确的，删卡**不影响它关联的记忆桶**（只在真删/`purge_card` 时才解绑关联行，从不碰记忆桶本体）。Dashboard 原来的硬删 `DELETE /cards/{id}` 改成走软删；新增 `POST .../restore`、`GET /trash`、`DELETE /trash/cards/{id}`（真删，附带清理这张卡全部历史里的附件文件）。林湛这边对应 `card_delete`/`card_trash_list`/`card_restore`/`card_purge`（真删需要 `confirm=true`）。保留期 30 天（`TRASH_RETENTION_DAYS`），由定时任务清理。
+  - **记忆桶（`.md` 文件）**：`BucketManager.delete()` 原来只留一个不含正文的 tombstone json、真文件直接删掉——改成把整个文件挪进 `.trash/` 目录（frontmatter 里打上 `deleted_at`，domain 子目录结构原样保留），`.tombstones/` 那份 json 照写不动（`sync_to_supabase.py` 读这个当"这个 id 没了"的信号，跟本地能不能恢复无关，两件事分开）。新增 `restore()`/`purge_from_trash()`/`list_trash()`。Dashboard 的批量删除 `/api/buckets/delete` 和林湛已有的 `trace(delete=True)` 都走同一个 `bucket_mgr.delete()`，改这一处两边全升级。新增 `bucket_restore`/`bucket_trash_list` 给林湛。
+  - **卡↔桶反向关联保护（顺手修的 bug）**：以前桶那边看不出自己被哪张事实卡关联着。`CardStore.find_cards_by_bucket()` 补上反向查询，`read_bucket`/Dashboard 桶详情页都显示"关联的事实卡"。删一个被关联的桶（Dashboard 批量删除、`trace(delete=True)`、画像事实删除）现在会先提示关联了哪张卡，需要二次确认（`force_linked`/`force=true`）才真删。
+  - **清理候选名单**：不做自动删除，只做"衰减引擎已经归档（沉底）+ 没有被任何事实卡关联 + 没钉选/保护"的桶的**只读**候选列表，一澜（Dashboard）和林湛（`bucket_cleanup_candidates`）都能看，挑了要删还是走正常删除流程进回收站。沉底阈值直接复用衰减引擎已有的归档判断，没有另外发明一个"权重低于多少"的数字——具体阈值她还没想好，等真用起来再调。
+  - **文件夹（folders）不在这次范围内**，`delete_folder` 保持硬删，按她的决定。
+  - Dashboard 加了一个"🗑 回收站"入口（时光馆工具栏 + 记忆桶列表工具栏共用同一个弹窗），里面卡/桶/清理候选三块分开列，各自能恢复或彻底删除，带"还剩几天自动清理"提示。
 
 ### 踩过、别再踩的坑
 
@@ -61,13 +68,12 @@
 
 ## 当前工作队列（按顺序）
 
-**骨架层这个项目本身，只差第 1 项（回收站）就收尾了**——下面 2/3 两项都是"等实际需要了再做"，不是排定的工作；4 是独立的下一个大功能，不算骨架层自己的收尾项。
+**骨架层这个项目本身已经收尾**——回收站（原第 1 项）2026-07-19 做完了（见上面"已经做完"里的详细记录）。下面 1/2 两项都是"等实际需要了再做"，不是排定的工作；3 是独立的下一个大功能。
 
-1. **👉 回收站（软删除 + 定时清理 + 恢复）——下一个要做的，也是最后一项**。林湛现在完全没有删除能力（`card_delete` 没做，是故意的），要给他删除权限但走回收站流程（一澜能看到、能恢复，超时才真删）。要覆盖两套存储：`cards.sqlite` 的卡 + 磁盘 `.md` 文件的记忆桶，工作量比前面几项都大。
-2. **不急，等实际碰到问题再做**：图片服务端压缩/缩略图、删除后孤儿文件清理。
-3. **更远期，看数据规模**：卡片语义检索（卡数量还很少）、真正的 ANN 向量索引（现在用不上）。
-4. **独立的下一个大功能**（等骨架层收尾后再开）：**"未来线/成就册"模块**，设计已定稿存档在 `docs/plans-achievements-plan.md`，完全没开工。
-5. **已经决定不做**：手写 `docs/Tool Guide.md`——MCP 工具的中文 docstring 本来就会自动下发给客户端，不需要额外维护一份；**事实卡不加重要性排序字段**（2026-07-18 一澜明确决定）；**实体图谱**（2026-07-18 一澜判断：事实卡本身就是手动归并好的"实体"，卡与卡之间没被连起来是设计出来的边界不是缺失，真要表达关系用馆/标签就够，不需要一层自动图谱——这个概念本来讨论的是记忆桶那层，不属于骨架层范围，从这份文档移除）。
+1. **不急，等实际碰到问题再做**：图片服务端压缩/缩略图；清理候选名单的"沉底阈值"目前直接借用衰减引擎的归档判断，等数据规模大了、真觉得不够用再单独调参数。
+2. **更远期，看数据规模**：卡片语义检索（卡数量还很少）、真正的 ANN 向量索引（现在用不上）。
+3. **独立的下一个大功能**（骨架层收尾后的下一个）：**"未来线/成就册"模块**，设计已定稿存档在 `docs/plans-achievements-plan.md`，完全没开工。
+4. **已经决定不做**：手写 `docs/Tool Guide.md`——MCP 工具的中文 docstring 本来就会自动下发给客户端，不需要额外维护一份；**事实卡不加重要性排序字段**（2026-07-18 一澜明确决定）；**实体图谱**（2026-07-18 一澜判断：事实卡本身就是手动归并好的"实体"，卡与卡之间没被连起来是设计出来的边界不是缺失，真要表达关系用馆/标签就够，不需要一层自动图谱——这个概念本来讨论的是记忆桶那层，不属于骨架层范围，从这份文档移除）；**文件夹纳入回收站**（2026-07-19 一澜决定这次不做，`delete_folder` 保持硬删）。
 
 ---
 

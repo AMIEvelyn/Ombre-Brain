@@ -73,16 +73,45 @@ def test_rename_does_not_split_timeline():
     assert s.get_current_revision(cid)["title"] == "个子"
 
 
-def test_delete_card_cascades():
+def test_delete_card_is_soft_and_restorable():
     s = _store()
     fid = s.create_folder("食物")
     cid = s.create_card(title="火锅", folder_ids=[fid])
     s.add_revision(cid, content="爱")
+    bid = "mem_abc123"
+    s.add_bucket_link(cid, bid)
+
     assert s.delete_card(cid)
+    assert s.delete_card(cid) is False           # already in the bin
+
+    card = s.get_card(cid)                       # still fully readable
+    assert card["deleted_at"]
+    assert len(card["history"]) == 2
+    assert [f["id"] for f in card["folders"]] == [fid]
+    assert [b["bucket_id"] for b in card["buckets"]] == [bid]
+
+    assert cid not in [c["id"] for c in s.all_cards()]           # hidden from normal listing
+    assert cid not in [c["id"] for c in s.list_cards_in_folder(fid)]
+    assert [c["id"] for c in s.list_trash_cards()] == [cid]
+
+    assert s.restore_card(cid)
+    assert s.restore_card(cid) is False           # not in the bin anymore
+    restored = s.get_card(cid)
+    assert restored["deleted_at"] == ""
+    assert cid in [c["id"] for c in s.all_cards()]
+    assert [b["bucket_id"] for b in restored["buckets"]] == [bid]   # bucket link untouched throughout
+
+
+def test_purge_card_cascades():
+    s = _store()
+    fid = s.create_folder("食物")
+    cid = s.create_card(title="火锅", folder_ids=[fid])
+    s.add_revision(cid, content="爱")
+    assert s.purge_card(cid)
     assert s.get_card(cid) is None
     assert s.list_revisions(cid) == []
     assert s.get_card_folders(cid) == []
-    assert s.delete_card(cid) is False           # already gone
+    assert s.purge_card(cid) is False           # already gone
 
 
 def test_folder_tree_and_descendants():
@@ -723,6 +752,26 @@ def test_favorite_folders_usable_like_any_other_folder():
     cid = s.create_card(title="婚戒", folder_ids=[FAVORITE_FOLDER_LIN_ZHAN])
     assert cid in {c["id"] for c in s.list_cards_in_folder(FAVORITE_FOLDER_LIN_ZHAN)}
     assert [f["id"] for f in s.get_card_favorite_folders(cid)] == [FAVORITE_FOLDER_LIN_ZHAN]
+
+
+def test_find_cards_by_bucket_is_reverse_of_get_bucket_links():
+    s = _store()
+    a = s.create_card(title="卡A")
+    b = s.create_card(title="卡B")
+    s.add_bucket_link(a, "shared_bucket")
+    s.add_bucket_link(b, "shared_bucket")
+    s.add_bucket_link(a, "only_a_bucket")
+
+    linked = {c["id"] for c in s.find_cards_by_bucket("shared_bucket")}
+    assert linked == {a, b}
+    assert [c["id"] for c in s.find_cards_by_bucket("only_a_bucket")] == [a]
+    assert s.find_cards_by_bucket("unlinked_bucket") == []
+    assert s.find_cards_by_bucket("") == []
+
+    # a card pending its own deletion shouldn't block deleting the bucket
+    # it's linked to
+    s.delete_card(a)
+    assert [c["id"] for c in s.find_cards_by_bucket("shared_bucket")] == [b]
 
 
 def _run_all():

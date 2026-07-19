@@ -2379,6 +2379,24 @@ async def _auto_generate_write_moment_if_needed(
     return await _auto_generate_moment_if_missing(content)
 
 
+def _bucket_linked_cards_brief(bucket_id: str) -> list[dict]:
+    """{id, title} for every fact card linked to this memory bucket
+    (2026-07-19, docs/facts-model-v2-collection-redesign.md §14 item 7 --
+    the bug Yi Lan found: a bucket had no way to show it was referenced by
+    a card, the link only showed up from the card's side). Backs the
+    Dashboard bucket detail view, read_bucket's MCP output, and the
+    protected-bucket-deletion confirmation check -- all three need the same
+    "which cards reference this" list, just rendered differently."""
+    try:
+        cards = card_store.find_cards_by_bucket(bucket_id)
+    except Exception:
+        return []
+    return [
+        {"id": c["id"], "title": str((c.get("current") or {}).get("title") or "(无标题)")}
+        for c in cards
+    ]
+
+
 def _bucket_read_payload(bucket: dict) -> dict:
     meta = bucket.get("metadata", {})
     metadata_view = normalize_memory_metadata(bucket)
@@ -2422,6 +2440,7 @@ def _bucket_read_payload(bucket: dict) -> dict:
         **metadata_view,
         "content": strip_wikilinks(bucket.get("content", "")),
         "score": decay_engine.calculate_score(meta),
+        "linked_cards": _bucket_linked_cards_brief(bucket["id"]),
     }
 
 
@@ -3505,7 +3524,7 @@ async def _refresh_bucket_embedding(bucket_id: str) -> bool:
     return await embedding_engine.generate_and_store(bucket_id, bucket_text_for_embedding(bucket))
 
 
-def _bucket_delete_skip_reason(bucket: dict) -> str:
+def _bucket_delete_skip_reason(bucket: dict, *, force_linked: bool = False) -> str:
     meta = bucket.get("metadata", {}) if isinstance(bucket, dict) else {}
     if meta.get("protected"):
         return "protected"
@@ -3515,6 +3534,13 @@ def _bucket_delete_skip_reason(bucket: dict) -> str:
         return "anchor"
     if meta.get("type") == "permanent":
         return "permanent"
+    if not force_linked and _bucket_linked_cards_brief(bucket.get("id", "")):
+        # 2026-07-19, §14 item 7: a bucket referenced by a fact card isn't
+        # permanently blocked (unlike protected/pinned/anchor/permanent
+        # above) -- it just needs one explicit confirmation. The caller
+        # re-submits the same bucket_id with force_linked=True once Yi Lan
+        # (or Lin Zhan, via trace's force=True) has seen which card(s).
+        return "linked_to_card"
     return ""
 
 
@@ -7979,6 +8005,39 @@ async def _select_resurface_buckets(
     return [bucket for _, bucket in candidates[:max_results]]
 
 
+async def _select_cleanup_candidate_buckets(max_results: int = 20) -> list[dict]:
+    """Buckets worth reviewing for deletion (2026-07-19, docs/facts-model-v2-
+    collection-redesign.md §14 item 8): already archived by the decay engine
+    (i.e. genuinely "沉底" -- reuses that existing threshold rather than
+    inventing a second one Yi Lan explicitly said she hasn't settled on),
+    not linked to any fact card (a linked bucket is evidence for something
+    still active in 时光馆, so it's excluded no matter how dormant), and not
+    pinned/protected/anchor/permanent/feel (same protections resurface
+    already respects).
+
+    This is a REVIEW list, not an auto-delete -- nothing here is touched
+    until Yi Lan or Lin Zhan explicitly picks one and calls the normal
+    delete path (Dashboard / trace(delete=True)), which moves it into the
+    same recycle bin as any other manual delete. Sorted most-dormant-first,
+    so the ones least likely to matter surface at the top."""
+    all_buckets = await bucket_mgr.list_all(include_archive=True)
+    candidates = []
+    for bucket in all_buckets:
+        meta = bucket.get("metadata", {})
+        if meta.get("type") != "archived":
+            continue
+        if is_self_anchor_bucket(bucket):
+            continue
+        if meta.get("pinned") or meta.get("protected") or meta.get("anchor"):
+            continue
+        if _bucket_linked_cards_brief(bucket.get("id", "")):
+            continue
+        dormant_days = _bucket_days_since_last_active(meta)
+        candidates.append((dormant_days, bucket))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [bucket for _, bucket in candidates[:max(1, min(100, int(max_results or 20)))]]
+
+
 # =============================================================
 # Tool 1.4: resurface — dormant memory resurfacing
 # 工具 1.4：resurface — 久未触碰记忆浮现
@@ -8032,7 +8091,9 @@ async def resurface(max_results: int = 1, include_archive: bool = True, max_toke
 # =============================================================
 @mcp.tool()
 async def read_bucket(bucket_id: str) -> dict:
-    """按 bucket_id 精确读取完整记忆桶；trace/comment 前先读。只读，不刷新活跃度。"""
+    """按 bucket_id 精确读取完整记忆桶；trace/comment 前先读。只读，不刷新活跃度。
+    返回里的 linked_cards 是关联着这个记忆桶的事实卡（时光馆）列表——如果非空，
+    删除这个桶前 trace(delete=True) 会要求先确认一次。"""
     bucket_id = _coerce_memory_id(bucket_id)
     if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
         return {"error": "invalid bucket_id"}
@@ -8918,8 +8979,10 @@ async def trace(
     content: str = "",
     date: str = "",
     delete: bool = False,
+    force: bool = False,
 ) -> str:
-    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
+    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。
+    delete=True 删除这个记忆桶（进回收站，30天内可恢复，见 bucket_restore）。如果这个桶关联着事实卡（时光馆），第一次调用（不传 force）只会提示关联了哪些卡、不会真的删；确定要删的话带上 force=true 再调用一次。"""
 
     bucket_id = _coerce_memory_id(bucket_id)
     if not bucket_id:
@@ -8927,9 +8990,14 @@ async def trace(
 
     # --- Delete mode / 删除模式 ---
     if delete:
+        if not force:
+            linked = _bucket_linked_cards_brief(bucket_id)
+            if linked:
+                titles = "、".join(f"《{c['title']}》" for c in linked)
+                return f"这个记忆桶关联着事实卡 {titles}，删除前需要确认。确定要删的话带上 force=true 再调用一次。"
         result = await _delete_bucket_and_indexes(bucket_id)
         return (
-            f"已遗忘记忆桶: {bucket_id}"
+            f"已放入回收站（30天内可用 bucket_restore 恢复）: {bucket_id}"
             if result.get("status") == "deleted"
             else f"未找到记忆桶: {bucket_id}"
         )
@@ -9008,6 +9076,67 @@ async def trace(
     if "anchor" in updates:
         changed += " → 已标为 anchor" if updates["anchor"] else " → 已取消 anchor"
     return f"已修改记忆桶 {bucket_id}: {changed}"
+
+
+# =============================================================
+# Tool 4.5: bucket_trash_list / bucket_restore — memory bucket recycle bin
+# 工具 4.5：bucket_trash_list / bucket_restore — 记忆桶回收站
+# 2026-07-19, docs/facts-model-v2-collection-redesign.md §14 item 7: both
+# Yi Lan and Lin Zhan get delete (trace(delete=True)) AND restore, symmetric
+# with the card recycle bin.
+# =============================================================
+@mcp.tool()
+async def bucket_trash_list() -> str:
+    """看看记忆桶回收站里现在有哪些（被 trace(delete=True) 删掉、还没到自动清理
+    时限的），每个带着还剩多少天会被彻底清理。想恢复用 bucket_restore。"""
+    trash = bucket_mgr.list_trash()
+    if not trash:
+        return "记忆桶回收站是空的。"
+    lines = [f"=== 记忆桶回收站（共 {len(trash)} 个）==="]
+    for b in trash:
+        name = str(b.get("name") or b["id"])
+        preview = str(b.get("content_preview") or "").strip()
+        body = f"：{preview[:60]}" if preview else ""
+        lines.append(f"- 【{name}】（id: {b['id']}），删除于 {str(b.get('deleted_at') or '')[:10]}{body}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def bucket_restore(bucket_id: str) -> str:
+    """把回收站里的一个记忆桶恢复回来——内容、类型、原本所在的主题域目录都是
+    删除前的原样。恢复后立刻能被正常搜到、读到。
+    bucket_id：回收站里那个桶的 id（用 bucket_trash_list 先看一眼）。"""
+    bucket_id = _coerce_memory_id(bucket_id)
+    if not bucket_id:
+        return "请提供有效的 bucket_id。"
+    restored = await bucket_mgr.restore(bucket_id)
+    if not restored:
+        return f"回收站里没找到 {bucket_id}（用 bucket_trash_list 确认一下 id）。"
+    _queue_embedding_refresh(bucket_id)
+    return f"已恢复记忆桶: {bucket_id}"
+
+
+@mcp.tool()
+async def bucket_cleanup_candidates(max_results: int = 20) -> str:
+    """看看有哪些记忆桶值得考虑删除——已经被衰减引擎归档（沉底）、没有关联任何
+    事实卡、也没被钉选/保护的桶，按沉寂天数从久到近排列。**这只是一份供参考
+    的候选名单，不会自动删除任何东西**：看完之后如果确实想删掉某个，还是要
+    自己用 trace(delete=True) 动手（会进回收站，30天内能反悔）。"""
+    try:
+        buckets = await _select_cleanup_candidate_buckets(max_results=max_results)
+    except Exception as e:
+        logger.error(f"Cleanup candidate listing failed / 清理候选名单生成失败: {e}")
+        return "候选名单暂时生成不了。"
+    if not buckets:
+        return "现在没有值得考虑删除的记忆桶（要么都还有关联，要么都没沉底够久）。"
+    lines = [f"=== 记忆桶清理候选名单（共 {len(buckets)} 个，仅供参考，不会自动删）==="]
+    for bucket in buckets:
+        meta = bucket.get("metadata", {})
+        dormant_days = _bucket_days_since_last_active(meta)
+        name = str(meta.get("name") or bucket.get("id"))
+        preview = _bucket_text_for_embedding(bucket).strip()[:80]
+        lines.append(f"- [bucket_id:{bucket['id']}] {name}（沉寂 {dormant_days:.0f} 天）：{preview}")
+    return "\n".join(lines)
 
 
 # =============================================================
@@ -10026,6 +10155,63 @@ def _facts_attachment_target_path(attachment: dict) -> str | None:
     return target
 
 
+def _delete_card_attachment_files(card: dict) -> None:
+    """Remove every attachment file across a card's whole history off disk
+    (2026-07-19, recycle bin's "delete forever" -- docs/facts-model-v2-
+    collection-redesign.md §14 item 1: purging a card can take its
+    attachments with it, unlike soft delete which leaves everything alone
+    for a possible restore). Best-effort per file -- one missing/unreadable
+    file doesn't stop the rest from being cleaned up, and the caller
+    (cards_api.purge_card / cards_mcp.card_purge) already purges the card
+    row regardless of whether this fully succeeds."""
+    seen_urls: set[str] = set()
+    for rev in card.get("history") or []:
+        for attachment in rev.get("attachments") or []:
+            url = str(attachment.get("url") or "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            target = _facts_attachment_target_path(attachment)
+            if target:
+                try:
+                    os.remove(target)
+                except OSError as e:
+                    logger.warning("Failed to delete card attachment file / 删除事实卡附件文件失败: %s: %s", target, e)
+
+
+async def _run_recycle_bin_purge(bucket_mgr_arg=None, card_store_arg=None) -> dict:
+    """Scheduled cleanup for both recycle bins (2026-07-19, docs/facts-model-
+    v2-collection-redesign.md §14 items 1/7): anything whose purge_at has
+    already passed gets permanently removed -- cards via CardStore.purge_card
+    (attachment files cleaned up first, same as the Dashboard/MCP "delete
+    forever" path), buckets via BucketManager.purge_from_trash. Restoring
+    before purge_at is always still possible; this only ever acts on entries
+    already past their window.
+
+    Accepts explicit bucket_mgr/card_store instances (for the scheduler
+    loop's own long-lived copies, same pattern as the other background loops
+    in this file) and falls back to the module-level globals otherwise, so
+    it's directly callable from a test or a one-off admin action too."""
+    bm = bucket_mgr_arg if bucket_mgr_arg is not None else bucket_mgr
+    cs = card_store_arg if card_store_arg is not None else card_store
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    cards_purged = 0
+    for card in cs.list_trash_cards():
+        if card.get("purge_at") and card["purge_at"] <= now:
+            _delete_card_attachment_files(card)
+            if cs.purge_card(card["id"]):
+                cards_purged += 1
+
+    buckets_purged = 0
+    for bucket in bm.list_trash():
+        if bucket.get("purge_at") and bucket["purge_at"] <= now:
+            if await bm.purge_from_trash(bucket["id"]):
+                buckets_purged += 1
+
+    return {"cards_purged": cards_purged, "buckets_purged": buckets_purged}
+
+
 def _facts_attachment_full_text(attachment: dict) -> str | None:
     """Extract an attachment's complete, untruncated text -- .txt/.md/.json/
     .py read directly, .docx via python-docx, .pdf via pypdf. None for
@@ -10867,6 +11053,12 @@ async def api_profile_fact_delete(request):
     meta = bucket.get("metadata", {}) if isinstance(bucket.get("metadata"), dict) else {}
     if meta.get("protected") or meta.get("pinned"):
         return JSONResponse({"error": "protected profile_fact cannot be deleted"}, status_code=403)
+    linked_cards = _bucket_linked_cards_brief(bucket_id)
+    if linked_cards and not _bool_value(body.get("force_linked"), False):
+        return JSONResponse(
+            {"error": "linked_to_card", "linked_cards": linked_cards},
+            status_code=409,
+        )
 
     result = await _delete_bucket_and_indexes(bucket_id)
     if result.get("status") != "deleted":
@@ -11249,6 +11441,7 @@ async def api_buckets_delete(request):
         return JSONResponse({"error": "json body must be an object"}, status_code=400)
     if body.get("confirm") != "DELETE":
         return JSONResponse({"error": "confirmation required"}, status_code=400)
+    force_linked = _bool_value(body.get("force_linked"), False)
 
     raw_ids = body.get("bucket_ids", [])
     if not isinstance(raw_ids, list) or not raw_ids:
@@ -11279,10 +11472,13 @@ async def api_buckets_delete(request):
             results.append({"id": bucket_id, "status": "not_found", "reason": "not_found"})
             continue
 
-        reason = _bucket_delete_skip_reason(bucket)
+        reason = _bucket_delete_skip_reason(bucket, force_linked=force_linked)
         if reason:
             summary["skipped"] += 1
-            results.append({"id": bucket_id, "status": "skipped", "reason": reason})
+            skip_result = {"id": bucket_id, "status": "skipped", "reason": reason}
+            if reason == "linked_to_card":
+                skip_result["linked_cards"] = _bucket_linked_cards_brief(bucket_id)
+            results.append(skip_result)
             continue
 
         result = await _delete_bucket_and_indexes(bucket_id)
@@ -11294,6 +11490,70 @@ async def api_buckets_delete(request):
         results.append(result)
 
     return JSONResponse({**summary, "results": results})
+
+
+@mcp.custom_route("/api/buckets/trash", methods=["GET"])
+async def api_buckets_trash(request):
+    """List everything currently in the memory bucket recycle bin (2026-07-19,
+    §14 item 7) -- same shape as bucket_trash_list's MCP tool, for the
+    Dashboard's 回收站 view."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    return JSONResponse({"buckets": bucket_mgr.list_trash()})
+
+
+@mcp.custom_route("/api/buckets/{bucket_id}/restore", methods=["POST"])
+async def api_bucket_restore(request):
+    """Undo a bucket delete -- moves it back from the bin, refreshes its
+    embedding (torn down at delete time)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    bucket_id = request.path_params["bucket_id"]
+    restored = await bucket_mgr.restore(bucket_id)
+    if not restored:
+        return JSONResponse({"error": "not found in trash"}, status_code=404)
+    _queue_embedding_refresh(bucket_id)
+    return JSONResponse({"status": "restored", "id": bucket_id})
+
+
+@mcp.custom_route("/api/buckets/trash/{bucket_id}", methods=["DELETE"])
+async def api_bucket_purge(request):
+    """Real, irreversible removal of a bucket already in the bin -- same
+    {"confirm": "DELETE"} shape as /api/buckets/delete."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict) or body.get("confirm") != "DELETE":
+        return JSONResponse({"error": "confirmation required"}, status_code=400)
+    bucket_id = request.path_params["bucket_id"]
+    purged = await bucket_mgr.purge_from_trash(bucket_id)
+    if not purged:
+        return JSONResponse({"error": "not found in trash"}, status_code=404)
+    return JSONResponse({"status": "purged", "id": bucket_id})
+
+
+@mcp.custom_route("/api/buckets/cleanup-candidates", methods=["GET"])
+async def api_buckets_cleanup_candidates(request):
+    """Review list of archived/unlinked/unprotected buckets worth considering
+    for deletion (2026-07-19, §14 item 8) -- same data as the
+    bucket_cleanup_candidates MCP tool, for the Dashboard. Never deletes
+    anything itself; picking one still goes through the normal delete flow."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    limit = _int_between(request.query_params.get("limit"), 20, 1, 100)
+    buckets = await _select_cleanup_candidate_buckets(max_results=limit)
+    return JSONResponse({"buckets": [_bucket_summary_payload(b) for b in buckets]})
 
 
 @mcp.custom_route("/api/bucket/{bucket_id}", methods=["GET"])
@@ -13477,7 +13737,11 @@ async def api_import_review(request):
 # this file barely changes. See docs/facts-model-v2-collection-redesign.md.
 import cards_api
 import cards_mcp
-cards_api.register_card_routes(mcp, card_store, _require_dashboard_auth, bucket_summary=_bucket_link_summary)
+cards_api.register_card_routes(
+    mcp, card_store, _require_dashboard_auth,
+    bucket_summary=_bucket_link_summary,
+    delete_attachments=_delete_card_attachment_files,
+)
 cards_mcp.register_card_tools(
     mcp, card_store,
     read_attachment_text=_facts_attachment_text,
@@ -13486,7 +13750,7 @@ cards_mcp.register_card_tools(
     attachment_outline=_facts_attachment_outline,
     bucket_summary=_bucket_link_summary,
 )
-cards_mcp.register_card_write_tools(mcp, card_store)
+cards_mcp.register_card_write_tools(mcp, card_store, delete_attachments=_delete_card_attachment_files)
 
 
 # --- Entry point / 启动入口 ---
@@ -13673,6 +13937,31 @@ if __name__ == "__main__":
         dt = threading.Thread(target=_start_dream_scheduler, daemon=True)
         dt.start()
         logger.info("Dream scheduler loop started / 夜梦定时器循环已启动")
+
+        async def _recycle_bin_purge_loop():
+            # 2026-07-19, docs/facts-model-v2-collection-redesign.md §14
+            # items 1/7: once-a-day is plenty against a 30-day retention
+            # window -- restoring anything before its purge_at always still
+            # works regardless of how often this checks.
+            await asyncio.sleep(45)
+            local_bucket_mgr = BucketManager(config)
+            local_card_store = CardStore(config)
+            while True:
+                try:
+                    result = await _run_recycle_bin_purge(local_bucket_mgr, local_card_store)
+                    if result.get("cards_purged") or result.get("buckets_purged"):
+                        logger.info("Recycle bin purge result / 回收站定时清理结果: %s", result)
+                except Exception as e:
+                    logger.warning("Recycle bin purge failed / 回收站定时清理失败: %s", e)
+                await asyncio.sleep(24 * 3600)
+
+        def _start_recycle_bin_purge_scheduler():
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_recycle_bin_purge_loop())
+
+        rbt = threading.Thread(target=_start_recycle_bin_purge_scheduler, daemon=True)
+        rbt.start()
+        logger.info("Recycle bin purge scheduler started / 回收站定时清理已启动")
 
         # --- Add CORS middleware so remote clients (Cloudflare Tunnel / ngrok) can connect ---
         # --- 添加 CORS 中间件，让远程客户端（Cloudflare Tunnel / ngrok）能正常连接 ---

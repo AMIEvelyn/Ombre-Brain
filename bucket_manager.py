@@ -33,7 +33,7 @@ import shutil
 import json
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +52,12 @@ from utils import (
 )
 
 logger = logging.getLogger("ombre_brain.bucket")
+
+
+# Recycle bin retention (2026-07-19) -- same window as the card recycle bin
+# (cards_store.TRASH_RETENTION_DAYS), kept as its own constant rather than a
+# shared import since bucket_manager.py stays dependency-free from cards_store.
+BUCKET_TRASH_RETENTION_DAYS = 30
 
 
 GENERIC_LEXICAL_STOPWORDS = {
@@ -149,6 +155,16 @@ class BucketManager:
         self.archive_dir = os.path.join(self.base_dir, "archive")
         self.feel_dir = os.path.join(self.base_dir, "feel")
         self.tombstone_dir = os.path.join(self.base_dir, ".tombstones")
+        # Recycle bin (2026-07-19, docs/facts-model-v2-collection-redesign.md
+        # §14 item 7): deleted buckets move here whole, under the same
+        # relative path they had under base_dir (e.g.
+        # "dynamic/情感/桶名_id.md"), so restore() is a straight move back
+        # and the domain subfolder is never lost. Distinct from
+        # tombstone_dir, which is untouched by this -- sync_to_supabase.py
+        # reads tombstone_dir as the authoritative "this id was deleted"
+        # signal and knows nothing about trash_dir; keeping that write
+        # exactly as before means the existing sync behavior doesn't change.
+        self.trash_dir = os.path.join(self.base_dir, ".trash")
         self.fuzzy_threshold = config.get("matching", {}).get("fuzzy_threshold", 50)
         self.max_results = config.get("matching", {}).get("max_results", 5)
 
@@ -643,8 +659,21 @@ class BucketManager:
     # ---------------------------------------------------------
     async def delete(self, bucket_id: str) -> bool:
         """
-        Delete a memory bucket file.
-        删除指定的记忆桶文件。
+        Soft delete (2026-07-19, recycle bin -- docs/facts-model-v2-
+        collection-redesign.md §14 item 7): moves the whole .md file into
+        trash_dir, under the same relative path it had under base_dir, with
+        deleted_at stamped into its own frontmatter -- full content
+        preserved, restore() is a straight move back within
+        BUCKET_TRASH_RETENTION_DAYS. The scheduled purge job (or an
+        explicit "delete forever") is what actually removes it later via
+        purge_from_trash.
+
+        Still writes the same tombstone_dir JSON as before, unchanged --
+        that's what sync_to_supabase.py reads as the authoritative "this id
+        is gone" signal, and it knows nothing about trash_dir, so this
+        keeps existing sync behavior identical regardless of whether the
+        bucket is still sitting in the local bin or fully purged.
+        删除指定的记忆桶文件（软删除，进回收站，保留完整内容）。
         """
         file_path = self._find_bucket_file(bucket_id)
         if not file_path:
@@ -652,15 +681,126 @@ class BucketManager:
 
         try:
             tombstone = self._build_tombstone(bucket_id, file_path)
-            os.remove(file_path)
+            rel_path = os.path.relpath(file_path, self.base_dir)
+            trash_path = safe_path(self.trash_dir, rel_path)
+            os.makedirs(os.path.dirname(trash_path), exist_ok=True)
+
+            post = frontmatter.load(file_path)
+            post["deleted_at"] = now_iso()
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(frontmatter.dumps(post))
+            shutil.move(file_path, trash_path)
+
             self._write_tombstone(tombstone)
         except OSError as e:
             logger.error(f"Failed to delete bucket file / 删除桶文件失败: {file_path}: {e}")
             return False
 
-        logger.info(f"Deleted bucket / 删除记忆桶: {bucket_id}")
+        logger.info(f"Deleted bucket / 删除记忆桶（进回收站）: {bucket_id}")
         self._invalidate_bucket_cache()
         return True
+
+    async def restore(self, bucket_id: str) -> bool:
+        """Undo delete(): move the file back from trash_dir to its original
+        relative path under base_dir, clear deleted_at, remove the
+        tombstone (the id is alive again, so "this id was deleted" is no
+        longer true). Returns False if nothing by this id is in the bin.
+        Does NOT refresh embedding/moment/edge/node indexes -- those were
+        torn down by _delete_bucket_indexes() at delete time; the caller
+        (server.py's bucket_restore tool) re-derives them the same way any
+        other content change does."""
+        file_path = self._find_trash_file(bucket_id)
+        if not file_path:
+            return False
+
+        try:
+            rel_path = os.path.relpath(file_path, self.trash_dir)
+            original_path = safe_path(self.base_dir, rel_path)
+            os.makedirs(os.path.dirname(original_path), exist_ok=True)
+
+            post = frontmatter.load(file_path)
+            post.metadata.pop("deleted_at", None)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(frontmatter.dumps(post))
+            shutil.move(file_path, original_path)
+
+            tombstone_file = safe_path(self.tombstone_dir, f"{bucket_id}.json")
+            if os.path.exists(tombstone_file):
+                os.remove(tombstone_file)
+        except OSError as e:
+            logger.error(f"Failed to restore bucket file / 恢复桶文件失败: {file_path}: {e}")
+            return False
+
+        logger.info(f"Restored bucket / 恢复记忆桶: {bucket_id}")
+        self._invalidate_bucket_cache()
+        return True
+
+    async def purge_from_trash(self, bucket_id: str) -> bool:
+        """Real, irreversible removal of a bucket already sitting in the
+        bin -- called by the scheduled purge job after
+        BUCKET_TRASH_RETENTION_DAYS, or an explicit "delete forever" from
+        the Dashboard. Does not touch tombstone_dir (already written at
+        delete() time, and stays -- the id was, and remains, deleted)."""
+        file_path = self._find_trash_file(bucket_id)
+        if not file_path:
+            return False
+        try:
+            os.remove(file_path)
+        except OSError as e:
+            logger.error(f"Failed to purge bucket file / 彻底删除桶文件失败: {file_path}: {e}")
+            return False
+        logger.info(f"Purged bucket from trash / 回收站中彻底删除记忆桶: {bucket_id}")
+        return True
+
+    def list_trash(self) -> list[dict]:
+        """Every bucket currently in the bin: {id, name, deleted_at,
+        purge_at, content_preview}. purge_at is when the scheduled purge job
+        will remove it for good, for the Dashboard's "N days left" display."""
+        out = []
+        if not os.path.exists(self.trash_dir):
+            return out
+        for root, _, files in os.walk(self.trash_dir):
+            for filename in files:
+                if not filename.endswith(".md"):
+                    continue
+                file_path = os.path.join(root, filename)
+                try:
+                    post = frontmatter.load(file_path)
+                except Exception:
+                    continue
+                deleted_at = str(post.get("deleted_at") or "")
+                out.append({
+                    "id": post.get("id", Path(file_path).stem),
+                    "name": post.get("name", Path(file_path).stem),
+                    "type": post.get("type", ""),
+                    "deleted_at": deleted_at,
+                    "purge_at": self._purge_at(deleted_at),
+                    "content_preview": str(post.content or "")[:200],
+                })
+        out.sort(key=lambda b: b["deleted_at"], reverse=True)
+        return out
+
+    @staticmethod
+    def _purge_at(deleted_at: str) -> str:
+        try:
+            deleted = datetime.fromisoformat(str(deleted_at))
+        except ValueError:
+            return ""
+        return (deleted + timedelta(days=BUCKET_TRASH_RETENTION_DAYS)).isoformat(timespec="seconds")
+
+    def _find_trash_file(self, bucket_id: str) -> Optional[str]:
+        """Same matching rule as _find_bucket_file (exact id segment in the
+        filename), scoped to trash_dir."""
+        if not bucket_id or not os.path.exists(self.trash_dir):
+            return None
+        for root, _, files in os.walk(self.trash_dir):
+            for fname in files:
+                if not fname.endswith(".md"):
+                    continue
+                name_part = fname[:-3]
+                if name_part == bucket_id or name_part.endswith(f"_{bucket_id}"):
+                    return os.path.join(root, fname)
+        return None
 
     def _build_tombstone(self, bucket_id: str, file_path: str) -> dict:
         deleted_at = now_iso()

@@ -45,8 +45,8 @@ def main():
         "card_edit_title", "card_edit_tags", "card_edit_content",
         "card_new_revision", "card_link_bucket", "card_unlink_bucket",
         "card_merge_preview", "card_merge",
+        "card_delete", "card_trash_list", "card_restore", "card_purge",
     }
-    assert "card_delete" not in mcp.tools  # deliberately scoped out, see docstring
     # 2026-07-17, second pass: card_add_content/card_delete_content are gone --
     # folded into card_edit_content, which now takes the whole content string
     # (same idea as card_new_revision) instead of a segment_id nothing could
@@ -265,6 +265,55 @@ def main():
     assert "没找到" in keep_missing
     print("PASS card_merge: keep must resolve to a real card")
 
+    # --- recycle bin: card_delete / card_trash_list / card_restore / card_purge ---
+    card_delete = mcp.tools["card_delete"]
+    card_trash_list = mcp.tools["card_trash_list"]
+    card_restore = mcp.tools["card_restore"]
+    card_purge = mcp.tools["card_purge"]
+
+    trash_card = store.create_card(title="待删除的卡", content="内容", author=AUTHOR_YI_LAN)
+    store.add_bucket_link(trash_card, "b_trash_evidence")
+
+    empty_trash = _run(card_trash_list())
+    assert "回收站是空的" in empty_trash
+    print("PASS card_trash_list: empty bin says so")
+
+    del_out = _run(card_delete(card="待删除的卡"))
+    assert "已放入回收站" in del_out and "30 天" in del_out
+    assert store.get_card(trash_card)["deleted_at"]
+    assert trash_card not in [c["id"] for c in store.all_cards()]  # hidden from normal listing
+    print("PASS card_delete: soft-deletes, doesn't touch bucket links")
+
+    not_found = _run(card_delete(card="不存在的卡"))
+    assert "没找到" in not_found
+    print("PASS card_delete: unknown card handled via _resolve_card")
+
+    list_out = _run(card_trash_list())
+    assert "待删除的卡" in list_out and trash_card in list_out
+    print("PASS card_trash_list: shows what's in the bin")
+
+    restore_out = _run(card_restore(card="待删除的卡"))
+    assert "已恢复" in restore_out
+    restored = store.get_card(trash_card)
+    assert restored["deleted_at"] == ""
+    assert [b["bucket_id"] for b in restored["buckets"]] == ["b_trash_evidence"]
+    print("PASS card_restore: undoes delete_card, bucket link intact")
+
+    restore_missing = _run(card_restore(card="待删除的卡"))
+    assert "回收站里没有" in restore_missing  # not in the bin anymore
+    print("PASS card_restore: card no longer in bin can't be re-restored via trash lookup")
+
+    _run(card_delete(card="待删除的卡"))
+    purge_preview = _run(card_purge(card="待删除的卡"))
+    assert "确定" in purge_preview and "confirm=true" in purge_preview
+    assert store.get_card(trash_card) is not None  # preview didn't actually delete
+    print("PASS card_purge: without confirm=True, only previews")
+
+    purge_out = _run(card_purge(card="待删除的卡", confirm=True))
+    assert "已彻底删除" in purge_out and "待删除的卡" in purge_out
+    assert store.get_card(trash_card) is None
+    print("PASS card_purge: confirm=True actually destroys it, message still shows the title")
+
     # --- missing-card resolution shared across all write tools ---
     for fn, kwargs in [
         (card_edit_title, {"card": "不存在的卡", "title": "x"}),
@@ -293,7 +342,9 @@ def real_fastmcp_registration_smoke_test():
     cards_mcp.register_card_write_tools(mcp, store)
     tools = _run(mcp.list_tools())
     names = {t.name for t in tools}
-    assert len(names) == 22, names  # 2026-07-18: +card_favorite, +card_unfavorite, +folder_tree (§14 item 5)
+    # 2026-07-18: +card_favorite, +card_unfavorite, +folder_tree (§14 item 5)
+    # 2026-07-19: +card_delete, +card_trash_list, +card_restore, +card_purge (recycle bin, §14 item 1)
+    assert len(names) == 26, names
     assert "card_create" in names and "card_lookup" in names
     assert "card_merge_preview" in names and "card_merge" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")
