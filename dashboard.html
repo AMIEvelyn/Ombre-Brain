@@ -2786,6 +2786,14 @@
     cursor: pointer;
     padding-top: 6px;
   }
+  .facts-timeline-edit-pencil {
+    margin-left: 6px;
+    opacity: .6;
+    cursor: pointer;
+  }
+  .facts-timeline-edit-pencil:hover { opacity: 1; }
+  .facts-rev-delete-btn { color: #c0392b !important; }
+  .facts-rev-delete-btn:hover { border-color: #c0392b !important; color: #c0392b !important; }
   .facts-modal-overlay {
     position: fixed;
     inset: 0;
@@ -3893,6 +3901,7 @@
     </div>
     <div class="facts-tags-row" id="cards-v2-edit-tags"></div>
     <div class="profile-proposal-form"><input type="text" id="cards-v2-edit-tag-input" placeholder="加个标签，回车确认" onkeydown="onCardsV2EditTagKeydown(event)" /><span></span><span></span></div>
+    <div class="profile-proposal-form"><input type="date" id="cards-v2-edit-valid-at" /><span></span><span></span></div>
     <div class="facts-attachment-toolbar">
       <button type="button" class="facts-attachment-add-btn" onclick="cardsV2ToggleAttachMenu('edit')">+ 添加图片/文件</button>
       <div id="cards-v2-edit-attach-menu" class="facts-attachment-menu" style="display:none">
@@ -3934,6 +3943,25 @@
     <input type="file" id="cards-v2-rev-file-input" accept=".pdf,.doc,.docx,.txt,.md,.json,.py" multiple style="display:none" onchange="cardsV2OnFileChosen('rev', this)" />
     <div class="profile-proposal-form"><span></span><span></span><button type="button" onclick="submitCardsV2Revision()">Save</button></div>
     <div class="profile-proposal-message" id="cards-v2-rev-message"></div>
+  </div>
+</div>
+
+<div id="cards-v2-rev-edit-overlay" class="facts-modal-overlay" style="display:none" onclick="if(event.target===this) closeCardsV2RevEditModal()">
+  <div class="facts-modal-panel">
+    <div class="facts-modal-header"><button type="button" class="facts-modal-back" onclick="closeCardsV2RevEditModal()">‹</button><span>编辑这个时间点</span></div>
+    <div class="profile-proposal-form"><input type="text" id="cards-v2-rev-edit-title" placeholder="标题" /><span></span><span></span></div>
+    <div class="profile-proposal-form">
+      <div class="facts-content-editor-row">
+        <textarea id="cards-v2-rev-edit-content" class="facts-content-editor" placeholder="内容"></textarea>
+        <div class="facts-content-editor-btn-row">
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2InsertMyTag('cards-v2-rev-edit-content')">+ 标记为我写的</button>
+          <button type="button" class="facts-tag-insert-btn" onclick="cardsV2PreviewContent('cards-v2-rev-edit-content')">预览</button>
+        </div>
+      </div>
+    </div>
+    <div class="profile-proposal-form"><input type="date" id="cards-v2-rev-edit-valid-at" /><span></span><span></span></div>
+    <div class="profile-proposal-form"><button type="button" class="facts-rev-delete-btn" onclick="deleteCardsV2Revision()">删除此时间点</button><span></span><button type="button" onclick="submitCardsV2RevEdit()">Save</button></div>
+    <div class="profile-proposal-message" id="cards-v2-rev-edit-message"></div>
   </div>
 </div>
 
@@ -9295,7 +9323,8 @@ function renderCardsV2Detail(){
       + hPhotos.map(function(a){ return '<a class="facts-attachment-thumb" href="' + esc(a.url) + '" target="_blank" rel="noopener"><img src="' + esc(a.url) + '" alt="' + esc(a.label||'') + '"></a>'; }).join('')
       + hFiles.map(function(a){ return '<a class="facts-attachment-thumb facts-attachment-thumb-file" href="' + esc(a.url) + '" target="_blank" rel="noopener" title="' + esc(a.label||'') + '"><span class="facts-attachment-file-icon">📄</span><span class="facts-attachment-file-name">' + esc(a.label||'文件') + '</span></a>'; }).join('')
       + '</div>' : '';
-    return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(cardsV2Date(hh.valid_at))
+    var pencil = open ? '<span class="facts-timeline-edit-pencil" onclick="event.stopPropagation(); openCardsV2RevEditModal(' + hh.id + ')" title="编辑这个时间点">✏️</span>' : '';
+    return '<div class="facts-timeline-row" onclick="cardsV2ToggleTimelineEntry(' + hh.id + ')"><span style="color:var(--accent);">●</span> ' + esc(cardsV2Date(hh.valid_at)) + pencil
       + '<div class="facts-timeline-entry-detail" style="display:' + (open?'':'none') + ';"><div><b>Name</b> ' + esc(hh.title || '') + '</div><div><b>Content</b> ' + esc(hh.content || '（无）') + '</div>' + hAttHtml + '</div></div>';
   }).join('');
   h += '<div class="facts-detail-timeline">' + (tl || '<div class="loading">没有时间线记录。</div>') + '</div>';
@@ -9736,6 +9765,7 @@ function openCardsV2EditModal(){
   cardsV2.editOrigContent = cur.content || '';
   document.getElementById('cards-v2-edit-title').value = cur.title || '';
   document.getElementById('cards-v2-edit-content').value = cur.content || '';
+  document.getElementById('cards-v2-edit-valid-at').value = (cur.valid_at || '').slice(0, 10);
   document.getElementById('cards-v2-edit-message').textContent = '';
   renderCardsV2Tags('edit'); cardsV2RenderThumbs('edit');
   var am = document.getElementById('cards-v2-edit-attach-menu'); if (am) am.style.display = 'none';
@@ -9752,6 +9782,7 @@ async function submitCardsV2Edit(force){
   // content_text is parsed server-side by "作者：" markers back into segments
   // (see parse_content_text) -- same free-text-editing flow as Create/Revision.
   if (newContent !== cardsV2.editOrigContent) body.content_text = newContent;
+  var editValidAt = document.getElementById('cards-v2-edit-valid-at').value; if (editValidAt) body.valid_at = editValidAt;
   if (force) body.force = true;
   try {
     var r = await fetch('/api/cards-skeleton/cards/' + cardsV2.editId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -9802,6 +9833,56 @@ async function submitCardsV2Revision(force){
     if (!r.ok) { if (msg) msg.textContent = '失败：' + (d.error || r.status); return; }
   } catch(e){ if (msg) msg.textContent = '失败：' + e; return; }
   closeCardsV2RevisionModal(); await openCardsV2Detail(cardsV2.revId); loadCardsV2();
+}
+// ---- edit/delete a single HISTORICAL timepoint in place (2026-07-19) --
+// distinct from Edit (which only ever touches the current timepoint) and
+// from New Revision (which adds one) -- opened via the pencil next to an
+// expanded timeline entry's date. Dashboard-only: no MCP equivalent for
+// delete, since that's Yi Lan's call alone.
+function openCardsV2RevEditModal(revisionId){
+  var card = cardsV2.detail; if (!card) return;
+  var rev = (card.history || []).filter(function(h){ return h.id === revisionId; })[0];
+  if (!rev) return;
+  cardsV2.revEditId = revisionId;
+  cardsV2.revEditOrigContent = rev.content || '';
+  document.getElementById('cards-v2-rev-edit-title').value = rev.title || '';
+  document.getElementById('cards-v2-rev-edit-content').value = rev.content || '';
+  document.getElementById('cards-v2-rev-edit-valid-at').value = (rev.valid_at || '').slice(0, 10);
+  document.getElementById('cards-v2-rev-edit-message').textContent = '';
+  document.getElementById('cards-v2-rev-edit-overlay').style.display = '';
+}
+function closeCardsV2RevEditModal(){ document.getElementById('cards-v2-rev-edit-overlay').style.display = 'none'; }
+async function submitCardsV2RevEdit(force){
+  var card = cardsV2.detail; if (!card) return;
+  var msg = document.getElementById('cards-v2-rev-edit-message');
+  var newContent = document.getElementById('cards-v2-rev-edit-content').value;
+  var body = { title: document.getElementById('cards-v2-rev-edit-title').value };
+  if (newContent !== cardsV2.revEditOrigContent) body.content_text = newContent;
+  var v = document.getElementById('cards-v2-rev-edit-valid-at').value; if (v) body.valid_at = v;
+  if (force) body.force = true;
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/' + card.id + '/revisions/' + cardsV2.revEditId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var d = await r.json().catch(function(){ return {}; });
+    if (r.status === 409 && d.error === 'ownership_conflict') {
+      var name = CARDS_V2_AUTHOR_NAME[d.author] || d.author;
+      var ok = confirm('你修改了' + name + '的内容：\n「' + d.text_preview + '」\n\n确定保存吗？');
+      if (ok) return submitCardsV2RevEdit(true);
+      return;
+    }
+    if (!r.ok) { if (msg) msg.textContent = '失败：' + (d.error || r.status); return; }
+  } catch(e){ if (msg) msg.textContent = '失败：' + e; return; }
+  closeCardsV2RevEditModal(); await cardsV2ReloadDetail();
+}
+async function deleteCardsV2Revision(){
+  var card = cardsV2.detail; if (!card) return;
+  if (!confirm('确定要删除这个时间点吗？删掉之后没法恢复。')) return;
+  var msg = document.getElementById('cards-v2-rev-edit-message');
+  try {
+    var r = await fetch('/api/cards-skeleton/cards/' + card.id + '/revisions/' + cardsV2.revEditId, { method:'DELETE' });
+    var d = await r.json().catch(function(){ return {}; });
+    if (!r.ok) { if (msg) msg.textContent = '失败：' + (d.error || r.status); return; }
+  } catch(e){ if (msg) msg.textContent = '失败：' + e; return; }
+  closeCardsV2RevEditModal(); await cardsV2ReloadDetail();
 }
 async function openCardsV2FoldersModal(){
   if (!cardsV2.detail) return;

@@ -582,44 +582,28 @@ class CardStore:
         conn.close()
         return rev_id
 
-    def edit_current(
+    def _apply_revision_edit(
         self,
         card_id: str,
+        current: dict,
         *,
-        title: str | None = None,
-        content: str | None = None,
-        content_segments: list[dict] | None = None,
-        tags: list[str] | None = None,
-        attachments: list[dict] | None = None,
-        author: str = AUTHOR_YI_LAN,
-        force: bool = False,
+        title: str | None,
+        content: str | None,
+        content_segments: list[dict] | None,
+        tags: list[str] | None,
+        attachments: list[dict] | None,
+        valid_at: str | None,
+        author: str,
+        force: bool,
     ) -> bool:
-        """Edit the current (latest) revision in place -- no new timepoint. Title
-        can be changed freely by either author (tags title_author to whoever
-        just changed it, but only if the title text actually differs from
-        what's there now -- an unchanged title passed along for the ride
-        never steals credit); identity is the card id, so renaming never
-        splits the timeline (that was the old title-as-identity bug).
-
-        content vs content_segments -- same two ways to say it as
-        add_revision: `content` is the convenience whole-string replace
-        (wraps into one segment credited to `author`); content_segments is
-        full control (e.g. from parse_content_text, for the Dashboard's
-        free-text content editor -- lets several segments, including ones
-        written by the other author, survive the same replace call).
-
-        Rule C (2026-07-17, second pass): freely *adding* content never
-        needs permission, but *losing* text the other author wrote does.
-        Checks whether the new segment list still contains every existing
-        foreign segment's exact text; if not and force isn't True, raises
-        SegmentOwnershipError instead of silently overwriting someone
-        else's words. Use add_content_segment to add your own text without
-        touching what's already there (never needs force)."""
-        card_id = self._resolve_id(card_id)
-        author = self._check_author(author)
-        current = self.get_current_revision(card_id)
-        if current is None:
-            return False
+        """Shared in-place UPDATE for one already-fetched revision row
+        (`current`, a _revision_row()-shaped dict) -- used by both
+        edit_current (current is the latest revision) and edit_revision
+        (current can be any historical one; see that method's docstring
+        for why the same Rule C applies regardless of which timepoint is
+        being touched). valid_at re-dates this exact timepoint (2026-07-19,
+        Yi Lan's request -- previously only create_card/add_revision could
+        set a date; in-place edits couldn't touch it at all)."""
         updates: dict[str, Any] = {}
         if title is not None:
             new_title = str(title)
@@ -641,6 +625,8 @@ class CardStore:
             updates["tags"] = self._dump(tags)
         if attachments is not None:
             updates["attachments"] = self._dump(attachments)
+        if valid_at is not None:
+            updates["valid_at"] = str(valid_at)
         if not updates:
             return False
         set_clause = ", ".join(f"{key} = ?" for key in updates)
@@ -654,6 +640,145 @@ class CardStore:
         conn.commit()
         conn.close()
         return True
+
+    def edit_current(
+        self,
+        card_id: str,
+        *,
+        title: str | None = None,
+        content: str | None = None,
+        content_segments: list[dict] | None = None,
+        tags: list[str] | None = None,
+        attachments: list[dict] | None = None,
+        valid_at: str | None = None,
+        author: str = AUTHOR_YI_LAN,
+        force: bool = False,
+    ) -> bool:
+        """Edit the current (latest) revision in place -- no new timepoint. Title
+        can be changed freely by either author (tags title_author to whoever
+        just changed it, but only if the title text actually differs from
+        what's there now -- an unchanged title passed along for the ride
+        never steals credit); identity is the card id, so renaming never
+        splits the timeline (that was the old title-as-identity bug).
+
+        content vs content_segments -- same two ways to say it as
+        add_revision: `content` is the convenience whole-string replace
+        (wraps into one segment credited to `author`); content_segments is
+        full control (e.g. from parse_content_text, for the Dashboard's
+        free-text content editor -- lets several segments, including ones
+        written by the other author, survive the same replace call).
+
+        valid_at (2026-07-19): optionally re-dates the current revision in
+        place, same as any other field here -- editing "now" doesn't have
+        to mean editing "today" too.
+
+        Rule C (2026-07-17, second pass): freely *adding* content never
+        needs permission, but *losing* text the other author wrote does.
+        Checks whether the new segment list still contains every existing
+        foreign segment's exact text; if not and force isn't True, raises
+        SegmentOwnershipError instead of silently overwriting someone
+        else's words. Use add_content_segment to add your own text without
+        touching what's already there (never needs force)."""
+        card_id = self._resolve_id(card_id)
+        author = self._check_author(author)
+        current = self.get_current_revision(card_id)
+        if current is None:
+            return False
+        return self._apply_revision_edit(
+            card_id, current,
+            title=title, content=content, content_segments=content_segments,
+            tags=tags, attachments=attachments, valid_at=valid_at,
+            author=author, force=force,
+        )
+
+    def edit_revision(
+        self,
+        card_id: str,
+        revision_id: int,
+        *,
+        title: str | None = None,
+        content: str | None = None,
+        content_segments: list[dict] | None = None,
+        tags: list[str] | None = None,
+        attachments: list[dict] | None = None,
+        valid_at: str | None = None,
+        author: str = AUTHOR_YI_LAN,
+        force: bool = False,
+    ) -> bool:
+        """Edit any ONE revision in place -- current or historical -- identified
+        by its own row id (the same "id" every entry in list_revisions()/
+        get_card()'s history already carries; this is Dashboard-internal,
+        not something exposed as a new concept to Lin Zhan -- his MCP
+        equivalent, card_edit_past_revision, resolves a timepoint by date
+        instead, same convention as card_attachment_read's `at` param).
+
+        2026-07-19, Yi Lan's request: editing was previously only possible
+        on the current (latest) revision -- a mistake typed into an older,
+        already-superseded timepoint had no way to be fixed short of living
+        with it forever. Same Rule C ownership check as edit_current
+        applies here regardless of which timepoint is being touched: a
+        historical revision's content_segments carry authorship exactly
+        like the current one's, so losing someone else's exact text still
+        needs force=True.
+
+        Editing valid_at can change which revision counts as "current" --
+        there's no separate stored flag, "current" has always just meant
+        "newest valid_at" (see get_current_revision) -- that's an
+        intentional, direct consequence, not a special case handled here.
+
+        Returns False if revision_id doesn't belong to this card at all
+        (after resolving merge redirects) or nothing was actually changed."""
+        card_id = self._resolve_id(card_id)
+        author = self._check_author(author)
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM card_revisions WHERE id = ? AND card_id = ?",
+            (int(revision_id), card_id),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return False
+        current = self._revision_row(row)
+        return self._apply_revision_edit(
+            card_id, current,
+            title=title, content=content, content_segments=content_segments,
+            tags=tags, attachments=attachments, valid_at=valid_at,
+            author=author, force=force,
+        )
+
+    def delete_revision(self, card_id: str, revision_id: int) -> bool:
+        """Remove ONE historical timepoint from a card's timeline entirely --
+        distinct from delete_card (the whole card, soft-delete into the
+        recycle bin) and purge_card (the whole card, for real). Yi Lan's
+        call (2026-07-19): Dashboard-only, no MCP equivalent -- undoing a
+        bad manual entry is her cleanup job, not a capability handed to
+        Lin Zhan.
+
+        Refuses to delete a card's only remaining revision -- a card must
+        always have at least one timepoint (get_current_revision/get_card
+        assume it); raises ValueError rather than silently leaving a
+        revision-less card behind. Delete the whole card via delete_card if
+        that's really what's wanted.
+
+        If the deleted revision happened to be the current (latest) one,
+        the next-newest simply becomes current -- there's no separate
+        stored "is_current" flag, so this falls out for free."""
+        card_id = self._resolve_id(card_id)
+        conn = self._connect()
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS c FROM card_revisions WHERE card_id = ?", (card_id,)
+        ).fetchone()
+        if count_row["c"] <= 1:
+            conn.close()
+            raise ValueError("这张卡只剩一个时间点了，不能再删——要整张卡都不要了的话用删除卡片。")
+        cursor = conn.execute(
+            "DELETE FROM card_revisions WHERE id = ? AND card_id = ?",
+            (int(revision_id), card_id),
+        )
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
 
     def set_title(self, card_id: str, title: str, *, author: str = AUTHOR_YI_LAN) -> bool:
         """Change just the current revision's title, in place, tagged to

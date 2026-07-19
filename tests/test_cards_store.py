@@ -789,6 +789,120 @@ def test_all_linked_bucket_ids_is_one_query_set_membership():
     assert s.all_linked_bucket_ids() == {"shared_bucket"}
 
 
+def test_edit_current_can_change_valid_at():
+    s = _store()
+    cid = s.create_card(title="卡", content="内容", valid_at="2026-01-01")
+    assert s.get_current_revision(cid)["valid_at"] == "2026-01-01"
+    assert s.edit_current(cid, valid_at="2026-02-15")
+    assert s.get_current_revision(cid)["valid_at"] == "2026-02-15"
+    # title/content untouched by a date-only edit
+    assert s.get_current_revision(cid)["title"] == "卡"
+
+
+def test_edit_revision_edits_a_historical_timepoint_in_place():
+    s = _store()
+    cid = s.create_card(title="标题1", content="内容1", valid_at="2026-01-01")
+    s.add_revision(cid, title="标题2", content="内容2", valid_at="2026-02-01")
+    history = s.list_revisions(cid)  # newest first
+    old_rev_id = history[1]["id"]
+    assert history[1]["title"] == "标题1"
+
+    assert s.edit_revision(cid, old_rev_id, title="改过的标题1", valid_at="2025-12-25")
+    history = s.list_revisions(cid)
+    old = next(r for r in history if r["id"] == old_rev_id)
+    assert old["title"] == "改过的标题1"
+    assert old["valid_at"] == "2025-12-25"
+    # the other (current) revision is untouched
+    current = next(r for r in history if r["id"] != old_rev_id)
+    assert current["title"] == "标题2"
+
+
+def test_edit_revision_moving_valid_at_past_current_changes_which_is_current():
+    # "current" has never been a stored flag -- just whichever revision has
+    # the newest valid_at -- so re-dating a historical timepoint forward
+    # past the current one directly changes which one is current.
+    s = _store()
+    cid = s.create_card(title="标题1", content="内容1", valid_at="2026-01-01")
+    s.add_revision(cid, title="标题2", content="内容2", valid_at="2026-02-01")
+    old_rev_id = next(r for r in s.list_revisions(cid) if r["title"] == "标题1")["id"]
+
+    s.edit_revision(cid, old_rev_id, valid_at="2026-03-01")
+    assert s.get_current_revision(cid)["title"] == "标题1"
+
+
+def test_edit_revision_rejects_id_from_a_different_card():
+    s = _store()
+    cid_a = s.create_card(title="卡A", content="内容A")
+    cid_b = s.create_card(title="卡B", content="内容B")
+    rev_id_a = s.get_current_revision(cid_a)["id"]
+    assert s.edit_revision(cid_b, rev_id_a, title="改坏了") is False
+    assert s.get_current_revision(cid_a)["title"] == "卡A"  # untouched
+
+
+def test_edit_revision_requires_force_to_lose_someone_elses_words():
+    s = _store()
+    cid = s.create_card(title="卡", content="一澜写的", author=AUTHOR_YI_LAN)
+    s.add_content_segment(cid, author=AUTHOR_LIN_ZHAN, text="林湛写的")
+    # force=True here just to snapshot forward to a new timepoint; the
+    # actual behavior under test is editing the OLD timepoint below.
+    s.add_revision(cid, content="第二个时间点", author=AUTHOR_YI_LAN, force=True)
+    old_rev_id = next(r for r in s.list_revisions(cid) if "第二个时间点" not in r["content"])["id"]
+
+    try:
+        s.edit_revision(cid, old_rev_id, content="覆盖掉的内容", author=AUTHOR_YI_LAN)
+        assert False, "should have raised SegmentOwnershipError"
+    except SegmentOwnershipError:
+        pass
+
+    assert s.edit_revision(cid, old_rev_id, content="覆盖掉的内容", author=AUTHOR_YI_LAN, force=True)
+    old = next(r for r in s.list_revisions(cid) if r["id"] == old_rev_id)
+    assert old["content"] == "一澜：覆盖掉的内容"
+
+
+def test_delete_revision_removes_one_historical_timepoint():
+    s = _store()
+    cid = s.create_card(title="标题1", content="内容1", valid_at="2026-01-01")
+    s.add_revision(cid, title="标题2", content="内容2", valid_at="2026-02-01")
+    s.add_revision(cid, title="标题3", content="内容3", valid_at="2026-03-01")
+    assert len(s.list_revisions(cid)) == 3
+
+    middle_id = next(r for r in s.list_revisions(cid) if r["title"] == "标题2")["id"]
+    assert s.delete_revision(cid, middle_id)
+    history = s.list_revisions(cid)
+    assert len(history) == 2
+    assert [r["title"] for r in history] == ["标题3", "标题1"]
+
+
+def test_delete_revision_of_current_promotes_next_newest():
+    s = _store()
+    cid = s.create_card(title="标题1", content="内容1", valid_at="2026-01-01")
+    s.add_revision(cid, title="标题2", content="内容2", valid_at="2026-02-01")
+    current_id = s.get_current_revision(cid)["id"]
+    assert s.get_current_revision(cid)["title"] == "标题2"
+
+    s.delete_revision(cid, current_id)
+    assert s.get_current_revision(cid)["title"] == "标题1"
+
+
+def test_delete_revision_refuses_to_delete_the_last_one():
+    s = _store()
+    cid = s.create_card(title="唯一时间点", content="内容")
+    only_id = s.get_current_revision(cid)["id"]
+    try:
+        s.delete_revision(cid, only_id)
+        assert False, "should have raised ValueError"
+    except ValueError:
+        pass
+    assert s.get_current_revision(cid) is not None  # untouched
+
+
+def test_delete_revision_unknown_id_returns_false():
+    s = _store()
+    cid = s.create_card(title="卡", content="内容")
+    s.add_revision(cid, content="第二个时间点")  # so there are 2, deletion is allowed in principle
+    assert s.delete_revision(cid, 999999) is False
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

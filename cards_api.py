@@ -169,6 +169,10 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None, delete_a
             # segments -- overrides a plain `content` if both were somehow sent.
             kwargs.pop("content", None)
             kwargs["content_segments"] = store.parse_content_text(str(body.get("content_text") or ""))
+        if body.get("valid_at"):
+            # 2026-07-19: editing in place can now re-date the current
+            # revision too, same as create/New Revision already could.
+            kwargs["valid_at"] = str(body["valid_at"]).strip()
         if not kwargs:
             return JSONResponse({"error": "nothing to edit"}, status_code=400)
         if "attachments" in kwargs:
@@ -232,6 +236,71 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None, delete_a
         if not store.get_card(card_id):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"revisions": store.list_revisions(card_id)})
+
+    async def edit_revision(request):
+        """Edit ONE historical (or current) timepoint in place by its own
+        revision id (2026-07-19, Yi Lan's request) -- distinct from
+        edit_card, which always targets the current revision. Same
+        content_text/force/SegmentOwnershipError handling as edit_card."""
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        try:
+            revision_id = int(request.path_params["revision_id"])
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "invalid revision_id"}, status_code=400)
+        if not store.get_card(card_id):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        body = await _body(request)
+        kwargs = {}
+        for key in ("title", "content", "tags", "attachments"):
+            if key in body:
+                kwargs[key] = body[key]
+        if "content_text" in body:
+            kwargs.pop("content", None)
+            kwargs["content_segments"] = store.parse_content_text(str(body.get("content_text") or ""))
+        if body.get("valid_at"):
+            kwargs["valid_at"] = str(body["valid_at"]).strip()
+        if not kwargs:
+            return JSONResponse({"error": "nothing to edit"}, status_code=400)
+        if "attachments" in kwargs:
+            count_err = _validate_attachment_count(kwargs["attachments"])
+            if count_err:
+                return JSONResponse({"error": count_err}, status_code=400)
+        force = bool(body.get("force"))
+        try:
+            edited = store.edit_revision(card_id, revision_id, author=AUTHOR_YI_LAN, force=force, **kwargs)
+        except SegmentOwnershipError as e:
+            return _ownership_conflict_response(e)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        if not edited:
+            return JSONResponse({"error": "revision not found"}, status_code=404)
+        return JSONResponse({"status": "edited", "card": store.get_card(card_id)})
+
+    async def delete_revision(request):
+        """Delete ONE historical timepoint entirely (2026-07-19, Yi Lan's
+        request) -- Dashboard-only, deliberately no MCP equivalent for Lin
+        Zhan (see cards_store.CardStore.delete_revision's docstring).
+        Refuses to delete a card's only remaining revision."""
+        err = _guard(request)
+        if err:
+            return err
+        card_id = str(request.path_params["card_id"])
+        try:
+            revision_id = int(request.path_params["revision_id"])
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "invalid revision_id"}, status_code=400)
+        if not store.get_card(card_id):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        try:
+            deleted = store.delete_revision(card_id, revision_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not deleted:
+            return JSONResponse({"error": "revision not found"}, status_code=404)
+        return JSONResponse({"status": "deleted", "card": store.get_card(card_id)})
 
     async def delete_card(request):
         """Soft delete (2026-07-19, recycle bin): moves the card into the bin,
@@ -490,6 +559,8 @@ def register_card_routes(mcp, store, require_auth, bucket_summary=None, delete_a
         ("/api/cards-skeleton/trash/cards/{card_id}", ["DELETE"], purge_card),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["POST"], add_revision),
         ("/api/cards-skeleton/cards/{card_id}/revisions", ["GET"], list_revisions),
+        ("/api/cards-skeleton/cards/{card_id}/revisions/{revision_id}", ["PATCH"], edit_revision),
+        ("/api/cards-skeleton/cards/{card_id}/revisions/{revision_id}", ["DELETE"], delete_revision),
         ("/api/cards-skeleton/cards/{card_id}/folders", ["GET"], card_folders),
         ("/api/cards-skeleton/cards/{card_id}/folders", ["POST"], add_card_folder),
         ("/api/cards-skeleton/cards/{card_id}/folders/{folder_id}", ["DELETE"], remove_card_folder),

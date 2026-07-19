@@ -234,6 +234,40 @@ def _resolve_folder(store, folder: str):
     return "", f"有多个文件夹匹配「{folder}」：{paths}。请说得更具体一点（可以用完整路径里的名字）。"
 
 
+def _revision_at(found: dict, at: str):
+    """Return (revision_dict, error_message). Empty `at` means the
+    current (latest) revision -- unchanged default behavior. A non-empty
+    `at` is a YYYY-MM-DD date, the same format card_history displays per
+    timepoint, matched against each historical revision's valid_at.
+
+    2026-07-17 (merge tool's attachment gap, found by Lin Zhan + Yi Lan
+    testing a real merge): every attachment tool used to only ever look
+    at `current`, so after merging two cards, the losing card's
+    attachments -- still fully intact on its own (now older) timepoint,
+    merge never touches revision content -- became unreachable through
+    any of these tools. `at` is how you reach them. Picking a date
+    (something a human reads straight off card_history) rather than an
+    internal revision id is the same call already made once before, for
+    the same reason: see why segment_id got removed entirely in favor of
+    whole-content editing (§14 item 3, Phase 3e).
+
+    Module-level (2026-07-19) rather than nested in register_card_tools --
+    register_card_write_tools' card_edit_past_revision needs the same
+    date-to-revision resolution and this never touched that closure's
+    state anyway, it's a pure function of (found, at)."""
+    if not at:
+        current = found.get("current")
+        if not current:
+            return None, "这张卡还没有任何时间点记录。"
+        return current, ""
+    at = at.strip()
+    matches = [h for h in (found.get("history") or []) if str(h.get("valid_at") or "")[:10] == at]
+    if not matches:
+        return None, f"没找到日期是 {at} 的时间点，用 card_history 看看这张卡有哪些日期。"
+    matches.sort(key=lambda h: h.get("id", 0), reverse=True)  # same day, several revisions -- newest of that day
+    return matches[0], ""
+
+
 def _fmt_merge_preview(preview: dict) -> str:
     a, b = preview["card_a"], preview["card_b"]
     lines = [
@@ -302,34 +336,6 @@ def register_card_tools(
     shape/contract as server.py's _bucket_link_summary (already passed to
     cards_api.register_card_routes) -- reused here rather than duplicated,
     powers card_buckets. None disables it with a clear message too."""
-
-    def _revision_at(found: dict, at: str):
-        """Return (revision_dict, error_message). Empty `at` means the
-        current (latest) revision -- unchanged default behavior. A non-empty
-        `at` is a YYYY-MM-DD date, the same format card_history displays per
-        timepoint, matched against each historical revision's valid_at.
-
-        2026-07-17 (merge tool's attachment gap, found by Lin Zhan + Yi Lan
-        testing a real merge): every attachment tool used to only ever look
-        at `current`, so after merging two cards, the losing card's
-        attachments -- still fully intact on its own (now older) timepoint,
-        merge never touches revision content -- became unreachable through
-        any of these tools. `at` is how you reach them. Picking a date
-        (something a human reads straight off card_history) rather than an
-        internal revision id is the same call already made once before, for
-        the same reason: see why segment_id got removed entirely in favor of
-        whole-content editing (§14 item 3, Phase 3e)."""
-        if not at:
-            current = found.get("current")
-            if not current:
-                return None, "这张卡还没有任何时间点记录。"
-            return current, ""
-        at = at.strip()
-        matches = [h for h in (found.get("history") or []) if str(h.get("valid_at") or "")[:10] == at]
-        if not matches:
-            return None, f"没找到日期是 {at} 的时间点，用 card_history 看看这张卡有哪些日期。"
-        matches.sort(key=lambda h: h.get("id", 0), reverse=True)  # same day, several revisions -- newest of that day
-        return matches[0], ""
 
     def _resolve_single_attachment(revision: dict, label: str):
         """Return (attachment_dict, error_message) for tools that need to
@@ -972,10 +978,12 @@ def register_card_write_tools(mcp, store) -> None:
         return "已取消收藏。" if removed else "这张卡本来就不在你的收藏里。"
 
     @mcp.tool()
-    async def card_edit_title(card: str = "", title: str = "") -> str:
+    async def card_edit_title(card: str = "", title: str = "", valid_at: str = "") -> str:
         """【时光馆】修改一张卡当前时间点的标题（原地修改，不产生新的时间点）。改了之后
         这个标题会记为你写的（不会在标题文字里加"湛："这种前缀，纯粹是后台
-        记录，一澜的界面上会用颜色区分）。card：卡片标题或id。"""
+        记录，一澜的界面上会用颜色区分）。card：卡片标题或id。
+        valid_at：可选，顺便把这个时间点的日期也改了（YYYY-MM-DD）——不传就
+        只改标题，日期不动。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
@@ -983,27 +991,33 @@ def register_card_write_tools(mcp, store) -> None:
         if not title:
             return "标题不能是空的。"
         store.set_title(found["id"], title, author=AUTHOR_LIN_ZHAN)
-        return f"标题已改成「{title}」。"
+        if valid_at.strip():
+            store.edit_current(found["id"], valid_at=valid_at.strip(), author=AUTHOR_LIN_ZHAN)
+        return f"标题已改成「{title}」。" + (f" 日期也改成了 {valid_at.strip()}。" if valid_at.strip() else "")
 
     @mcp.tool()
-    async def card_edit_tags(card: str = "", tags: list[str] | None = None) -> str:
+    async def card_edit_tags(card: str = "", tags: list[str] | None = None, valid_at: str = "") -> str:
         """【时光馆】整体替换一张卡当前时间点的标签列表——是替换成你传的这一份，不是追加。
-        card：卡片标题或id。tags：新的标签列表，传空列表就是清空标签。"""
+        card：卡片标题或id。tags：新的标签列表，传空列表就是清空标签。
+        valid_at：可选，顺便把这个时间点的日期也改了（YYYY-MM-DD）——不传就
+        只改标签，日期不动。"""
         found, err = _resolve_card(store, card)
         if err:
             return err
         if tags is None:
             return "请给一个标签列表（传空列表 [] 就是清空标签）。"
-        store.edit_current(found["id"], tags=tags, author=AUTHOR_LIN_ZHAN)
+        store.edit_current(found["id"], tags=tags, valid_at=(valid_at.strip() or None), author=AUTHOR_LIN_ZHAN)
         return f"标签已更新为：{'、'.join(tags) if tags else '（空）'}"
 
     @mcp.tool()
-    async def card_edit_content(card: str = "", content: str = "", force: bool = False) -> str:
+    async def card_edit_content(card: str = "", content: str = "", valid_at: str = "", force: bool = False) -> str:
         """【时光馆】整份替换这张卡当前时间点的内容（原地改，不产生新时间点——就跟改一份
         文档一样，不需要知道内容内部是怎么切分的）。
         content：传这张卡完整的新内容。可以保留一澜原有的"一澜："段落原样不动，
         只改自己那部分；也可以整段重写。带着"一澜：""林湛："标签的部分会被
         正确识别成对应的作者，没有标签的部分默认算你写的。
+        valid_at：可选，顺便把这个时间点的日期也改了（YYYY-MM-DD）——不传就
+        只改内容，日期不动。
         如果这次改动会让一澜写的某一段原文一个字都对不上了（哪怕只是被改了
         几个字、或者干脆整段没了），第一次调用（不传 force）会告诉你那段是
         什么、不会真的执行；确认要保存的话，带上 force=true 再调用一次。
@@ -1017,6 +1031,7 @@ def register_card_write_tools(mcp, store) -> None:
         try:
             store.edit_current(
                 found["id"], content_segments=_segments_from_text(content),
+                valid_at=(valid_at.strip() or None),
                 author=AUTHOR_LIN_ZHAN, force=force,
             )
         except SegmentOwnershipError as e:
@@ -1059,6 +1074,52 @@ def register_card_write_tools(mcp, store) -> None:
         except ValueError as e:
             return str(e)
         return f"已加新时间点：{_card_result(found['id'])}"
+
+    @mcp.tool()
+    async def card_edit_past_revision(
+        card: str = "", at: str = "", title: str = "", content: str = "", tags: list[str] | None = None,
+        valid_at: str = "", force: bool = False,
+    ) -> str:
+        """【时光馆】修改一张卡**某一个历史时间点**本身（原地改那个时间点，不是加新的、
+        也不是改当前状态）——比如发现之前记错了日期，或者某条历史记录标题/
+        内容打错了字，想直接改那一条，而不是当前状态。
+        card：卡片标题或id。at：要改哪个时间点，用 card_history 看到的日期
+        （YYYY-MM-DD）指定；同一天有多条时间点会挑最新的那条。
+        title/content/tags/valid_at：只传你想改的字段，不传的字段这个时间点
+        原样不动。content 是整段替换（跟 card_edit_content 一样，带"一澜："
+        "林湛："标签的部分会被正确识别，没标签的算你写的）。valid_at 可以
+        把这个时间点的日期改到别的日子——如果改到比"当前状态"那个时间点
+        还新，这个时间点就会变成新的"当前状态"（没有单独的"是不是当前"
+        标记，就是看哪个日期最新）。
+        改动会让一澜写的某段原文对不上时（这条规则跟 card_edit_content
+        一样），第一次调用（不传 force）只会告诉你冲突在哪，不会真的执行；
+        确认要保存的话带上 force=true 再调用一次。
+        想删掉某个时间点整个不要了，这个工具做不到——那是一澜在 Dashboard
+        才有的操作。"""
+        found, err = _resolve_card(store, card)
+        if err:
+            return err
+        revision, err = _revision_at(found, at)
+        if err:
+            return err
+        kwargs: dict = {}
+        if title:
+            kwargs["title"] = title
+        if content:
+            kwargs["content_segments"] = _segments_from_text(content)
+        if tags is not None:
+            kwargs["tags"] = tags
+        if valid_at:
+            kwargs["valid_at"] = valid_at
+        if not kwargs:
+            return "没有要改的字段——title/content/tags/valid_at 至少传一个。"
+        try:
+            edited = store.edit_revision(found["id"], revision["id"], author=AUTHOR_LIN_ZHAN, force=force, **kwargs)
+        except SegmentOwnershipError as e:
+            return f"你修改了一澜的内容：「{e.text_preview}」。确定要保存的话，带上 force=true 再调用一次。"
+        if not edited:
+            return "没有实际改动（传的值跟原来一样，或者没传任何字段）。"
+        return f"已修改 {str(revision.get('valid_at') or '')[:10]} 这个时间点：{_card_result(found['id'])}"
 
     @mcp.tool()
     async def card_link_bucket(card: str = "", bucket_id: str = "") -> str:

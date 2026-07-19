@@ -43,7 +43,7 @@ def main():
         "card_create", "card_create_folder", "card_add_to_folder", "card_remove_from_folder",
         "card_favorite", "card_unfavorite",
         "card_edit_title", "card_edit_tags", "card_edit_content",
-        "card_new_revision", "card_link_bucket", "card_unlink_bucket",
+        "card_new_revision", "card_edit_past_revision", "card_link_bucket", "card_unlink_bucket",
         "card_merge_preview", "card_merge",
         "card_delete", "card_trash_list", "card_restore",
     }
@@ -62,6 +62,7 @@ def main():
     card_edit_tags = mcp.tools["card_edit_tags"]
     card_edit_content = mcp.tools["card_edit_content"]
     card_new_revision = mcp.tools["card_new_revision"]
+    card_edit_past_revision = mcp.tools["card_edit_past_revision"]
     card_link_bucket = mcp.tools["card_link_bucket"]
     card_unlink_bucket = mcp.tools["card_unlink_bucket"]
 
@@ -133,14 +134,27 @@ def main():
     assert "湛：" not in cur["title"] and "澜：" not in cur["title"]  # no text prefix, metadata only
     print("PASS card_edit_title: no confirmation needed, no text prefix baked into title")
 
+    # --- card_edit_title: optional valid_at re-dates the same timepoint (2026-07-19) ---
+    title_date_out = _run(card_edit_title(card="ZhLanism 设定（改）", title="ZhLanism 设定（三改）", valid_at="2025-11-01"))
+    assert "标题已改成" in title_date_out and "日期也改成了 2025-11-01" in title_date_out
+    cur = store.get_current_revision(store.search_cards("ZhLanism 设定（三改）")[0]["id"])
+    assert str(cur["valid_at"])[:10] == "2025-11-01"
+    print("PASS card_edit_title: optional valid_at re-dates the current timepoint too")
+
     # --- card_edit_tags: whole-list replace ---
-    tags_out = _run(card_edit_tags(card="ZhLanism 设定（改）", tags=["设定", "世界观"]))
+    tags_out = _run(card_edit_tags(card="ZhLanism 设定（三改）", tags=["设定", "世界观"]))
     assert "设定" in tags_out and "世界观" in tags_out
-    cur = store.get_current_revision(store.search_cards("ZhLanism 设定（改）")[0]["id"])
+    cur = store.get_current_revision(store.search_cards("ZhLanism 设定（三改）")[0]["id"])
     assert cur["tags"] == ["设定", "世界观"]
-    empty_out = _run(card_edit_tags(card="ZhLanism 设定（改）", tags=[]))
+    empty_out = _run(card_edit_tags(card="ZhLanism 设定（三改）", tags=[]))
     assert "空" in empty_out
     print("PASS card_edit_tags: whole-list replace including clearing to empty")
+
+    # --- card_edit_tags: optional valid_at alongside a tag replace ---
+    _run(card_edit_tags(card="ZhLanism 设定（三改）", tags=["设定"], valid_at="2025-11-15"))
+    cur = store.get_current_revision(store.search_cards("ZhLanism 设定（三改）")[0]["id"])
+    assert cur["tags"] == ["设定"] and str(cur["valid_at"])[:10] == "2025-11-15"
+    print("PASS card_edit_tags: optional valid_at re-dates alongside the tag replace")
 
     # --- card_edit_content: whole-content, no segment_id involved (2026-07-17, second pass) ---
     yl_card = store.create_card(title="沟通方式", content="我希望吵架后能先冷静半小时", author=AUTHOR_YI_LAN)
@@ -185,6 +199,12 @@ def main():
     empty_out = _run(card_edit_content(card="沟通方式", content="   "))
     assert "内容不能是空的" in empty_out
     print("PASS card_edit_content: empty content rejected")
+
+    # --- card_edit_content: optional valid_at re-dates the current timepoint too ---
+    latest_shown = store.get_current_revision(yl_card)["content"]
+    _run(card_edit_content(card="沟通方式", content=latest_shown, valid_at="2025-10-05"))
+    assert str(store.get_current_revision(yl_card)["valid_at"])[:10] == "2025-10-05"
+    print("PASS card_edit_content: optional valid_at re-dates the current timepoint")
 
     # --- card_new_revision: content REPLACES, rule-C gated (2026-07-17, second pass) ---
     novel_card = store.create_card(title="慁", content="第一版内容", author=AUTHOR_YI_LAN)
@@ -233,6 +253,48 @@ def main():
     _run(card_new_revision(card="纯文字卡", content="没有标签的新内容", force=True))
     assert store.get_current_revision(plain_card)["content_segments"][0]["author"] == AUTHOR_LIN_ZHAN
     print("PASS card_new_revision: plain unlabeled content still defaults to Lin Zhan")
+
+    # --- card_edit_past_revision: editing a HISTORICAL timepoint in place, not the current one (2026-07-19) ---
+    past_card = store.create_card(title="历史修改测试", content="第一版", valid_at="2026-01-01", author=AUTHOR_YI_LAN)
+    store.add_revision(past_card, content="第二版", valid_at="2026-02-01", author=AUTHOR_LIN_ZHAN, force=True)
+
+    no_at_out = _run(card_edit_past_revision(card="不存在的卡", at="2026-01-01", title="x"))
+    assert "没找到" in no_at_out
+    print("PASS card_edit_past_revision: unknown card handled via _resolve_card")
+
+    bad_date_out = _run(card_edit_past_revision(card="历史修改测试", at="2020-01-01", title="x"))
+    assert "没找到" in bad_date_out or "没有" in bad_date_out
+    print("PASS card_edit_past_revision: unknown date rejected")
+
+    no_fields_out = _run(card_edit_past_revision(card="历史修改测试", at="2026-01-01"))
+    assert "没有要改的字段" in no_fields_out
+    print("PASS card_edit_past_revision: no fields passed is rejected")
+
+    edit_past_out = _run(card_edit_past_revision(
+        card="历史修改测试", at="2026-01-01", title="第一版（改过）", valid_at="2025-12-25",
+    ))
+    assert "已修改" in edit_past_out
+    revs = store.list_revisions(past_card)
+    old = next(r for r in revs if r["title"] == "第一版（改过）")
+    assert str(old["valid_at"])[:10] == "2025-12-25"
+    cur = store.get_current_revision(past_card)
+    assert cur["content"] == "林湛：第二版"  # the other (current) timepoint untouched
+    print("PASS card_edit_past_revision: edits title+date of the historical timepoint, current one untouched")
+
+    blocked_past = _run(card_edit_past_revision(card="历史修改测试", at="2026-02-01", content="覆盖掉一澜的第二版"))
+    # current revision's content is authored by lin_zhan in this fixture, so
+    # this specific edit doesn't conflict -- confirm it goes through instead
+    assert "已修改" in blocked_past
+    print("PASS card_edit_past_revision: editing the current-at-that-date revision's own content needs no force")
+
+    # a genuine Rule-C conflict on a historical timepoint is still gated
+    owned_card = store.create_card(title="历史所有权测试", content="一澜的原话", valid_at="2026-01-01", author=AUTHOR_YI_LAN)
+    store.add_revision(owned_card, content="第二个时间点", valid_at="2026-02-01", author=AUTHOR_YI_LAN, force=True)
+    conflict_out = _run(card_edit_past_revision(card="历史所有权测试", at="2026-01-01", content="改掉的话"))
+    assert "你修改了一澜的内容" in conflict_out and "一澜的原话" in conflict_out
+    forced_out = _run(card_edit_past_revision(card="历史所有权测试", at="2026-01-01", content="改掉的话", force=True))
+    assert "已修改" in forced_out
+    print("PASS card_edit_past_revision: Rule-C ownership conflict on a historical timepoint gated by force")
 
     # --- card_link_bucket / card_unlink_bucket ---
     link_out = _run(card_link_bucket(card="慁", bucket_id="b_evidence_1"))
@@ -333,7 +395,8 @@ def real_fastmcp_registration_smoke_test():
     # 2026-07-18: +card_favorite, +card_unfavorite, +folder_tree (§14 item 5)
     # 2026-07-19: +card_delete, +card_trash_list, +card_restore (recycle bin, §14 item 1)
     # -- no card_purge (Yi Lan's call: scheduled purge already cleans up unrestored cards)
-    assert len(names) == 25, names
+    # 2026-07-19: +card_edit_past_revision (edit a historical timepoint in place)
+    assert len(names) == 26, names
     assert "card_create" in names and "card_lookup" in names
     assert "card_merge_preview" in names and "card_merge" in names
     print(f"PASS real FastMCP registration smoke test ({len(tools)} read+write tools, no schema errors)")
