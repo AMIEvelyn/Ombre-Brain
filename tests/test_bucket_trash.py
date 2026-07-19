@@ -59,6 +59,20 @@ async def test_restore_brings_back_original_content_and_location(bucket_mgr):
 
 
 @pytest.mark.asyncio
+async def test_get_from_trash_reads_full_content_but_get_does_not(bucket_mgr):
+    bid = await bucket_mgr.create(content="回收站详情测试", tags=[], importance=5, domain=["测试"], name="详情")
+    await bucket_mgr.delete(bid)
+
+    assert await bucket_mgr.get(bid) is None  # normal get() can't see trash
+    trashed = await bucket_mgr.get_from_trash(bid)
+    assert trashed is not None
+    assert trashed["content"] == "回收站详情测试"
+    assert trashed["metadata"].get("importance") == 5
+
+    assert await bucket_mgr.get_from_trash("no_such_id") is None
+
+
+@pytest.mark.asyncio
 async def test_restore_nonexistent_returns_false(bucket_mgr):
     assert await bucket_mgr.restore("no_such_bucket_id") is False
 

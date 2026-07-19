@@ -9752,6 +9752,11 @@ async def api_buckets(request):
         return err
     try:
         all_buckets = await bucket_mgr.list_all(include_archive=True)
+        # 2026-07-19, §14 item 7 follow-up: one set-membership query up
+        # front instead of a find_cards_by_bucket() call per bucket below --
+        # this list can be 7000+ long, see docs §12's search-performance
+        # history for why an N+1 query here would be a real regression.
+        linked_bucket_ids = card_store.all_linked_bucket_ids()
         result = []
         for b in all_buckets:
             meta = b.get("metadata", {})
@@ -9786,6 +9791,7 @@ async def api_buckets(request):
                 "comment_count": meta.get("comment_count", 0),
                 "score": decay_engine.calculate_score(meta),
                 "content_preview": strip_wikilinks(b.get("content", ""))[:200],
+                "linked_to_card": b["id"] in linked_bucket_ids,
             })
         result.sort(key=lambda x: x["score"], reverse=True)
         return JSONResponse(result)
@@ -11558,13 +11564,18 @@ async def api_buckets_cleanup_candidates(request):
 
 @mcp.custom_route("/api/bucket/{bucket_id}", methods=["GET"])
 async def api_bucket_detail(request):
-    """Get full bucket content by ID."""
+    """Get full bucket content by ID. Falls back to the recycle bin
+    (2026-07-19, §14 item 1/7) if not found in normal storage, so the
+    回收站 Miller-column view can open a trashed bucket's row straight into
+    this same existing detail page instead of needing its own."""
     from starlette.responses import JSONResponse
     err = _require_dashboard_auth(request)
     if err:
         return err
     bucket_id = request.path_params["bucket_id"]
     bucket = await bucket_mgr.get(bucket_id)
+    if not bucket:
+        bucket = await bucket_mgr.get_from_trash(bucket_id)
     if not bucket:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(_bucket_read_payload(bucket))

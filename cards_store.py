@@ -1144,6 +1144,23 @@ class CardStore:
         conn.close()
         return [dict(row) for row in rows]
 
+    def all_linked_bucket_ids(self) -> set[str]:
+        """Every bucket_id linked to at least one non-deleted card, in one
+        query -- backs the main记忆桶 list's "🔗 关联着事实卡" icon (2026-07-19,
+        §14 item 7 follow-up). Deliberately a single set-membership query
+        rather than calling find_cards_by_bucket() once per bucket: that
+        list can be 7000+ buckets long (see docs §12's search-performance
+        history), and this needs to stay cheap regardless of scale."""
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT DISTINCT cb.bucket_id FROM card_buckets cb JOIN cards c ON c.id = cb.card_id
+            WHERE c.deleted_at = ''
+            """
+        ).fetchall()
+        conn.close()
+        return {row["bucket_id"] for row in rows}
+
     def find_cards_by_bucket(self, bucket_id: str) -> list[dict]:
         """Reverse of get_bucket_links (2026-07-19, docs/facts-model-v2-
         collection-redesign.md §14 item 7): every card this memory bucket is

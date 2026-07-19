@@ -700,6 +700,17 @@ class BucketManager:
         self._invalidate_bucket_cache()
         return True
 
+    async def get_from_trash(self, bucket_id: str) -> Optional[dict]:
+        """Read a bucket that's currently in the bin -- same shape as get(),
+        but scoped to trash_dir. Lets the existing bucket detail view
+        (api_bucket_detail / showDetail) work unchanged for a trashed
+        bucket too, instead of needing a separate detail UI just for
+        recycle-bin rows (2026-07-19, §14 item 1/7)."""
+        file_path = self._find_trash_file(bucket_id)
+        if not file_path:
+            return None
+        return self._load_bucket(file_path)
+
     async def restore(self, bucket_id: str) -> bool:
         """Undo delete(): move the file back from trash_dir to its original
         relative path under base_dir, clear deleted_at, remove the

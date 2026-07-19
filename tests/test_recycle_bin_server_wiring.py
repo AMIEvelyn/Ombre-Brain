@@ -177,6 +177,47 @@ async def test_bucket_trash_restore_purge_dashboard_endpoints(monkeypatch, bucke
 
 
 @pytest.mark.asyncio
+async def test_api_buckets_marks_linked_to_card_without_per_bucket_query(monkeypatch, bucket_mgr):
+    import server
+
+    store = _card_store()
+    monkeypatch.setattr(server, "bucket_mgr", bucket_mgr)
+    monkeypatch.setattr(server, "card_store", store)
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+
+    linked_id = await bucket_mgr.create(content="关联的桶", tags=[], importance=5, domain=["测试"], name="linked")
+    unlinked_id = await bucket_mgr.create(content="没关联的桶", tags=[], importance=5, domain=["测试"], name="unlinked")
+    cid = store.create_card(title="引用它的卡")
+    store.add_bucket_link(cid, linked_id)
+
+    resp = await server.api_buckets(DummyRequest())
+    body = json.loads(resp.body)
+    by_id = {b["id"]: b for b in body}
+    assert by_id[linked_id]["linked_to_card"] is True
+    assert by_id[unlinked_id]["linked_to_card"] is False
+
+
+@pytest.mark.asyncio
+async def test_api_bucket_detail_falls_back_to_trash(monkeypatch, bucket_mgr):
+    import server
+
+    monkeypatch.setattr(server, "bucket_mgr", bucket_mgr)
+    monkeypatch.setattr(server, "card_store", _card_store())
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+
+    bid = await bucket_mgr.create(content="回收站详情页测试", tags=[], importance=5, domain=["测试"], name="详情页")
+    await bucket_mgr.delete(bid)
+
+    resp = await server.api_bucket_detail(DummyRequest(path_params={"bucket_id": bid}))
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["content"] == "回收站详情页测试"
+
+    resp2 = await server.api_bucket_detail(DummyRequest(path_params={"bucket_id": "no_such_id"}))
+    assert resp2.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_scheduled_purge_only_removes_entries_past_their_window(monkeypatch, bucket_mgr):
     import server
 

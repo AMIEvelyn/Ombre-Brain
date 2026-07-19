@@ -774,6 +774,21 @@ def test_find_cards_by_bucket_is_reverse_of_get_bucket_links():
     assert [c["id"] for c in s.find_cards_by_bucket("shared_bucket")] == [b]
 
 
+def test_all_linked_bucket_ids_is_one_query_set_membership():
+    s = _store()
+    a = s.create_card(title="卡A")
+    b = s.create_card(title="卡B")
+    s.add_bucket_link(a, "shared_bucket")
+    s.add_bucket_link(b, "shared_bucket")
+    s.add_bucket_link(a, "only_a_bucket")
+
+    assert s.all_linked_bucket_ids() == {"shared_bucket", "only_a_bucket"}
+
+    # a card pending its own deletion doesn't keep its buckets "linked"
+    s.delete_card(a)
+    assert s.all_linked_bucket_ids() == {"shared_bucket"}
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
