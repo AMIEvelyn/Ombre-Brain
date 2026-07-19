@@ -2456,6 +2456,7 @@ def _bucket_summary_payload(bucket: dict) -> dict:
         "metadata_view": metadata_view,
         **metadata_view,
         "importance": meta.get("importance", 5),
+        "date": meta.get("date"),
         "valence": meta.get("valence", 0.5),
         "arousal": meta.get("arousal", 0.5),
         "confidence": meta.get("confidence", 0.5),

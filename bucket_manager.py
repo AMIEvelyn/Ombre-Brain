@@ -764,9 +764,12 @@ class BucketManager:
         return True
 
     def list_trash(self) -> list[dict]:
-        """Every bucket currently in the bin: {id, name, deleted_at,
-        purge_at, content_preview}. purge_at is when the scheduled purge job
-        will remove it for good, for the Dashboard's "N days left" display."""
+        """Every bucket currently in the bin: {id, name, type, importance,
+        date, deleted_at, purge_at, content_preview}. purge_at is when the
+        scheduled purge job will remove it for good, for the Dashboard's
+        "N days left" display. importance/date are the same metadata fields
+        shown everywhere else a bucket is listed (2026-07-19, Yi Lan's UI
+        request for the recycle bin's list rows)."""
         out = []
         if not os.path.exists(self.trash_dir):
             return out
@@ -784,6 +787,8 @@ class BucketManager:
                     "id": post.get("id", Path(file_path).stem),
                     "name": post.get("name", Path(file_path).stem),
                     "type": post.get("type", ""),
+                    "importance": post.get("importance", 5),
+                    "date": post.get("date"),
                     "deleted_at": deleted_at,
                     "purge_at": self._purge_at(deleted_at),
                     "content_preview": str(post.content or "")[:200],

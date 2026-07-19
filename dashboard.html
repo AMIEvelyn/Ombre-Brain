@@ -283,7 +283,7 @@
     border-color: rgba(139, 74, 74, 0.58);
   }
   .bucket-tools .bulk-hidden { display: none; }
-  .bucket-linked-icon { font-size: 12px; margin-left: 4px; opacity: 0.75; }
+  .bucket-row .name.linked-to-card, .bucket-row .score.linked-to-card { color: var(--negative); }
     .bucket-tools .flag-btn {
       background: linear-gradient(145deg, var(--accent-light), var(--accent));
       color: #F0EDE4;
@@ -2453,6 +2453,27 @@
   .cards-v2-item:hover .cards-v2-ribbon-btn { opacity: 0.5; }
   .cards-v2-ribbon-btn:hover { opacity: 1 !important; color: var(--accent); }
 
+  /* 回收站 (recycle bin) row actions ONLY -- 2026-07-19, her explicit call:
+     restore/delete stacked (not side-by-side), bigger, restore always
+     visible (not hover-gated like 时光馆's icons), delete in red. Scoped to
+     #recycle-bin-nav so 时光馆's cards-v2-ribbon-btn/cards-v2-del (hover-
+     only, unchanged) are never touched. */
+  #recycle-bin-nav .rb-actions {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  #recycle-bin-nav .rb-icon {
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity .15s;
+  }
+  #recycle-bin-nav .rb-icon:hover { opacity: 0.7; }
+  #recycle-bin-nav .rb-icon.rb-restore { color: var(--accent); }
+  #recycle-bin-nav .rb-icon.rb-delete { color: var(--negative); }
+
   /* 丝带 (folder ribbon timeline), 2026-07-18 -- §14 item 6 */
   .cards-v2-ribbon-card {
     position: relative;
@@ -3394,6 +3415,7 @@
 <div class="content" id="list-view">
   <div class="filters" id="filters"></div>
   <div class="bucket-tools" id="bucket-bulk-toolbar">
+    <button type="button" onclick="loadBuckets()">刷新</button>
     <button type="button" id="bucket-bulk-toggle" onclick="toggleBucketBulkMode()">批量选择</button>
     <button type="button" class="bulk-hidden" data-bulk-action="select-current" onclick="selectCurrentBuckets()">全选当前筛选</button>
     <button type="button" class="bulk-hidden" data-bulk-action="clear" onclick="clearBucketSelection()">清空</button>
@@ -4543,6 +4565,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('upstream-config-view').style.display = target === 'upstream-config' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     document.getElementById('recycle-bin-view').style.display = target === 'recycle-bin' ? '' : 'none';
+    if (target === 'list') loadBuckets();
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
@@ -6429,7 +6452,8 @@ function renderBuckets(buckets) {
     var domainLabel = [bucketCanonicalDomain(b), bucketKind(b), bucketStatusView(b)].filter(Boolean).join(' · ');
     var legacyLabel = bucketLegacyDomain(b).join(', ');
     var blockReason = bucketBulkDeleteBlockReason(b);
-    var linkedIcon = b.linked_to_card ? '<span class="bucket-linked-icon" title="关联着事实卡（时光馆）">🔗</span>' : '';
+    var linkedClass = b.linked_to_card ? ' linked-to-card' : '';
+    var linkedTitle = b.linked_to_card ? '关联着事实卡（时光馆）· ' : '';
     var checked = selectedBucketIds.has(id);
     var rowClass = 'bucket-row' + (bucketBulkMode ? ' bulk' : '') + (checked ? ' selected' : '');
     var rowClick = bucketBulkMode ? 'toggleBucketSelection(\'' + jsString(id) + '\')' : 'showDetail(\'' + jsString(id) + '\')';
@@ -6441,10 +6465,10 @@ function renderBuckets(buckets) {
     return '<div class="' + rowClass + '" onclick="' + rowClick + '">' +
       selectHtml +
       '<span class="icon">' + icon + '</span>' +
-      '<span class="name" title="' + esc(b.name) + '">' + esc(b.name) + '</span>' + linkedIcon +
+      '<span class="name' + linkedClass + '" title="' + linkedTitle + esc(b.name) + '">' + esc(b.name) + '</span>' +
       '<span class="domain" title="legacy: ' + escAttr(legacyLabel || '—') + '">' + esc(domainLabel || legacyLabel || '—') + '</span>' +
       '<span class="emotion"><span class="v-bar"><span class="v-dot" style="left:' + vPos + '%"></span></span>' + modelV + '</span>' +
-      '<span class="score">' + b.score.toFixed(2) + '</span>' +
+      '<span class="score' + linkedClass + '">' + b.score.toFixed(2) + '</span>' +
       '<span class="time">' + esc(timeAgo) + '</span>' +
       '<span class="preview">' + esc(b.content_preview) + '</span>' +
       '<span class="row-flag" onclick="event.stopPropagation()">' +
@@ -9467,62 +9491,97 @@ async function recycleBinDrillSub(subId){
   renderRecycleBinNav();
 }
 
+function recycleBinActionsHtml(restoreOnclick, deleteOnclick, deleteTitle){
+  // Scoped to #recycle-bin-nav only (rb-* classes, not shared with 时光馆's
+  // cards-v2-ribbon-btn/cards-v2-del) -- stacked, always-visible, larger,
+  // delete in red, per her explicit "只在回收站改，时光馆保持原样" call.
+  var restoreHtml = restoreOnclick
+    ? '<span class="rb-icon rb-restore" title="恢复" onclick="event.stopPropagation();' + restoreOnclick + '">↻</span>'
+    : '';
+  return '<div class="facts-nav-row-right rb-actions">' + restoreHtml +
+    '<span class="rb-icon rb-delete" title="' + escAttr(deleteTitle) + '" onclick="event.stopPropagation();' + deleteOnclick + '">🗑</span>' +
+  '</div>';
+}
+
 function renderRecycleBinItems(items){
   if (!items.length) return '<div class="loading" style="font-size:13px;">这里是空的。</div>';
   if (recycleBin.top === 'cards') {
     return items.map(function(c){
       var title = (c.current && c.current.title) || '(无标题)';
+      var lastChanged = (c.current && c.current.valid_at) ? String(c.current.valid_at).slice(0, 10) : '未知';
+      var info = 'id：' + esc(c.id) + '<br>最新变动于：' + esc(lastChanged) + '<br>' + esc(recycleBinDaysLeft(c.purge_at));
       return '<div class="facts-nav-row" onclick="openCardsV2Detail(\'' + jsString(c.id) + '\')"><div><b>' + esc(title) + '</b>'
-        + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(c.id) + '<br>' + esc(recycleBinDaysLeft(c.purge_at)) + '</div></div>'
-        + '<div class="facts-nav-row-right">'
-        + '<span class="cards-v2-ribbon-btn" title="恢复" onclick="event.stopPropagation();recycleBinRestoreCard(\'' + jsString(c.id) + '\')">↻</span>'
-        + '<span class="cards-v2-del" style="opacity:0.6;" title="彻底删除" onclick="event.stopPropagation();recycleBinPurgeCard(\'' + jsString(c.id) + '\', \'' + jsString(title) + '\')">🗑</span>'
-        + '</div></div>';
+        + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + info + '</div></div>'
+        + recycleBinActionsHtml(
+            'recycleBinRestoreCard(\'' + jsString(c.id) + '\')',
+            'recycleBinPurgeCard(\'' + jsString(c.id) + '\', \'' + jsString(title) + '\')',
+            '彻底删除'
+          )
+        + '</div>';
     }).join('');
   }
   var isTrash = recycleBin.sub === 'trash';
   return items.map(function(b){
     var name = (b.metadata && b.metadata.name) || b.name || b.id;
+    var date = (b.metadata && b.metadata.date) || b.date || '未知';
+    var importance = (b.metadata && b.metadata.importance != null) ? b.metadata.importance : (b.importance != null ? b.importance : '—');
     var statusText = isTrash ? recycleBinDaysLeft(b.purge_at) : '沉底中，未关联事实卡';
+    var info = 'id：' + esc(b.id) + '<br>date：' + esc(date) + '<br>权重：' + esc(importance) + '<br>' + esc(statusText);
     var actions = isTrash
-      ? ('<span class="cards-v2-ribbon-btn" title="恢复" onclick="event.stopPropagation();recycleBinRestoreBucket(\'' + jsString(b.id) + '\')">↻</span>'
-         + '<span class="cards-v2-del" style="opacity:0.6;" title="彻底删除" onclick="event.stopPropagation();recycleBinPurgeBucket(\'' + jsString(b.id) + '\', \'' + jsString(name) + '\')">🗑</span>')
-      : ('<span class="cards-v2-del" style="opacity:0.6;" title="放入回收站" onclick="event.stopPropagation();recycleBinDeleteCandidate(\'' + jsString(b.id) + '\', \'' + jsString(name) + '\')">🗑</span>');
+      ? recycleBinActionsHtml(
+          'recycleBinRestoreBucket(\'' + jsString(b.id) + '\')',
+          'recycleBinPurgeBucket(\'' + jsString(b.id) + '\', \'' + jsString(name) + '\')',
+          '彻底删除'
+        )
+      : recycleBinActionsHtml(
+          '',
+          'recycleBinDeleteCandidate(\'' + jsString(b.id) + '\', \'' + jsString(name) + '\')',
+          '放入回收站'
+        );
     return '<div class="facts-nav-row" onclick="showDetail(\'' + jsString(b.id) + '\')"><div><b>' + esc(name) + '</b>'
-      + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">id：' + esc(b.id) + '<br>' + esc(statusText) + '</div></div>'
-      + '<div class="facts-nav-row-right">' + actions + '</div></div>';
+      + '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + info + '</div></div>'
+      + actions + '</div>';
   }).join('');
 }
 
 function renderRecycleBinNav(){
   var c = document.getElementById('recycle-bin-nav'); if (!c) return;
-  var N = 3;
-  var col0Color = cardsV2ColColor(0, N), col1Color = cardsV2ColColor(1, N), col2Color = cardsV2ColColor(2, N);
+  // 事实卡 has no 候选/已入站 choice (only one option), so her call is to
+  // skip that middle column entirely and go straight from col 1 to the
+  // list -- only 记忆桶 shows all 3 columns.
+  var showSubColumn = recycleBin.top !== 'cards';
+  var N = showSubColumn ? 3 : 2;
+  var col0Color = cardsV2ColColor(0, N), col1Color = cardsV2ColColor(1, N);
+  var lastColColor = cardsV2ColColor(N - 1, N);
   var subs = recycleBinSubOptions(recycleBin.top);
   var key = recycleBin.top + ':' + recycleBin.sub;
   var items = recycleBin.lists[key] || [];
 
   var col0 = recycleBinTopOptions().map(function(t){
     var active = t.id === recycleBin.top;
-    var st = active ? ' style="background:' + col1Color + ';"' : '';
+    var st = active ? ' style="background:' + (showSubColumn ? col1Color : lastColColor) + ';"' : '';
     return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="recycleBinDrillTop(\'' + t.id + '\')"><span style="flex:1;">' + esc(t.name) + '</span></div>';
   }).join('');
-  var col1 = subs.map(function(s){
-    var active = s.id === recycleBin.sub;
-    var st = active ? ' style="background:' + col2Color + ';"' : '';
-    return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="recycleBinDrillSub(\'' + s.id + '\')"><span style="flex:1;">' + esc(s.name) + '</span></div>';
-  }).join('');
-  var col2 = renderRecycleBinItems(items);
+  var colsHtml = '<div class="cards-v2-col" style="background:' + col0Color + ';">' + col0 + '</div>';
 
-  c.innerHTML = '<div class="cards-v2-columns">'
-    + '<div class="cards-v2-col" style="background:' + col0Color + ';">' + col0 + '</div>'
-    + '<div class="cards-v2-col" style="background:' + col1Color + ';">' + col1 + '</div>'
-    + '<div class="cards-v2-col" style="background:' + col2Color + ';">' + col2 + '</div>'
-    + '</div>';
+  if (showSubColumn) {
+    var col1 = subs.map(function(s){
+      var active = s.id === recycleBin.sub;
+      var st = active ? ' style="background:' + lastColColor + ';"' : '';
+      return '<div class="cards-v2-item' + (active ? ' active' : '') + '"' + st + ' onclick="recycleBinDrillSub(\'' + s.id + '\')"><span style="flex:1;">' + esc(s.name) + '</span></div>';
+    }).join('');
+    colsHtml += '<div class="cards-v2-col" style="background:' + col1Color + ';">' + col1 + '</div>';
+  }
+
+  colsHtml += '<div class="cards-v2-col" style="background:' + lastColColor + ';">' + renderRecycleBinItems(items) + '</div>';
+  c.innerHTML = '<div class="cards-v2-columns">' + colsHtml + '</div>';
 }
 
 async function recycleBinRestoreCard(id){
-  try { await fetch('/api/cards-skeleton/cards/' + id + '/restore', { method: 'POST' }); } catch(e){}
+  try {
+    var res = await fetch('/api/cards-skeleton/cards/' + id + '/restore', { method: 'POST' });
+    if (!res.ok) { var d = await res.json().catch(function(){return {};}); alert('恢复失败：' + (d.error || res.status)); return; }
+  } catch(e){ alert('恢复失败：' + e.message); return; }
   await recycleBinEnsureList('cards', 'trash', true);
   renderRecycleBinNav();
   loadCardsV2();
@@ -9530,15 +9589,20 @@ async function recycleBinRestoreCard(id){
 async function recycleBinPurgeCard(id, title){
   if (!confirm('彻底删除「' + title + '」？这个操作不能撤销，附件也会一起删掉。')) return;
   try {
-    await fetch('/api/cards-skeleton/trash/cards/' + id, {
+    var res = await fetch('/api/cards-skeleton/trash/cards/' + id, {
       method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirm: 'DELETE' }),
     });
-  } catch(e){}
+    if (!res.ok) { var d = await res.json().catch(function(){return {};}); alert('删除失败：' + (d.error || res.status)); return; }
+  } catch(e){ alert('删除失败：' + e.message); return; }
   await recycleBinEnsureList('cards', 'trash', true);
   renderRecycleBinNav();
 }
 async function recycleBinRestoreBucket(id){
-  try { await authFetch(BASE + '/api/buckets/' + encodeURIComponent(id) + '/restore', { method: 'POST' }); } catch(e){}
+  try {
+    var res = await authFetch(BASE + '/api/buckets/' + encodeURIComponent(id) + '/restore', { method: 'POST' });
+    if (!res) return;
+    if (!res.ok) { var d = await res.json().catch(function(){return {};}); alert('恢复失败：' + (d.error || res.status)); return; }
+  } catch(e){ alert('恢复失败：' + e.message); return; }
   await recycleBinEnsureList('buckets', 'trash', true);
   renderRecycleBinNav();
   loadBuckets();
@@ -9546,10 +9610,12 @@ async function recycleBinRestoreBucket(id){
 async function recycleBinPurgeBucket(id, name){
   if (!confirm('彻底删除「' + name + '」？这个操作不能撤销。')) return;
   try {
-    await authFetch(BASE + '/api/buckets/trash/' + encodeURIComponent(id), {
+    var res = await authFetch(BASE + '/api/buckets/trash/' + encodeURIComponent(id), {
       method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirm: 'DELETE' }),
     });
-  } catch(e){}
+    if (!res) return;
+    if (!res.ok) { var d = await res.json().catch(function(){return {};}); alert('删除失败：' + (d.error || res.status)); return; }
+  } catch(e){ alert('删除失败：' + e.message); return; }
   await recycleBinEnsureList('buckets', 'trash', true);
   renderRecycleBinNav();
 }
