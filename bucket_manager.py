@@ -354,7 +354,9 @@ class BucketManager:
             f"Created bucket / 创建记忆桶: {bucket_id} ({bucket_name}) → {primary_domain}/"
             + (" [PINNED]" if pinned else "") + (" [PROTECTED]" if protected else "")
         )
-        self._invalidate_bucket_cache()
+        new_bucket = self._load_bucket(file_path)
+        if new_bucket:
+            self._cache_upsert_bucket(new_bucket)
         return bucket_id
 
     # ---------------------------------------------------------
@@ -508,10 +510,12 @@ class BucketManager:
             post["type"] = "permanent"
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(frontmatter.dumps(post))
-            self._move_bucket(file_path, self.permanent_dir, domain)
+            file_path = self._move_bucket(file_path, self.permanent_dir, domain)
 
         logger.info(f"Updated bucket / 更新记忆桶: {bucket_id}")
-        self._invalidate_bucket_cache()
+        updated_bucket = self._load_bucket(file_path)
+        if updated_bucket:
+            self._cache_upsert_bucket(updated_bucket)
         return True
 
     async def add_comment(
@@ -579,7 +583,9 @@ class BucketManager:
             logger.error(f"Failed to write bucket comment / 写入桶评论失败: {file_path}: {e}")
             return None
 
-        self._invalidate_bucket_cache()
+        commented_bucket = self._load_bucket(file_path)
+        if commented_bucket:
+            self._cache_upsert_bucket(commented_bucket)
 
         if touch:
             current_time = self._parse_iso_datetime(post.get("created", post.get("last_active", "")))
@@ -639,7 +645,9 @@ class BucketManager:
             return {"status": "failed", "comment": target}
 
         logger.info(f"Deleted bucket comment / 已删除年轮: {bucket_id}#{comment_id}")
-        self._invalidate_bucket_cache()
+        updated_bucket = self._load_bucket(file_path)
+        if updated_bucket:
+            self._cache_upsert_bucket(updated_bucket)
         return {"status": "deleted", "comment": target}
 
     # ---------------------------------------------------------
@@ -697,7 +705,7 @@ class BucketManager:
             return False
 
         logger.info(f"Deleted bucket / 删除记忆桶（进回收站）: {bucket_id}")
-        self._invalidate_bucket_cache()
+        self._cache_remove_bucket(bucket_id)
         return True
 
     async def get_from_trash(self, bucket_id: str) -> Optional[dict]:
@@ -743,7 +751,9 @@ class BucketManager:
             return False
 
         logger.info(f"Restored bucket / 恢复记忆桶: {bucket_id}")
-        self._invalidate_bucket_cache()
+        restored_bucket = self._load_bucket(original_path)
+        if restored_bucket:
+            self._cache_upsert_bucket(restored_bucket)
         return True
 
     async def purge_from_trash(self, bucket_id: str) -> bool:
@@ -1655,6 +1665,61 @@ class BucketManager:
                     bucket.setdefault("metadata", {}).update(metadata_updates)
                     break
 
+    def _cache_upsert_bucket(self, bucket: dict) -> None:
+        """Incremental counterpart to _invalidate_bucket_cache (2026-07-19,
+        Yi Lan's report: the bucket list felt slow, sometimes fast sometimes
+        slow -- root cause was every single write, hers or Lin Zhan's,
+        blowing away the WHOLE cache and forcing the next list_all() call to
+        re-walk and re-parse all 7000+ files from disk). Called after
+        create/update/comment/restore/archive with the bucket's fresh
+        _load_bucket() result: drops it into whichever cache slots are
+        currently warm, in the right place, without touching anything else
+        already in them.
+
+        Respects the include_archive=True/False split: the True-keyed cache
+        holds everything, the False-keyed one excludes archived buckets --
+        so an archived bucket is upserted into the True list and removed
+        from the False list; anything else is upserted into both. Only
+        patches cache slots that are already populated (`is not None`) --
+        a cold/absent slot is left alone, since the next real list_all()
+        call will build it correctly from scratch anyway, and there'd be
+        nothing correct to patch it with yet."""
+        bucket_id = bucket.get("id")
+        if not bucket_id:
+            return
+        is_archived = bucket.get("metadata", {}).get("type") == "archived"
+        self._cache_put(True, bucket)
+        if is_archived:
+            self._cache_drop(False, bucket_id)
+        else:
+            self._cache_put(False, bucket)
+
+    def _cache_remove_bucket(self, bucket_id: str) -> None:
+        """Incremental counterpart for delete() (soft delete into trash) --
+        the bucket shouldn't appear in list_all() at all anymore, in either
+        cache slot."""
+        self._cache_drop(True, bucket_id)
+        self._cache_drop(False, bucket_id)
+
+    def _cache_put(self, include_archive: bool, bucket: dict) -> None:
+        cached = self._all_buckets_cache.get(include_archive)
+        if cached is None:
+            return
+        bucket_id = bucket.get("id")
+        for index, existing in enumerate(cached):
+            if existing.get("id") == bucket_id:
+                cached[index] = bucket
+                return
+        cached.append(bucket)
+
+    def _cache_drop(self, include_archive: bool, bucket_id: str) -> None:
+        cached = self._all_buckets_cache.get(include_archive)
+        if cached is None:
+            return
+        self._all_buckets_cache[include_archive] = [
+            b for b in cached if b.get("id") != bucket_id
+        ]
+
     # ---------------------------------------------------------
     # Statistics (counts per category + total size)
     # 统计信息（各分类桶数量 + 总体积）
@@ -1737,7 +1802,9 @@ class BucketManager:
             return False
 
         logger.info(f"Archived bucket / 归档记忆桶: {bucket_id} → archive/{primary_domain}/")
-        self._invalidate_bucket_cache()
+        archived_bucket = self._load_bucket(str(dest))
+        if archived_bucket:
+            self._cache_upsert_bucket(archived_bucket)
         return True
 
     # ---------------------------------------------------------

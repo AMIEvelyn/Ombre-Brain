@@ -72,6 +72,92 @@ async def test_create_update_delete_archive_invalidate_cache(bucket_mgr):
     assert len(with_archive) == 1
 
 
+def _cache_timestamps(bucket_mgr) -> dict:
+    """Snapshot of list_all()'s internal cache-rebuild timestamps, keyed by
+    include_archive. An unchanged timestamp after a write + list_all() call
+    proves that call was served from the patched cache, not a real rescan
+    (a rescan always sets a fresh time.monotonic() timestamp)."""
+    return dict(bucket_mgr._all_buckets_cache_at)
+
+
+@pytest.mark.asyncio
+async def test_create_patches_cache_incrementally_no_full_rescan(bucket_mgr):
+    """2026-07-19, Yi Lan's report: the bucket list felt slow, sometimes
+    fast sometimes slow -- root cause was every single write blowing away
+    the WHOLE list_all() cache, forcing the next call to re-walk and
+    re-parse all 7000+ files from disk. create() (and update/comment/
+    delete/restore/archive, covered below) now patches the warm cache
+    directly instead of invalidating it -- proven here by the cache's
+    rebuild timestamp staying put across a write, instead of jumping to a
+    fresh time.monotonic() value the way a real rescan would."""
+    await bucket_mgr.list_all()  # warm the cache
+    before = _cache_timestamps(bucket_mgr)
+
+    bid = await bucket_mgr.create(content="桶A", tags=[], importance=5, domain=["测试"], name="A")
+    all_buckets = await bucket_mgr.list_all()
+
+    assert _cache_timestamps(bucket_mgr) == before  # no rebuild happened
+    assert [b["id"] for b in all_buckets] == [bid]
+
+
+@pytest.mark.asyncio
+async def test_update_delete_restore_archive_patch_cache_no_full_rescan(bucket_mgr):
+    bid_a = await bucket_mgr.create(content="桶A", tags=[], importance=5, domain=["测试"], name="A")
+    bid_b = await bucket_mgr.create(content="桶B", tags=[], importance=5, domain=["测试"], name="B")
+    await bucket_mgr.list_all(include_archive=True)  # warm both cache slots
+    await bucket_mgr.list_all(include_archive=False)
+    before = _cache_timestamps(bucket_mgr)
+
+    await bucket_mgr.update(bid_a, content="桶A改")
+    match = next(b for b in await bucket_mgr.list_all() if b["id"] == bid_a)
+    assert match["content"] == "桶A改"
+
+    await bucket_mgr.delete(bid_b)
+    assert [b["id"] for b in await bucket_mgr.list_all()] == [bid_a]
+
+    await bucket_mgr.restore(bid_b)
+    ids_after_restore = {b["id"] for b in await bucket_mgr.list_all()}
+    assert ids_after_restore == {bid_a, bid_b}
+
+    await bucket_mgr.archive(bid_a)
+    no_archive = await bucket_mgr.list_all(include_archive=False)
+    with_archive = await bucket_mgr.list_all(include_archive=True)
+    assert {b["id"] for b in no_archive} == {bid_b}
+    assert {b["id"] for b in with_archive} == {bid_a, bid_b}
+
+    assert _cache_timestamps(bucket_mgr) == before  # every op above stayed cache-only
+
+
+@pytest.mark.asyncio
+async def test_add_and_delete_comment_patch_cache_no_full_rescan(bucket_mgr):
+    bid = await bucket_mgr.create(content="桶A", tags=[], importance=5, domain=["测试"], name="A")
+    await bucket_mgr.list_all()
+    before = _cache_timestamps(bucket_mgr)
+
+    entry = await bucket_mgr.add_comment(bid, "一条年轮", touch=False)
+    all_buckets = await bucket_mgr.list_all()
+    match = next(b for b in all_buckets if b["id"] == bid)
+    assert match["metadata"]["comment_count"] == 1
+
+    await bucket_mgr.delete_comment(bid, entry["id"])
+    match = next(b for b in await bucket_mgr.list_all() if b["id"] == bid)
+    assert match["metadata"]["comment_count"] == 0
+
+    assert _cache_timestamps(bucket_mgr) == before
+
+
+@pytest.mark.asyncio
+async def test_cache_patch_is_skipped_when_slot_is_cold(bucket_mgr):
+    """If a cache slot was never warmed (or was invalidated), the
+    incremental patch functions must no-op rather than half-populate it --
+    the next real list_all() call builds it correctly from scratch."""
+    bid = await bucket_mgr.create(content="桶A", tags=[], importance=5, domain=["测试"], name="A")
+    # Cache slots are still cold (list_all() was never called) -- creating
+    # a second bucket must not crash or leave a partial cache behind.
+    await bucket_mgr.create(content="桶B", tags=[], importance=5, domain=["测试"], name="B")
+    assert len(await bucket_mgr.list_all()) == 2
+
+
 @pytest.mark.asyncio
 async def test_search_score_annotation_does_not_leak_into_cache(bucket_mgr):
     """Regression guard: search() writes bucket["score"] onto dicts sourced
