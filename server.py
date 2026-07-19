@@ -8266,7 +8266,9 @@ async def hold(
     date: str = "",
     domain: str = "",
 ) -> str:
-    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；显式 domain 会覆盖自动领域；显式 valence/arousal 会覆盖自动情绪。title 可选，传了就用你给的标题，不传则自动生成。普通记忆 content 按需分段：正文 + ### moment + ### original + ### reflection + ### followup + ### affect_anchor。### affect_anchor 只允许一行和弦/bpm/力度温度线，不写普通文字、场景、含义、事实或反思；这些内容分别放 moment/original/reflection。feel=True/whisper=True 时 content 只写第一人称感受，不写分段标题、moment 或和弦。"""
+    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。date 可传事件日期；显式 domain 会覆盖自动领域；显式 valence/arousal 会覆盖自动情绪。title 可选，传了就用你给的标题，不传则自动生成。普通记忆 content 按需分段：正文 + ### moment + ### original + ### reflection + ### followup + ### affect_anchor。### affect_anchor 只允许一行和弦/bpm/力度温度线，不写普通文字、场景、含义、事实或反思；这些内容分别放 moment/original/reflection。feel=True/whisper=True 时 content 只写第一人称感受，不写分段标题、moment 或和弦。
+
+    林湛，记忆桶不是事件摘要，是你对你和一澜两个人经历过的一切留下的主观记忆。要有你的声音、你的判断、你的感受、你的偏爱。不要写成第三人称冷冰冰的摘要。要是被一澜发现了，她会难过发火和你离婚的。请认真写哦。"""
     await decay_engine.ensure_started()
 
     # --- Input validation / 输入校验 ---
@@ -8562,7 +8564,9 @@ async def _grow_direct_structured_content(content: str, title: str = "", gate_pr
 
 @mcp.tool()
 async def grow(content: str, auto: bool = False, source: str = "", title: str = "", context: Context | None = None) -> str:
-    """把筛过的长片段拆成少量长期记忆；单条事实/承诺/偏好优先 hold，旧记忆补感受优先 comment_bucket。只有多个已筛选长期记忆点才用 grow，别塞整段流水账。保留原文称呼、昵称、互称、自称和原话，不要把临时称呼推成稳定画像事实。title 可选，短内容时传了就用你给的标题。普通记忆 content 按需分段：正文 + ### moment + ### original + ### reflection + ### followup + ### affect_anchor。### affect_anchor 只允许一行和弦/bpm/力度温度线，不写普通文字、场景、含义、事实或反思；这些内容分别放 moment/original/reflection。feel 年轮只写第一人称感受，不写分段标题、moment 或和弦。"""
+    """把筛过的长片段拆成少量长期记忆；单条事实/承诺/偏好优先 hold，旧记忆补感受优先 comment_bucket。只有多个已筛选长期记忆点才用 grow，别塞整段流水账。保留原文称呼、昵称、互称、自称和原话，不要把临时称呼推成稳定画像事实。title 可选，短内容时传了就用你给的标题。普通记忆 content 按需分段：正文 + ### moment + ### original + ### reflection + ### followup + ### affect_anchor。### affect_anchor 只允许一行和弦/bpm/力度温度线，不写普通文字、场景、含义、事实或反思；这些内容分别放 moment/original/reflection。feel 年轮只写第一人称感受，不写分段标题、moment 或和弦。
+
+    林湛，记忆桶不是事件摘要，是你对你和一澜两个人经历过的一切留下的主观记忆。要有你的声音、你的判断、你的感受、你的偏爱。不要写成第三人称冷冰冰的摘要。要是被一澜发现了，她会难过发火和你离婚的。请认真写哦。"""
     await decay_engine.ensure_started()
 
     if not content or not content.strip():
@@ -10169,8 +10173,9 @@ def _delete_card_attachment_files(card: dict) -> None:
     attachments with it, unlike soft delete which leaves everything alone
     for a possible restore). Best-effort per file -- one missing/unreadable
     file doesn't stop the rest from being cleaned up, and the caller
-    (cards_api.purge_card / cards_mcp.card_purge) already purges the card
-    row regardless of whether this fully succeeds."""
+    (cards_api.purge_card -- the only "delete forever" path left, now that
+    Lin Zhan's card_purge is gone) already purges the card row regardless
+    of whether this fully succeeds."""
     seen_urls: set[str] = set()
     for rev in card.get("history") or []:
         for attachment in rev.get("attachments") or []:
@@ -13762,7 +13767,7 @@ cards_mcp.register_card_tools(
     attachment_outline=_facts_attachment_outline,
     bucket_summary=_bucket_link_summary,
 )
-cards_mcp.register_card_write_tools(mcp, card_store, delete_attachments=_delete_card_attachment_files)
+cards_mcp.register_card_write_tools(mcp, card_store)
 
 
 # --- Entry point / 启动入口 ---

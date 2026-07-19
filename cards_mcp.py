@@ -51,8 +51,10 @@ interleave, no auto duplicate detection; see merge_cards' docstring in
 cards_store.py), and the recycle bin (2026-07-19, §14 item 1 -- Yi Lan's
 call: both of them get delete/restore, symmetric with the Dashboard):
 card_delete (soft, reversible), card_trash_list (what's currently in the
-bin), card_restore, card_purge (irreversible, requires confirm=True).
-Still no attachment upload (no binary-file channel through an MCP tool call).
+bin), card_restore. No card_purge -- unrestored cards clean themselves up
+via the scheduled purge job, so an immediate "delete forever" stays a
+Dashboard-only action. Still no attachment upload (no binary-file channel
+through an MCP tool call).
 
 card_edit_content takes the card's whole new content as one string (2026-07-17,
 second pass) -- an earlier version required a segment_id identifying which
@@ -177,9 +179,9 @@ def _resolve_trash_card(store, card: str):
     """Same shape as _resolve_card (returns (card_dict, error_message)), but
     scoped to what's currently in the recycle bin -- a card in the bin is
     invisible to search_cards/get_card's normal listing-adjacent callers, so
-    card_restore/card_purge need their own lookup over list_trash_cards()
-    instead. Accepts an exact id or a title match against each trashed
-    card's current title."""
+    card_restore needs its own lookup over list_trash_cards() instead.
+    Accepts an exact id or a title match against each trashed card's
+    current title."""
     card = str(card or "").strip()
     if not card:
         return None, "请给一张卡的标题或 id。"
@@ -816,21 +818,19 @@ def register_card_tools(
         return "\n".join(lines)
 
 
-def register_card_write_tools(mcp, store, *, delete_attachments=None) -> None:
+def register_card_write_tools(mcp, store) -> None:
     """Lin Zhan's write access to cards.sqlite (see docs/facts-model-v2-
     collection-redesign.md §14 item 3): new/edit/new-revision, folder
     management, bucket linking, and the recycle bin -- matching what Yi Lan
     can already do from the Dashboard, field for field, per her explicit
     request.
 
-    delete_attachments: optional callable(card_dict) -> None, deleting every
-    attachment file across a card's whole history off disk (server.py owns
-    the actual attachments directory, same decoupling pattern as
-    register_card_tools' read_attachment_* params). Only called by
-    card_purge, right before the card row itself is destroyed -- soft
-    delete (card_delete) never touches attachment files, since a card in
-    the bin might still be restored. None disables attachment cleanup on
-    purge (the card row still gets purged; files would just be orphaned).
+    No card_purge here (2026-07-19, Yi Lan's call): soft delete
+    (card_delete) already puts a card in the bin, and if he never restores
+    it the scheduled purge job cleans it up on its own after
+    TRASH_RETENTION_DAYS -- an irreversible "delete forever" button on top
+    of that was redundant for him. Real, immediate purge stays a
+    Dashboard-only (her) action.
 
     Deliberately does NOT include attachment upload -- he has no channel to
     send actual file bytes through an MCP tool call, only the Dashboard can
@@ -1167,7 +1167,8 @@ def register_card_write_tools(mcp, store, *, delete_attachments=None) -> None:
     @mcp.tool()
     async def card_trash_list() -> str:
         """【时光馆】看看回收站里现在有哪些卡（还没被彻底清理掉的），每张卡带着还剩
-        多少天会被自动清理。想恢复用 card_restore，想直接彻底删掉用 card_purge。"""
+        多少天会被自动清理。想恢复用 card_restore；不用管彻底删除，放着不管
+        超过这个天数就会自动清理掉，不需要你自己动手。"""
         trash = store.list_trash_cards()
         if not trash:
             return "回收站是空的。"
@@ -1187,24 +1188,3 @@ def register_card_write_tools(mcp, store, *, delete_attachments=None) -> None:
             return err
         store.restore_card(found["id"])
         return f"已恢复：{_card_result(found['id'])}"
-
-    @mcp.tool()
-    async def card_purge(card: str = "", confirm: bool = False) -> str:
-        """【时光馆】把回收站里的一张卡彻底删除——真的删掉，之后谁都恢复不了，跟等 30 天
-        自动清理是同一个结果，只是现在马上执行。
-        第一次调用（不传 confirm）只会告诉你这是哪张卡，不会真的执行；确定要
-        删的话带上 confirm=true 再调一次。
-        card：回收站里那张卡的标题或 id（用 card_trash_list 先看一眼）。"""
-        found, err = _resolve_trash_card(store, card)
-        if err:
-            return err
-        result = _card_result(found["id"])
-        if not confirm:
-            return f"确定要彻底删除「{result}」吗？这个操作不能撤销。确定的话带上 confirm=true 再调用一次。"
-        if delete_attachments is not None:
-            try:
-                delete_attachments(found)
-            except Exception:
-                pass
-        store.purge_card(found["id"])
-        return f"已彻底删除 {result}。"
