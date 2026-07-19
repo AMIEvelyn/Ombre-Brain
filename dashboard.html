@@ -9260,16 +9260,36 @@ function cardsV2RenderContentSegments(cur){
   if (!segments.length) return cardsV2RenderContent(cur.content);
   var over = (cur.content || '').length > FACTS_CONTENT_COLLAPSE_CHARS;
   var toggle = over ? '<span class="facts-detail-content-toggle" onclick="cardsV2ToggleContent()">' + (cardsV2ContentExpanded ? '收起' : '展开') + '</span>' : '';
-  var body = segments.map(function(s){
+  // 2026-07-19 bugfix: collapsing used to slice the already-built HTML string
+  // at a fixed character count, which could land mid-tag and leave a colored
+  // segment's <div> unclosed -- its border-left then bled down through
+  // everything rendered after it (tags/files/timeline). Truncate each
+  // segment's plain text BEFORE wrapping it, so every div this produces is
+  // always fully closed.
+  var collapse = !cardsV2ContentExpanded && over;
+  var budget = FACTS_CONTENT_COLLAPSE_CHARS * 3;
+  var body = '';
+  for (var i = 0; i < segments.length; i++) {
+    var s = segments[i];
+    var text = s.text || '';
+    var truncated = false;
+    if (collapse) {
+      if (budget <= 0) break;
+      if (text.length > budget) { text = text.slice(0, budget) + '…'; truncated = true; }
+      budget -= text.length;
+    }
     var color = CARDS_V2_AUTHOR_COLOR[s.author];
-    if (!color) return '<div class="facts-content-segment">' + cardsV2Markdown(s.text) + '</div>';
-    var name = CARDS_V2_AUTHOR_NAME[s.author] || s.author;
-    return '<div class="facts-content-segment" style="border-left:3px solid ' + color + ';padding-left:10px;margin:8px 0;">'
-      + '<div style="font-size:11px;font-weight:600;margin-bottom:2px;color:' + color + ';">' + esc(name) + '</div>'
-      + cardsV2Markdown(s.text)
-      + '</div>';
-  }).join('');
-  if (!cardsV2ContentExpanded && over) body = body.slice(0, FACTS_CONTENT_COLLAPSE_CHARS * 3); // rough cap, refined once Yi Lan sees it
+    if (!color) {
+      body += '<div class="facts-content-segment">' + cardsV2Markdown(text) + '</div>';
+    } else {
+      var name = CARDS_V2_AUTHOR_NAME[s.author] || s.author;
+      body += '<div class="facts-content-segment" style="border-left:3px solid ' + color + ';padding-left:10px;margin:8px 0;">'
+        + '<div style="font-size:11px;font-weight:600;margin-bottom:2px;color:' + color + ';">' + esc(name) + '</div>'
+        + cardsV2Markdown(text)
+        + '</div>';
+    }
+    if (truncated) break;
+  }
   return '<div class="facts-detail-content">' + body + toggle + '</div>';
 }
 
