@@ -3545,7 +3545,13 @@ def _bucket_delete_skip_reason(bucket: dict, *, force_linked: bool = False) -> s
     return ""
 
 
-def _delete_bucket_indexes(bucket_id: str) -> tuple[dict, list[str]]:
+def _delete_bucket_indexes(bucket_id: str, *, skip_edges: bool = False) -> tuple[dict, list[str]]:
+    """skip_edges: let a bulk caller defer memory_edge_store cleanup and do
+    it once for the whole batch afterward instead of once per bucket here
+    (2026-07-19, Yi Lan's report -- see _batch_delete_edges_for_buckets).
+    Embedding/moment/node stores are all sqlite with indexed deletes, cheap
+    per-call regardless; memory_edge_store is a flat JSONL file that does a
+    full read+rewrite on every delete, so it's the one worth batching."""
     cleanup: dict = {}
     errors: list[str] = []
 
@@ -3562,11 +3568,12 @@ def _delete_bucket_indexes(bucket_id: str) -> tuple[dict, list[str]]:
         logger.warning("Failed to delete moment index for bucket / 删除桶 moment 索引失败: %s: %s", bucket_id, e)
         errors.append("moments")
 
-    try:
-        cleanup["edges"] = memory_edge_store.delete_for_bucket(bucket_id)
-    except Exception as e:
-        logger.warning("Failed to delete memory edges for bucket / 删除桶关系边失败: %s: %s", bucket_id, e)
-        errors.append("edges")
+    if not skip_edges:
+        try:
+            cleanup["edges"] = memory_edge_store.delete_for_bucket(bucket_id)
+        except Exception as e:
+            logger.warning("Failed to delete memory edges for bucket / 删除桶关系边失败: %s: %s", bucket_id, e)
+            errors.append("edges")
 
     try:
         cleanup["node"] = memory_node_store.delete(bucket_id)
@@ -3577,7 +3584,19 @@ def _delete_bucket_indexes(bucket_id: str) -> tuple[dict, list[str]]:
     return cleanup, errors
 
 
-async def _delete_bucket_and_indexes(bucket_id: str) -> dict:
+def _batch_delete_edges_for_buckets(bucket_ids: list[str]) -> int:
+    """Call after a bulk delete loop that passed skip_edges=True to
+    _delete_bucket_indexes for every bucket -- does the memory_edge_store
+    cleanup for the whole batch in a single read+rewrite pass instead of
+    one per bucket."""
+    try:
+        return memory_edge_store.delete_for_buckets(bucket_ids)
+    except Exception as e:
+        logger.warning("Failed to batch-delete memory edges / 批量删除关系边失败: %s", e)
+        return 0
+
+
+async def _delete_bucket_and_indexes(bucket_id: str, *, skip_edges: bool = False) -> dict:
     bucket_id = str(bucket_id or "").strip()
     if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
         return {"id": bucket_id, "status": "invalid", "reason": "invalid_bucket_id"}
@@ -3590,7 +3609,7 @@ async def _delete_bucket_and_indexes(bucket_id: str) -> dict:
     if not success:
         return {"id": bucket_id, "status": "failed", "reason": "delete_failed"}
 
-    cleanup, errors = _delete_bucket_indexes(bucket_id)
+    cleanup, errors = _delete_bucket_indexes(bucket_id, skip_edges=skip_edges)
     return {
         "id": bucket_id,
         "status": "deleted",
@@ -11472,6 +11491,7 @@ async def api_buckets_delete(request):
 
     summary = {"deleted": 0, "skipped": 0, "not_found": 0, "invalid": 0, "failed": 0}
     results = []
+    deleted_ids: list[str] = []
     for bucket_id in bucket_ids:
         if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
             summary["invalid"] += 1
@@ -11493,15 +11513,24 @@ async def api_buckets_delete(request):
             results.append(skip_result)
             continue
 
-        result = await _delete_bucket_and_indexes(bucket_id)
+        # 2026-07-19, Yi Lan's report: bulk delete felt slow -- memory_edge_store
+        # is a flat JSONL file that does a full read+rewrite per delete, so
+        # doing that once per bucket here (like the single-delete callers do)
+        # meant N full-file rewrites for N buckets. Deferred to one batched
+        # call after the loop instead (_batch_delete_edges_for_buckets).
+        result = await _delete_bucket_and_indexes(bucket_id, skip_edges=True)
         status = str(result.get("status") or "failed")
         if status in summary:
             summary[status] += 1
         else:
             summary["failed"] += 1
+        if status == "deleted":
+            deleted_ids.append(bucket_id)
         results.append(result)
 
-    return JSONResponse({**summary, "results": results})
+    edges_deleted = _batch_delete_edges_for_buckets(deleted_ids) if deleted_ids else 0
+
+    return JSONResponse({**summary, "edges_deleted": edges_deleted, "results": results})
 
 
 @mcp.custom_route("/api/buckets/trash", methods=["GET"])

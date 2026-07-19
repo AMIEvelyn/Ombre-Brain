@@ -141,10 +141,27 @@ class MemoryEdgeStore:
         bucket_id = str(bucket_id or "").strip()
         if not bucket_id:
             return 0
+        return self.delete_for_buckets([bucket_id])
+
+    def delete_for_buckets(self, bucket_ids: list[str]) -> int:
+        """Same as delete_for_bucket, but for a whole batch in one pass
+        (2026-07-19, Yi Lan's report: bulk-deleting buckets from the
+        Dashboard felt slow). This is a flat JSONL file -- every delete
+        does a full read + rewrite regardless of how many ids are
+        involved, so calling delete_for_bucket once per bucket in a loop
+        (the bulk-delete endpoint's old behavior) meant N full-file
+        rewrites for N buckets. Filtering against the whole id set in a
+        single pass makes bulk delete O(file size) once, not O(file size
+        * bucket count) -- and avoids N concurrent writers racing to
+        rewrite the same file, which per-bucket calls issued concurrently
+        could have hit."""
+        ids = {str(b or "").strip() for b in bucket_ids or [] if str(b or "").strip()}
+        if not ids:
+            return 0
         edges = self.list_edges()
         kept = [
             edge for edge in edges
-            if edge.get("source") != bucket_id and edge.get("target") != bucket_id
+            if edge.get("source") not in ids and edge.get("target") not in ids
         ]
         deleted = len(edges) - len(kept)
         if deleted:

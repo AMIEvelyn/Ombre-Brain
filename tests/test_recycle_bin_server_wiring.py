@@ -218,6 +218,46 @@ async def test_api_bucket_detail_falls_back_to_trash(monkeypatch, bucket_mgr):
 
 
 @pytest.mark.asyncio
+async def test_bulk_delete_batches_memory_edge_cleanup_into_one_rewrite(monkeypatch, bucket_mgr):
+    """2026-07-19, Yi Lan's report: bulk-deleting buckets from the Dashboard
+    felt slow. Root cause: memory_edge_store is a flat JSONL file that does
+    a full read+rewrite per delete call -- doing that once per bucket in
+    the bulk-delete loop meant N rewrites for N buckets. Verifies the fix:
+    exactly one rewrite for the whole batch, not one per bucket."""
+    import server
+    from memory_edges import MemoryEdgeStore
+
+    tmp_edges = tempfile.mkdtemp()
+    edge_store = MemoryEdgeStore({"state_dir": tmp_edges})
+    monkeypatch.setattr(server, "bucket_mgr", bucket_mgr)
+    monkeypatch.setattr(server, "card_store", _card_store())
+    monkeypatch.setattr(server, "memory_edge_store", edge_store)
+    monkeypatch.setattr(server, "_require_dashboard_auth", lambda request: None)
+
+    bid_a = await bucket_mgr.create(content="桶A", tags=[], importance=5, domain=["测试"], name="A")
+    bid_b = await bucket_mgr.create(content="桶B", tags=[], importance=5, domain=["测试"], name="B")
+    bid_c = await bucket_mgr.create(content="桶C（不删）", tags=[], importance=5, domain=["测试"], name="C")
+    edge_store.add_edge(bid_a, bid_c, "causes")
+    edge_store.add_edge(bid_b, bid_c, "causes")
+
+    write_calls = []
+    original_write_all = edge_store._write_all
+    def counting_write_all(edges):
+        write_calls.append(len(edges))
+        return original_write_all(edges)
+    monkeypatch.setattr(edge_store, "_write_all", counting_write_all)
+
+    resp = await server.api_buckets_delete(
+        DummyRequest({"confirm": "DELETE", "bucket_ids": [bid_a, bid_b]})
+    )
+    body = json.loads(resp.body)
+    assert body["deleted"] == 2
+    assert body["edges_deleted"] == 2
+    assert len(write_calls) == 1  # ONE rewrite for both buckets, not two
+    assert [e["source"] for e in edge_store.list_edges()] == []  # both edges gone
+
+
+@pytest.mark.asyncio
 async def test_scheduled_purge_only_removes_entries_past_their_window(monkeypatch, bucket_mgr):
     import server
 

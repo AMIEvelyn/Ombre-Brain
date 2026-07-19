@@ -6395,11 +6395,6 @@ async function deleteSelectedBuckets() {
   }).join('\n');
   var extra = ids.length > 5 ? '\n...' : '';
   if (!confirm('准备把 ' + ids.length + ' 个普通记忆桶放进回收站：\n' + names + extra + '\n\n30 天内可以在「回收站」里恢复。')) return;
-  var token = prompt('输入 DELETE 确认删除 ' + ids.length + ' 个记忆桶');
-  if (token !== 'DELETE') {
-    setBucketBulkMessage('已取消删除。', '');
-    return;
-  }
   try {
     var res = await requestBucketsDelete(ids, false);
     if (!res) return;
