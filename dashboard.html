@@ -6401,6 +6401,10 @@ async function deleteSelectedBuckets() {
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || '删除失败');
 
+    var deletedIds = (data.results || [])
+      .filter(function(r) { return r.status === 'deleted'; })
+      .map(function(r) { return r.id; });
+
     // 2026-07-19, §14 item 7: buckets linked to a fact card come back
     // skipped (reason "linked_to_card") instead of silently deleted --
     // show which card(s) reference each one, then let her force through
@@ -6418,12 +6422,30 @@ async function deleteSelectedBuckets() {
           var forceData = await forceRes.json();
           data.deleted = (data.deleted || 0) + (forceData.deleted || 0);
           data.skipped = forceData.skipped || 0;
+          deletedIds = deletedIds.concat(
+            (forceData.results || [])
+              .filter(function(r) { return r.status === 'deleted'; })
+              .map(function(r) { return r.id; })
+          );
         }
       }
     }
 
+    // 2026-07-19, Yi Lan's report: delete felt slow -- delete() just
+    // invalidated the server's bucket-list cache, so an immediate full
+    // /api/buckets reload here would hit it cold and force a full
+    // 7000+-bucket disk rescan every single time. We already know exactly
+    // which ids are gone, so just drop them from local state instead of
+    // round-tripping to the server at all.
+    if (deletedIds.length) {
+      var deletedSet = {};
+      deletedIds.forEach(function(id) { deletedSet[id] = true; });
+      allBuckets = allBuckets.filter(function(b) { return !deletedSet[String(b.id || '')]; });
+      updateStats();
+      buildFilters();
+    }
     selectedBucketIds.clear();
-    await loadBuckets();
+    renderBuckets(sortBuckets(filterBuckets(allBuckets)));
     setBucketBulkMessage('已放入回收站 ' + data.deleted + ' 个，跳过 ' + data.skipped + ' 个，未找到 ' + data.not_found + ' 个。', data.deleted ? 'ok' : '');
   } catch (e) {
     setBucketBulkMessage('删除失败: ' + e.message, 'error');
